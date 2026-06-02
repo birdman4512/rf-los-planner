@@ -2122,11 +2122,15 @@ function loadFromHash(){
       const nIds=(raw.n||[]).map(()=>id++);
       const eIds=(raw.e||[]).map(()=>id++);
       const pIds=(raw.p||[]).map(()=>id++);
+      const presetRf=PRESET_RF[String(raw.f)];
+      const legacyCoverageDefaults=raw.cm==null&&raw.cf===0&&presetRf;
       data={
         freq:raw.f,
         k:raw.k,
         tx:raw.tx, gain:raw.gn, rx:raw.rx, margin:raw.mg,
-        rxAntH:raw.ra, covRays:raw.cr, covSamples:raw.cs, covFresnel:raw.cf, covMaxKm:raw.cm,
+        rxAntH:raw.ra, covRays:raw.cr, covSamples:raw.cs,
+        covFresnel:legacyCoverageDefaults?presetRf.fresnel:raw.cf,
+        covMaxKm:raw.cm??presetRf?.maxKm,
         nodes:(raw.n||[]).map((nd,i)=>({
           id:nIds[i], lat:nd[0], lng:nd[1], antH:nd[2], name:nd[3],
           rfOverride: !!nd[4], txDbm: nd[5]??null, gainDbi: nd[6]??null, rxDbm: nd[7]??null,
