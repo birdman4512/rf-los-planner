@@ -1,0 +1,2250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-store, max-age=0">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>RF Line of Sight Planner</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0b0f17; --panel:#111824; --border:#1e2d42;
+  --accent:#00c8f0; --green:#2ecc71; --orange:#f39c12; --red:#e74c3c;
+  --text:#c8daea; --muted:#4a6278;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;font-family:'Barlow Condensed',sans-serif;background:var(--bg);color:var(--text)}
+#app{display:flex;flex-direction:column;height:100vh}
+
+/* ── HEADER ── */
+header{flex-shrink:0;background:var(--panel);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:12px;z-index:10}
+header h1{font-size:17px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#fff}
+header h1 em{color:var(--accent);font-style:normal}
+.hdr-tag{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:3px}
+.hdr-right{margin-left:auto;display:flex;gap:6px;align-items:center}
+.btn{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:1px;padding:5px 11px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;text-transform:uppercase;transition:all .15s;white-space:nowrap}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:700}
+.btn.primary:hover{opacity:.85}
+.btn.danger{border-color:var(--red);color:var(--red)}
+.btn.danger:hover{background:var(--red);color:#fff}
+.btn.share{border-color:#9b59b6;color:#9b59b6}
+.btn.share:hover{background:#9b59b6;color:#fff}
+
+/* ── BODY ── */
+.body-row{flex:1;display:flex;min-height:0;overflow:hidden}
+
+/* ── SIDEBAR ── */
+.sidebar{width:300px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sb-section{padding:9px 11px;border-bottom:1px solid var(--border);flex-shrink:0}
+.section-label{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sb-toggle{cursor:pointer;user-select:none}
+.sb-toggle:hover{color:var(--accent)}
+.sb-chev{display:inline-block;font-size:9px;color:var(--muted);transition:transform .15s;width:9px;margin-right:5px;text-align:center}
+.sb-toggle.collapsed .sb-chev{transform:rotate(-90deg)}
+[hidden]{display:none!important}
+.field-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.field-row label{font-size:11px;color:var(--muted);white-space:nowrap}
+input[type=number],input[type=text],select{font-family:'Share Tech Mono',monospace;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;transition:border .15s}
+input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border-color:var(--accent)}
+
+/* ── NODES LIST ── */
+.wp-scroll{flex:1;overflow-y:auto;padding:7px 9px}
+.wp-scroll::-webkit-scrollbar{width:3px}
+.wp-scroll::-webkit-scrollbar-thumb{background:var(--border)}
+
+.wp-card{background:var(--bg);border:1px solid var(--border);border-left-width:3px;margin-bottom:5px;padding:6px 8px;cursor:grab;user-select:none;transition:border-color .15s}
+.wp-card:active{cursor:grabbing}
+.wp-card.drag-over{border-color:var(--accent)!important}
+
+.wp-row1{display:flex;align-items:center;gap:5px;margin-bottom:5px}
+.wp-num{width:17px;height:17px;border-radius:50%;border:2px solid;font-family:'Share Tech Mono',monospace;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.wp-name{flex:1;font-size:12px;font-weight:600;background:transparent;border:none;border-bottom:1px solid transparent;color:#fff;padding:0 2px}
+.wp-name:focus{outline:none;border-bottom-color:var(--accent)}
+.wp-del{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 2px}
+.wp-del:hover{color:var(--red)}
+
+.wp-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:4px}
+.wp-field label{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);display:block;margin-bottom:2px}
+.wp-field input{width:100%;font-size:10px;padding:3px 4px}
+
+.wp-bottom{display:flex;align-items:center;gap:6px}
+.wp-bottom label{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted)}
+.wp-bottom input{width:52px;font-size:10px;padding:3px 4px}
+.wp-elev{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);margin-left:auto}
+.wp-elev span{color:var(--accent)}
+.wp-amsl{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);margin-left:4px}
+.wp-amsl span{color:#f39c12}
+
+/* ── EDGES / PATHS ── */
+.edges-panel{flex-shrink:0;border-top:1px solid var(--border);max-height:130px;overflow-y:auto}
+.edges-panel::-webkit-scrollbar{width:3px}
+.edges-panel::-webkit-scrollbar-thumb{background:var(--border)}
+.edge-row{display:flex;align-items:center;gap:5px;padding:4px 10px;border-bottom:1px solid rgba(30,45,66,.5);font-size:11px}
+.edge-row.active{background:rgba(0,200,240,.08)}
+.edge-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.edge-label{flex:1;color:var(--text)}
+.edge-status{font-family:'Share Tech Mono',monospace;font-size:9px}
+.edge-del{background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 2px;flex-shrink:0}
+.edge-del:hover{color:var(--red)}
+
+/* ── PATHS LIST ── */
+.paths-panel{flex-shrink:0;border-top:1px solid var(--border);max-height:100px;overflow-y:auto}
+.paths-panel::-webkit-scrollbar{width:3px}
+.paths-panel::-webkit-scrollbar-thumb{background:var(--border)}
+.path-row{display:flex;align-items:center;gap:5px;padding:4px 10px;border-bottom:1px solid rgba(30,45,66,.5);font-size:11px;cursor:pointer}
+.path-row:hover{background:rgba(0,200,240,.05)}
+.path-row.active{background:rgba(0,200,240,.08)}
+.deselect-btn{background:none;border:1px solid var(--accent);color:var(--accent);cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:8px;padding:1px 5px;letter-spacing:1px;margin-right:3px}
+.deselect-btn:hover{background:var(--accent);color:#000}
+.path-label{flex:1;color:var(--text)}
+.path-del{background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 2px}
+.path-del:hover{color:var(--red)}
+
+/* ── ANALYSE BUTTON ── */
+.analyse-wrap{padding:7px 9px;border-top:1px solid var(--border);flex-shrink:0}
+.analyse-wrap .btn{width:100%;font-size:12px;padding:7px}
+
+/* ── RESULTS ── */
+.results-area{flex-shrink:0;border-top:1px solid var(--border);max-height:150px;overflow-y:auto}
+.results-area::-webkit-scrollbar{width:3px}
+.results-area::-webkit-scrollbar-thumb{background:var(--border)}
+.hop-card{padding:6px 10px;border-bottom:1px solid var(--border);cursor:pointer}
+.hop-card:hover{background:rgba(255,255,255,.02)}
+.hop-card.active-hop{background:rgba(0,200,240,.05)}
+.hop-top{display:flex;align-items:center;gap:5px;margin-bottom:3px}
+.hop-name{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--accent);flex:1}
+.badge{font-family:'Share Tech Mono',monospace;font-size:9px;font-weight:700;padding:1px 5px;border-radius:2px;border:1px solid;letter-spacing:1px}
+.badge.ok{color:var(--green);border-color:var(--green);background:rgba(46,204,113,.1)}
+.badge.marginal{color:var(--orange);border-color:var(--orange);background:rgba(243,156,18,.1)}
+.badge.blocked{color:var(--red);border-color:var(--red);background:rgba(231,76,60,.1)}
+.hop-stats{display:flex;gap:14px}
+.hop-stat{font-size:11px}
+.hop-stat .lbl{color:var(--muted)}
+.hop-stat .val{font-family:'Share Tech Mono',monospace;font-size:10px}
+.no-data{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);text-align:center;padding:12px;letter-spacing:1px}
+
+/* ── MAP + CHART ── */
+.map-col{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;position:relative}
+#map{flex:1;min-height:0}
+
+/* ── CHART PANEL ── */
+.chart-panel{flex-shrink:0;height:200px;background:var(--panel);border-top:2px solid var(--border);position:relative}
+.chart-header{display:flex;align-items:center;gap:8px;padding:4px 10px;border-bottom:1px solid var(--border)}
+.chart-title{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:1px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chart-tabs{display:flex;gap:3px;overflow-x:auto;flex-shrink:0;max-width:60%}
+.chart-tabs::-webkit-scrollbar{height:2px}
+.chart-tabs::-webkit-scrollbar-thumb{background:var(--border)}
+.chart-tab{font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;letter-spacing:1px;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.chart-tab.active{border-color:var(--accent);color:var(--accent)}
+#profileCanvas{display:block;width:100%}
+
+/* ── FLOATING BUTTONS ── */
+.fab-group{position:absolute;bottom:210px;right:10px;z-index:600;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.fab{width:34px;height:34px;border-radius:50%;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,.5);transition:all .15s}
+.fab:hover{border-color:var(--accent);color:var(--accent);background:#0b0f17}
+.fab.loc{font-size:14px}
+
+/* ── TOAST & HINT ── */
+#toast{position:absolute;bottom:210px;left:50%;transform:translateX(-50%);font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:1px;background:rgba(11,15,23,.92);border:1px solid var(--accent);color:var(--accent);padding:5px 14px;z-index:900;white-space:nowrap;display:none}
+#mapHint{position:absolute;top:8px;left:50%;transform:translateX(-50%);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;background:rgba(11,15,23,.85);border:1px solid var(--border);color:var(--muted);padding:4px 12px;z-index:500;pointer-events:none}
+
+/* ── SHARE MODAL ── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;display:none;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:var(--panel);border:1px solid var(--border);padding:20px;min-width:420px;max-width:90vw}
+.modal h2{font-size:14px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#fff;margin-bottom:12px}
+.modal-url{font-family:'Share Tech Mono',monospace;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--accent);padding:8px;word-break:break-all;margin-bottom:10px;line-height:1.5}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end}
+
+/* ── CONTEXT MENU ── */
+#ctxMenu{position:fixed;z-index:9999;background:#111824;border:1px solid #1e2d42;box-shadow:0 6px 24px rgba(0,0,0,.6);min-width:190px;padding:4px 0;display:none;user-select:none}
+.ctx-header{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#4a6278;padding:5px 14px 4px;border-bottom:1px solid #1e2d42}
+.ctx-item{display:flex;align-items:center;gap:9px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:500;padding:6px 14px;color:#c8daea;cursor:pointer;transition:background .1s}
+.ctx-item:hover{background:rgba(0,200,240,.08);color:#fff}
+.ctx-item .ctx-icon{font-size:12px;width:14px;text-align:center;flex-shrink:0}
+.ctx-item.danger{color:#e74c3c}
+.ctx-item.danger:hover{background:rgba(231,76,60,.1)}
+.ctx-sep{height:1px;background:#1e2d42;margin:3px 0}
+
+/* leaflet marker */
+.lf-marker{background:none!important;border:none!important}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── COVERAGE ── */
+.wp-cov{display:flex;align-items:center;gap:5px;margin-top:4px;padding-top:4px;border-top:1px dashed rgba(74,98,120,.35)}
+.wp-cov label{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);letter-spacing:1px}
+.wp-cov input[type=checkbox]{accent-color:var(--accent);width:11px;height:11px;margin:0;cursor:pointer}
+.wp-cov-btn{font-family:'Share Tech Mono',monospace;font-size:8px;letter-spacing:1px;padding:2px 6px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;text-transform:uppercase}
+.wp-cov-btn:hover{border-color:var(--accent);color:var(--accent)}
+.wp-cov-btn.dirty{border-color:var(--orange);color:var(--orange)}
+.wp-cov-btn.ok{border-color:var(--green);color:var(--green)}
+.wp-cov-btn:disabled{opacity:.4;cursor:wait}
+.wp-cov-status{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);margin-left:auto}
+.wp-rf-toggle{font-family:'Share Tech Mono',monospace;font-size:8px;letter-spacing:1px;color:var(--muted);cursor:pointer;user-select:none;padding:3px 0 1px;border-top:1px dashed rgba(74,98,120,.35);margin-top:4px}
+.wp-rf-toggle:hover{color:var(--accent)}
+.wp-rf-toggle .chev{display:inline-block;width:8px;font-size:8px;transition:transform .15s}
+.wp-rf-toggle.open .chev{transform:rotate(90deg)}
+.wp-rf-body{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:3px}
+.wp-rf-body input{width:100%;font-size:10px;padding:3px 4px}
+.wp-rf-body label{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);display:block;margin-bottom:1px}
+.cov-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px}
+.cov-row label{font-size:11px;color:var(--muted)}
+.cov-btn-row{display:flex;gap:5px;margin-top:6px}
+.cov-btn-row .btn{flex:1;font-size:10px;padding:5px}
+
+/* ── SETTINGS MODAL + SUMMARY ── */
+.settings-group{border:1px solid var(--border);padding:10px 12px;margin-bottom:12px;background:rgba(11,15,23,.5)}
+.settings-label{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+.settings-summary{display:flex;align-items:center;gap:6px;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px;cursor:pointer;padding:4px 0;user-select:none}
+.settings-summary:hover{color:var(--accent)}
+.ss-band{color:var(--accent)}
+.ss-budget{color:var(--text)}
+.ss-cov{color:var(--orange)}
+.ss-sep{color:var(--border)}
+.ss-gear{margin-left:auto;font-size:14px;color:var(--muted)}
+.settings-summary:hover .ss-gear{color:var(--accent)}
+</style>
+</head>
+<body>
+
+<!-- Context Menu -->
+<div id="ctxMenu"><div class="ctx-header" id="ctxTitle">MAP</div></div>
+
+<!-- Help Modal -->
+<div class="modal-bg" id="helpModal">
+  <div class="modal" style="max-width:560px">
+    <h2>📡 Getting Started</h2>
+    <ol style="line-height:1.65;font-size:13px;color:var(--text);padding-left:22px;margin-bottom:14px">
+      <li><strong>Add nodes</strong> — right-click anywhere on the map → "Add node here". Each node is a transmitter or receiver. Click the ◎ button to centre on your current location first.</li>
+      <li><strong>Set antenna height</strong> — in the sidebar, edit each node's <em>ANT HT</em> (metres above ground). Default is 6 m.</li>
+      <li><strong>Link nodes</strong> — right-click a node marker → "Connect to …" to add a radio link. Links automatically join into paths.</li>
+      <li><strong>Pick a band</strong> — top of the sidebar, choose a radio preset (Meshtastic AU 915 MHz by default) or enter a custom frequency.</li>
+      <li><strong>Analyse</strong> — click <strong>▶ ANALYSE</strong>. Terrain elevation is fetched along each link and the line-of-sight + 1st Fresnel zone are drawn below the map.</li>
+      <li><strong>Coverage layer</strong> — set TX power / antenna gain / RX sensitivity (defaults seeded from the preset), tick the <em>COVERAGE</em> box on a node, then click <em>COMPUTE</em>. A terrain-aware coverage polygon is drawn. Use <em>ALL ON / ALL OFF</em> to toggle every node at once.</li>
+    </ol>
+    <p style="font-size:12px;color:var(--muted);line-height:1.5">
+      <strong style="color:var(--green)">✓ CLEAR</strong> — LOS clear and Fresnel meets preset threshold (40 % for Meshtastic/ham, 60 % for Wi-Fi).&nbsp;
+      <strong style="color:var(--orange)">⚠ MARGINAL</strong> — LOS clear but the 1st Fresnel zone is obstructed below the preset threshold (diffraction loss likely).&nbsp;
+      <strong style="color:var(--red)">✕ BLOCKED</strong> — terrain in the way.
+    </p>
+    <p style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">
+      Tip: terrain is fetched from AWS Open Terrain Tiles (~30 m global) — no API key, cached in-memory once loaded. Right-click a link on the map to delete it. Use <strong>⇪ SHARE</strong> to copy a URL containing your full setup.
+    </p>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn primary" onclick="closeHelp()">GOT IT</button>
+    </div>
+  </div>
+</div>
+
+<!-- Share Modal -->
+<div class="modal-bg" id="shareModal">
+  <div class="modal">
+    <h2>📡 Share This Map</h2>
+    <div class="modal-url" id="shareUrl"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="copyShareUrl()">COPY LINK</button>
+      <button class="btn primary" onclick="closeShare()">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal (RF Parameters + Coverage) -->
+<div class="modal-bg" id="settingsModal">
+  <div class="modal" style="min-width:500px;max-width:560px">
+    <h2>⚙ RF + Coverage Settings</h2>
+
+    <div class="settings-group">
+      <div class="settings-label">RF Parameters</div>
+      <div class="field-row" style="margin-bottom:6px">
+        <label>Preset</label>
+        <select id="inpPreset" onchange="applyPreset()" style="flex:1;min-width:0">
+          <option value="915">Meshtastic AU/US (915 MHz)</option>
+          <option value="868">Meshtastic EU (868 MHz)</option>
+          <option value="433">Meshtastic Asia (433 MHz)</option>
+          <option value="146">2m VHF (146 MHz)</option>
+          <option value="438">70cm UHF (438 MHz)</option>
+          <option value="2400">2.4 GHz Wi-Fi</option>
+          <option value="5800">5.8 GHz Wi-Fi</option>
+          <option value="">Custom</option>
+        </select>
+      </div>
+      <div class="field-row" style="margin-bottom:6px">
+        <label>Freq (MHz)</label>
+        <input type="number" id="inpFreq" value="915" min="1" style="width:78px" oninput="syncPresetFromFreq()" onchange="onCoverageParamChanged()">
+        <label>K-Factor</label>
+        <select id="inpK" style="width:64px" onchange="onCoverageParamChanged()">
+          <option value="1.333">4/3</option>
+          <option value="1.0">1.0</option>
+          <option value="0.667">2/3</option>
+        </select>
+      </div>
+      <div class="field-row" style="margin-bottom:6px">
+        <label>TX (dBm)</label>
+        <input type="number" id="inpTx" value="22" step="0.5" style="width:60px" onchange="onGlobalRfChanged()">
+        <label>Gain (dBi)</label>
+        <input type="number" id="inpGain" value="2" step="0.5" style="width:60px" onchange="onGlobalRfChanged()">
+      </div>
+      <div class="field-row">
+        <label>RX Sens (dBm)</label>
+        <input type="number" id="inpRx" value="-130" step="1" style="width:68px" onchange="onGlobalRfChanged()">
+        <label>Margin (dB)</label>
+        <input type="number" id="inpMargin" value="6" step="0.5" style="width:60px" onchange="onGlobalRfChanged()">
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-label">Coverage <span id="covCount" style="color:var(--accent)">0</span> active</div>
+      <div class="field-row" style="margin-bottom:6px">
+        <label>RX Ant (m)</label>
+        <input type="number" id="inpRxAntH" value="2" step="0.5" min="0" style="width:58px" onchange="onCoverageParamChanged()">
+        <label>Max (km)</label>
+        <input type="number" id="inpCovMaxKm" value="50" step="1" min="1" max="100" style="width:58px" title="Cap the search radius. Larger = slower compute + more tile downloads." onchange="onCoverageParamChanged()">
+      </div>
+      <div class="field-row" style="margin-bottom:6px">
+        <label>Rays</label>
+        <select id="inpCovRays" style="width:90px" title="More rays = smoother polygon. Diminishing returns past 180 (DEM is ~30 m)." onchange="onCoverageParamChanged()">
+          <option value="24">24 (15°)</option>
+          <option value="36">36 (10°)</option>
+          <option value="72" selected>72 (5°)</option>
+          <option value="144">144 (2.5°)</option>
+          <option value="360">360 (1°)</option>
+        </select>
+        <label>Samples / ray</label>
+        <select id="inpCovSamples" style="width:60px" title="Samples per ray — fewer = faster but coarser" onchange="onCoverageParamChanged()">
+          <option value="30">30</option>
+          <option value="50" selected>50</option>
+          <option value="80">80</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <label>Fresnel clearance</label>
+        <select id="inpCovFresnel" style="width:120px" onchange="onCoverageParamChanged()" title="0 = LOS only (no Fresnel penalty). 40% = forgiving links (Meshtastic/ham — a few dB diffraction loss absorbed by link margin). 60% = professional engineering quality (essentially free-space).">
+          <option value="0">0 (LOS only)</option>
+          <option value="0.4" selected>40%</option>
+          <option value="0.6">60%</option>
+          <option value="1">100%</option>
+        </select>
+      </div>
+      <div class="cov-btn-row" style="margin-top:10px">
+        <button class="btn" onclick="setAllCoverage(true)">ALL ON</button>
+        <button class="btn" onclick="setAllCoverage(false)">ALL OFF</button>
+        <button class="btn primary" onclick="computeAllCoverage()">▶ COMPUTE ALL</button>
+      </div>
+      <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:1px;line-height:1.4">
+        Compute downloads terrain tiles (AWS Open Terrain, ~30 m global). Toggle ON/OFF is instant once cached.
+      </div>
+    </div>
+
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn primary" onclick="closeSettings()">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<div id="app">
+  <header>
+    <div class="hdr-tag">RF</div>
+    <h1>Multi-Hop <em>Line of Sight</em></h1>
+    <div class="hdr-right">
+      <button class="btn" onclick="openHelp()">? HELP</button>
+      <button class="btn" onclick="openSettings()">⚙ SETTINGS</button>
+      <button class="btn share" onclick="openShare()">⇪ SHARE</button>
+      <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
+      <span class="hdr-tag" title="Build 20260527-1">BUILD 20260527-1</span>
+      <button class="btn primary" onclick="runAnalysis()">▶ ANALYSE</button>
+    </div>
+  </header>
+
+  <div class="body-row">
+    <div class="sidebar">
+
+      <!-- Compact summary bar (open SETTINGS for RF + coverage controls) -->
+      <div class="sb-section" style="padding:8px 11px">
+        <div class="settings-summary" onclick="openSettings()" title="Click to open RF + Coverage settings">
+          <span class="ss-band" id="ssBand">915 MHz</span>
+          <span class="ss-sep">·</span>
+          <span class="ss-budget" id="ssBudget">22 dBm / +2 dBi</span>
+          <span class="ss-sep">·</span>
+          <span class="ss-cov"><span id="ssCovCount">0</span> COV</span>
+          <span class="ss-gear">⚙</span>
+        </div>
+      </div>
+
+      <!-- Nodes -->
+      <div class="sb-section" style="display:flex;align-items:center;justify-content:space-between;padding:6px 11px">
+        <div class="section-label sb-toggle" data-sb="nodes" style="margin:0"><span class="sb-chev">▾</span>NODES <span id="wpCount" style="color:var(--accent)">0</span></div>
+        <span style="font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);letter-spacing:1px">DRAG TO REORDER</span>
+      </div>
+      <div class="wp-scroll" id="wpList" data-sb-body="nodes"></div>
+
+      <!-- Edges -->
+      <div class="sb-section" style="padding:5px 11px">
+        <div class="section-label sb-toggle" data-sb="links" style="margin-bottom:0"><span class="sb-chev">▾</span>LINKS <span id="edgeCount" style="color:var(--accent)">0</span> <span style="color:var(--muted);font-size:8px">(right-click node to connect · right-click link to delete)</span></div>
+      </div>
+      <div class="edges-panel" id="edgesPanel" data-sb-body="links"><div class="no-data">No links yet.</div></div>
+
+      <!-- Paths -->
+      <div class="sb-section" style="display:flex;align-items:center;justify-content:space-between;padding:5px 11px">
+        <div class="section-label sb-toggle" data-sb="paths" style="margin:0"><span class="sb-chev">▾</span>PATHS <span id="pathCount" style="color:var(--accent)">0</span></div>
+        <button class="btn" style="font-size:9px;padding:2px 8px" onclick="addPath()">+ NEW PATH</button>
+      </div>
+      <div class="paths-panel" id="pathsPanel" data-sb-body="paths"><div class="no-data">No paths defined.</div></div>
+
+      <div class="analyse-wrap">
+        <button class="btn primary" onclick="runAnalysis()">▶ ANALYSE ALL LINKS</button>
+      </div>
+
+      <!-- Results -->
+      <div class="sb-section" style="padding:5px 11px">
+        <div class="section-label sb-toggle" data-sb="results" style="margin-bottom:0"><span class="sb-chev">▾</span>RESULTS</div>
+      </div>
+      <div class="results-area" id="resultsArea" data-sb-body="results">
+        <div class="no-data">Add nodes, links, then analyse.</div>
+      </div>
+
+    </div><!-- /sidebar -->
+
+    <!-- MAP + CHART -->
+    <div class="map-col">
+      <div id="mapHint">Right-click map to add node · Drag markers · Right-click marker for options</div>
+      <div id="map"></div>
+      <div id="toast"></div>
+
+      <!-- Floating buttons -->
+      <div class="fab-group">
+        <button class="fab loc" title="Go to my location" onclick="goToMyLocation()">◎</button>
+      </div>
+
+      <div class="chart-panel">
+        <div class="chart-header">
+          <div class="chart-title" id="chartTitle">TERRAIN PROFILE</div>
+          <div class="chart-tabs" id="chartTabs"></div>
+        </div>
+        <canvas id="profileCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BUILD_ID='20260526-1';
+// ═══════════════════════════════════════════════════════════
+//  STATE
+//  Graph model: nodes (waypoints) + edges (links between any two)
+//  Paths: ordered sequences of node IDs for combined chart views
+// ═══════════════════════════════════════════════════════════
+const S = {
+  map: null,
+  nodes: [],       // {id, name, lat, lng, antH, elev, marker, rfOverride, txDbm, gainDbi, rxDbm, coverageOn, coverageLayer, coverageDirty, coverageComputed}
+  edges: [],       // {id, aId, bId, line, result, profile}
+  paths: [],       // {id, name, nodeIds[]}  — user-defined chains for chart
+  nextId: 1,
+  activeView: null, // {type:'edge'|'path', id}
+  elevCache: {},
+  profileCache: {},
+  _coverageComputing: false,
+  _analysing: false,
+  hoverMarker: null,
+  profileHover: null,
+  redrawProfile: null,
+  _dragId: null
+};
+
+const COLORS = ['#00c8f0','#f39c12','#2ecc71','#e74c3c','#9b59b6','#1abc9c','#e67e22','#3498db','#f1c40f','#e91e63'];
+const nodeColor = i => COLORS[i % COLORS.length];
+
+function removeEdgeLayers(edge){
+  if(edge.line) S.map.removeLayer(edge.line);
+  if(edge.hitLine) S.map.removeLayer(edge.hitLine);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MAP INIT
+// ═══════════════════════════════════════════════════════════
+function initMap() {
+  S.map = L.map('map', { center: [-27.6, 153.1], zoom: 10, zoomControl: true });
+  S.map.createPane('profileHoverPane');
+  S.map.getPane('profileHoverPane').style.zIndex=750;
+  S.map.getPane('profileHoverPane').style.pointerEvents='none';
+  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors', maxZoom: 19, crossOrigin: true
+  }).addTo(S.map);
+  const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+    attribution: '© Esri', maxZoom: 19
+  });
+  L.control.layers({'OpenStreetMap': osm, 'Esri Topo': esri}, {}, {position:'topright'}).addTo(S.map);
+  S.map.on('contextmenu', e => { L.DomEvent.preventDefault(e.originalEvent); showMapCtx(e.originalEvent.clientX, e.originalEvent.clientY, e.latlng); });
+  S.map.on('click mousedown', closeCtx);
+  setTimeout(() => S.map.invalidateSize(), 150);
+  setTimeout(() => S.map.invalidateSize(), 500);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  NODES
+// ═══════════════════════════════════════════════════════════
+const DEFAULT_NAMES = ['Site A','Site B','Site C','Site D','Relay 1','Relay 2','Relay 3','Relay 4','Node 5','Node 6'];
+
+function addNode(lat, lng) {
+  const idx = S.nodes.length;
+  const node = { id: S.nextId++, name: DEFAULT_NAMES[idx] || `Node ${idx+1}`, lat, lng, antH: 6, elev: null, marker: null,
+    rfOverride: false, txDbm: null, gainDbi: null, rxDbm: null,
+    coverageOn: false, coverageLayer: null, coverageDirty: true, coverageComputed: false };
+  S.nodes.push(node);
+  node.marker = makeMarker(node);
+  renderNodeList();
+  fetchElev(node);
+  document.getElementById('wpCount').textContent = S.nodes.length;
+  document.getElementById('mapHint').style.display = 'none';
+  return node;
+}
+
+function makeMarker(node) {
+  const idx = S.nodes.indexOf(node);
+  const marker = L.marker([node.lat, node.lng], { draggable: true, icon: buildIcon(node) }).addTo(S.map);
+  marker.on('drag', () => {
+    const ll = marker.getLatLng(); node.lat = ll.lat; node.lng = ll.lng;
+    updateNodeFields(node); redrawEdgeLines();
+  });
+  marker.on('dragend', () => {
+    node.elev = null; invalidateEdgesForNode(node.id); fetchElev(node);
+    invalidateNodeCoverage(node, true);
+    // Re-analyse all links whenever a node is dragged
+    if (S.edges.length > 0) runAnalysis();
+  });
+  marker.on('contextmenu', e => { L.DomEvent.preventDefault(e.originalEvent); L.DomEvent.stopPropagation(e.originalEvent); showNodeCtx(e.originalEvent.clientX, e.originalEvent.clientY, node); });
+  marker.bindTooltip(node.name, { permanent: false, direction: 'top', offset: [0,-14] });
+  return marker;
+}
+
+function buildIcon(node) {
+  const idx = S.nodes.indexOf(node);
+  const c = nodeColor(idx);
+  const n = idx + 1;
+  const amsl = node.elev !== null ? (node.elev + node.antH).toFixed(0) : '?';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="28" viewBox="0 0 22 28">
+    <path d="M11 0C4.9 0 0 4.9 0 11c0 8.3 11 17 11 17s11-8.7 11-17C22 4.9 17.1 0 11 0z" fill="${c}" opacity="0.92"/>
+    <circle cx="11" cy="11" r="6" fill="#0b0f17"/>
+    <text x="11" y="14.5" text-anchor="middle" font-family="monospace" font-size="7" fill="${c}" font-weight="bold">${n}</text>
+  </svg>`;
+  return L.divIcon({ html: svg, className: 'lf-marker', iconSize:[22,28], iconAnchor:[11,28], tooltipAnchor:[0,-28] });
+}
+
+function refreshAllIcons() {
+  S.nodes.forEach((n, i) => {
+    if (n.marker) n.marker.setIcon(buildIcon(n));
+    if (n.coverageLayer){
+      const c = nodeColor(i);
+      n.coverageLayer.setStyle({color:c, fillColor:c});
+    }
+  });
+}
+
+function removeNode(id) {
+  const idx = S.nodes.findIndex(n => n.id === id);
+  if (idx < 0) return;
+  if (S.nodes[idx].coverageLayer) S.map.removeLayer(S.nodes[idx].coverageLayer);
+  S.map.removeLayer(S.nodes[idx].marker);
+  S.nodes.splice(idx, 1);
+  // Remove all edges involving this node
+  S.edges.filter(e => e.aId === id || e.bId === id).forEach(removeEdgeLayers);
+  S.edges = S.edges.filter(e => e.aId !== id && e.bId !== id);
+  // Remove this node from all paths, delete paths that become too short
+  S.paths.forEach(p => { p.nodeIds = p.nodeIds.filter(nid => nid !== id); });
+  S.paths = S.paths.filter(p => p.nodeIds.length >= 2);
+  if(S.activeView?.type==='edge'&&!S.edges.some(e=>e.id===S.activeView.id)) S.activeView=null;
+  if(S.activeView?.type==='path'&&!S.paths.some(p=>p.id===S.activeView.id)) S.activeView=null;
+  refreshAllIcons();
+  renderNodeList();
+  renderEdgesPanel();
+  renderPathsPanel();
+  renderChartTabs();
+  renderResults();
+  highlightActiveMapView();
+  document.getElementById('wpCount').textContent = S.nodes.length;
+  document.getElementById('edgeCount').textContent = S.edges.length;
+  document.getElementById('pathCount').textContent = S.paths.length;
+}
+
+function clearAll() {
+  S.nodes.forEach(n => {
+    if (n.marker) S.map.removeLayer(n.marker);
+    if (n.coverageLayer) S.map.removeLayer(n.coverageLayer);
+  });
+  S.edges.forEach(removeEdgeLayers);
+  S.nodes = []; S.edges = []; S.paths = [];
+  S.activeView = null;
+  updateCovCount();
+  renderNodeList(); renderEdgesPanel(); renderPathsPanel();
+  document.getElementById('resultsArea').innerHTML = '<div class="no-data">Add nodes, links, then analyse.</div>';
+  renderChartTabs(); clearCanvas();
+  document.getElementById('wpCount').textContent = '0';
+  document.getElementById('edgeCount').textContent = '0';
+  document.getElementById('pathCount').textContent = '0';
+  document.getElementById('mapHint').style.display = '';
+}
+
+function updateNodeFields(node) {
+  const latEl = document.getElementById(`lat_${node.id}`);
+  const lngEl = document.getElementById(`lng_${node.id}`);
+  if (latEl) latEl.value = node.lat.toFixed(6);
+  if (lngEl) lngEl.value = node.lng.toFixed(6);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  EDGES (LINKS)
+// ═══════════════════════════════════════════════════════════
+function addEdge(aId, bId) {
+  // Prevent duplicate edges
+  if (S.edges.some(e => (e.aId===aId&&e.bId===bId)||(e.aId===bId&&e.bId===aId))) { toast('Link already exists.',2000); return; }
+  if (aId === bId) { toast('Cannot link a node to itself.',2000); return; }
+  const edge = { id: S.nextId++, aId, bId, line: null, hitLine: null, result: null, profile: null };
+  S.edges.push(edge);
+  const a = S.nodes.find(n=>n.id===aId), b = S.nodes.find(n=>n.id===bId);
+  edge.line = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#4a6278', weight:2, opacity:.7, dashArray:'5 4' }).addTo(S.map);
+  edge.hitLine = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#ffffff', weight:24, opacity:0, interactive:true }).addTo(S.map);
+  attachEdgeHandlers(edge);
+  renderEdgesPanel();
+  document.getElementById('edgeCount').textContent = S.edges.length;
+
+  // Auto-create or extend a path
+  autoExtendPath(aId, bId);
+}
+
+function removeEdge(id) {
+  const idx = S.edges.findIndex(e => e.id === id);
+  if (idx < 0) return;
+  const e = S.edges[idx];
+  removeEdgeLayers(e);
+  S.edges.splice(idx, 1);
+  // Clean up paths that used this edge
+  S.paths.forEach(p => {
+    // Check each consecutive pair — remove paths that lose a required edge
+  });
+  S.paths = S.paths.filter(p => {
+    for (let i=0;i<p.nodeIds.length-1;i++) {
+      const a=p.nodeIds[i], b=p.nodeIds[i+1];
+      if (!S.edges.some(e2=>(e2.aId===a&&e2.bId===b)||(e2.aId===b&&e2.bId===a))) return false;
+    }
+    return true;
+  });
+  if(S.activeView?.type==='edge'&&S.activeView.id===id) S.activeView=null;
+  if(S.activeView?.type==='path'&&!S.paths.some(p=>p.id===S.activeView.id)) S.activeView=null;
+  renderEdgesPanel();
+  renderPathsPanel();
+  renderChartTabs();
+  renderResults();
+  highlightActiveMapView();
+  document.getElementById('edgeCount').textContent = S.edges.length;
+  document.getElementById('pathCount').textContent = S.paths.length;
+}
+
+function redrawEdgeLines() {
+  S.edges.forEach(e => {
+    const a = S.nodes.find(n=>n.id===e.aId), b = S.nodes.find(n=>n.id===e.bId);
+    if (a && b && e.line) e.line.setLatLngs([[a.lat,a.lng],[b.lat,b.lng]]);
+    if (a && b && e.hitLine) e.hitLine.setLatLngs([[a.lat,a.lng],[b.lat,b.lng]]);
+  });
+}
+
+function edgeBaseStyle(edge){
+  if(!edge.result) return {color:'#4a6278',weight:2,opacity:.7,dashArray:'5 4'};
+  if(edge.result.status==='error') return {color:'#e74c3c',weight:2,opacity:.8,dashArray:'3 5'};
+  const col=edge.result.status==='clear'?'#2ecc71':edge.result.status==='marginal'?'#f39c12':'#e74c3c';
+  return {color:col,weight:3,opacity:.9,dashArray:''};
+}
+
+function clearActiveView(){
+  S.activeView=null;
+  clearCanvas();
+  highlightActiveMapView();
+  renderEdgesPanel();
+  renderPathsPanel();
+  renderChartTabs();
+  renderResults();
+}
+
+function highlightActiveMapView(){
+  const activePath=S.activeView?.type==='path'?S.paths.find(p=>p.id===S.activeView.id):null;
+  const pathEdgeIds=new Set();
+  if(activePath){
+    for(let i=0;i<activePath.nodeIds.length-1;i++){
+      const aId=activePath.nodeIds[i],bId=activePath.nodeIds[i+1];
+      const edge=S.edges.find(e=>(e.aId===aId&&e.bId===bId)||(e.aId===bId&&e.bId===aId));
+      if(edge) pathEdgeIds.add(edge.id);
+    }
+  }
+  S.edges.forEach(e=>{
+    if(!e.line) return;
+    if(S.activeView?.type==='edge'&&S.activeView.id===e.id){
+      e.line.setStyle({...edgeBaseStyle(e),weight:6,opacity:1});
+      e.line.bringToFront();
+    }else if(pathEdgeIds.has(e.id)){
+      e.line.setStyle({color:'#00c8f0',weight:6,opacity:1,dashArray:''});
+      e.line.bringToFront();
+    }else{
+      e.line.setStyle(edgeBaseStyle(e));
+    }
+    if(e.hitLine) e.hitLine.bringToFront();
+  });
+}
+
+function invalidateEdgesForNode(nodeId) {
+  let changed = false;
+  S.edges.forEach(e => {
+    if (e.aId !== nodeId && e.bId !== nodeId) return;
+    e.result = null;
+    e.profile = null;
+    changed = true;
+    if (e.line) e.line.setStyle(edgeBaseStyle(e));
+  });
+  if (!changed) return;
+
+  // Clear stale chart but keep activeView so runAnalysis can restore the same view.
+  const active = S.activeView;
+  if (active?.type === 'edge') {
+    const edge = S.edges.find(e => e.id === active.id);
+    if (edge && (edge.aId === nodeId || edge.bId === nodeId)) clearCanvas();
+  } else if (active?.type === 'path') {
+    const path = S.paths.find(p => p.id === active.id);
+    if (path?.nodeIds.includes(nodeId)) clearCanvas();
+  }
+
+  renderResults();
+  renderEdgesPanel();
+  renderChartTabs();
+  renderPathsPanel();
+  highlightActiveMapView();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  AUTO PATH BUILDING
+//  When an edge is added, try to extend an existing path
+//  that ends/starts at one of the nodes; otherwise create new path.
+// ═══════════════════════════════════════════════════════════
+function autoExtendPath(aId, bId) {
+  // Try to extend an existing path
+  for (const p of S.paths) {
+    const last = p.nodeIds[p.nodeIds.length-1];
+    const first = p.nodeIds[0];
+    if (last === aId && !p.nodeIds.includes(bId)) { p.nodeIds.push(bId); renderPathsPanel(); return; }
+    if (last === bId && !p.nodeIds.includes(aId)) { p.nodeIds.push(aId); renderPathsPanel(); return; }
+    if (first === bId && !p.nodeIds.includes(aId)) { p.nodeIds.unshift(aId); renderPathsPanel(); return; }
+    if (first === aId && !p.nodeIds.includes(bId)) { p.nodeIds.unshift(bId); renderPathsPanel(); return; }
+  }
+  // Create new path
+  const a = S.nodes.find(n=>n.id===aId), b = S.nodes.find(n=>n.id===bId);
+  const p = { id: S.nextId++, name: `${a.name} → ${b.name}`, nodeIds: [aId, bId] };
+  S.paths.push(p);
+  renderPathsPanel();
+  document.getElementById('pathCount').textContent = S.paths.length;
+}
+
+function addPath() {
+  // Show a builder dialog — pick nodes in order
+  if (S.nodes.length < 2) { toast('Need at least 2 nodes to create a path.',3000); return; }
+  const options = S.nodes.map((n,i) => `${i+1}: ${n.name}`).join('\n');
+  const input = prompt(`Enter node numbers for path (comma-separated):\n${options}\n\nExample: 1,2,3`);
+  if (!input) return;
+  const idxs = input.split(',').map(s=>parseInt(s.trim())-1).filter(i=>i>=0&&i<S.nodes.length);
+  if (idxs.length < 2) { toast('Need at least 2 valid nodes.',2000); return; }
+  // Check that edges exist for each consecutive pair
+  for (let i=0;i<idxs.length-1;i++) {
+    const a=S.nodes[idxs[i]].id, b=S.nodes[idxs[i+1]].id;
+    if (!S.edges.some(e=>(e.aId===a&&e.bId===b)||(e.aId===b&&e.bId===a))) {
+      toast(`No link between ${S.nodes[idxs[i]].name} and ${S.nodes[idxs[i+1]].name}. Add the link first.`,3000); return;
+    }
+  }
+  const nodeIds = idxs.map(i=>S.nodes[i].id);
+  const name = nodeIds.map(id=>S.nodes.find(n=>n.id===id).name).join(' → ');
+  S.paths.push({ id: S.nextId++, name, nodeIds });
+  renderPathsPanel();
+  document.getElementById('pathCount').textContent = S.paths.length;
+}
+
+function removePath(id) {
+  S.paths = S.paths.filter(p => p.id !== id);
+  if(S.activeView?.type==='path'&&S.activeView.id===id) S.activeView=null;
+  renderPathsPanel();
+  renderChartTabs();
+  highlightActiveMapView();
+  document.getElementById('pathCount').textContent = S.paths.length;
+}
+
+function pathHasAnalysedProfiles(path){
+  return !!path&&path.nodeIds.slice(0,-1).every((id,i)=>{
+    const nextId=path.nodeIds[i+1];
+    return S.edges.some(e=>e.profile&&((e.aId===id&&e.bId===nextId)||(e.aId===nextId&&e.bId===id)));
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RENDER SIDEBAR
+// ═══════════════════════════════════════════════════════════
+function renderNodeList() {
+  const list = document.getElementById('wpList');
+  if (S.nodes.length === 0) { list.innerHTML = '<div class="no-data">Right-click map to add nodes.</div>'; return; }
+  list.innerHTML = '';
+  S.nodes.forEach((node, idx) => {
+    const c = nodeColor(idx);
+    const amsl = node.elev !== null ? (node.elev + node.antH).toFixed(1) + 'm' : '…';
+    const card = document.createElement('div');
+    card.className = 'wp-card'; card.draggable = true; card.dataset.id = node.id;
+    card.style.borderLeftColor = c;
+    const rf = effectiveRf(node);
+    const covBtnClass = !node.coverageComputed ? '' : (node.coverageDirty ? 'dirty' : 'ok');
+    const covBtnLabel = !node.coverageComputed ? 'COMPUTE' : (node.coverageDirty ? 'RECOMPUTE' : '✓ RECOMPUTE');
+    card.innerHTML = `
+      <div class="wp-row1">
+        <div class="wp-num" style="color:${c};border-color:${c}">${idx+1}</div>
+        <input class="wp-name" value="${escHtml(node.name)}" onchange="renameNode(${node.id},this.value)"/>
+        <button class="wp-del" onclick="removeNode(${node.id})">✕</button>
+      </div>
+      <div class="wp-grid">
+        <div class="wp-field"><label>LATITUDE</label>
+          <input id="lat_${node.id}" type="number" step="0.000001" value="${node.lat.toFixed(6)}" onchange="setNodeCoord(${node.id},'lat',+this.value)"/></div>
+        <div class="wp-field"><label>LONGITUDE</label>
+          <input id="lng_${node.id}" type="number" step="0.000001" value="${node.lng.toFixed(6)}" onchange="setNodeCoord(${node.id},'lng',+this.value)"/></div>
+      </div>
+      <div class="wp-bottom">
+        <label>ANT HT (m)</label>
+        <input type="number" step="0.5" min="0" value="${node.antH}" onchange="setNodeAntH(${node.id},+this.value)"/>
+        <div class="wp-elev">GND:<span id="elev_${node.id}">${node.elev!==null?node.elev.toFixed(1)+'m':'…'}</span></div>
+        <div class="wp-amsl">AMSL:<span id="amsl_${node.id}">${amsl}</span></div>
+      </div>
+      <div class="wp-cov">
+        <input type="checkbox" id="cov_${node.id}" ${node.coverageOn?'checked':''} onchange="setNodeCoverageOn(${node.id},this.checked)"/>
+        <label for="cov_${node.id}" style="cursor:pointer">COVERAGE</label>
+        <button class="wp-cov-btn ${covBtnClass}" id="covBtn_${node.id}" onclick="computeNodeCoverage(${node.id})">${covBtnLabel}</button>
+        <span class="wp-cov-status" id="covStat_${node.id}">${node.coverageComputed?'cached':''}</span>
+      </div>
+      <div class="wp-rf-toggle ${node.rfOverride?'open':''}" onclick="toggleNodeRfOverride(${node.id})">
+        <span class="chev">▸</span> RF OVERRIDE ${node.rfOverride?'(custom)':'(using global)'}
+      </div>
+      <div class="wp-rf-body" id="rfBody_${node.id}" ${node.rfOverride?'':'style="display:none"'}>
+        <div><label>TX dBm</label><input type="number" step="0.5" value="${rf.tx}" onchange="setNodeRf(${node.id},'txDbm',+this.value)"/></div>
+        <div><label>Gain dBi</label><input type="number" step="0.5" value="${rf.gain}" onchange="setNodeRf(${node.id},'gainDbi',+this.value)"/></div>
+        <div><label>RX dBm</label><input type="number" step="1" value="${rf.rx}" onchange="setNodeRf(${node.id},'rxDbm',+this.value)"/></div>
+      </div>`;
+    card.addEventListener('dragstart', e => { e.dataTransfer.effectAllowed='move'; S._dragId=node.id; });
+    card.addEventListener('dragend', () => { S._dragId=null; document.querySelectorAll('.wp-card').forEach(c=>c.classList.remove('drag-over')); });
+    card.addEventListener('dragover', e => { e.preventDefault(); card.classList.add('drag-over'); });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', e => {
+      e.preventDefault(); card.classList.remove('drag-over');
+      if (!S._dragId || S._dragId===node.id) return;
+      const fi = S.nodes.findIndex(n=>n.id===S._dragId), ti=idx;
+      const [m]=S.nodes.splice(fi,1); S.nodes.splice(ti,0,m);
+      refreshAllIcons(); renderNodeList();
+    });
+    list.appendChild(card);
+  });
+}
+
+function renderEdgesPanel() {
+  const panel = document.getElementById('edgesPanel');
+  if (!S.edges.length) { panel.innerHTML='<div class="no-data">No links yet.</div>'; return; }
+  panel.innerHTML='';
+  S.edges.forEach(e => {
+    const a=S.nodes.find(n=>n.id===e.aId), b=S.nodes.find(n=>n.id===e.bId);
+    if (!a||!b) return;
+    const statusCol = !e.result ? '#4a6278' : e.result.status==='clear' ? '#2ecc71' : e.result.status==='marginal' ? '#f39c12' : '#e74c3c';
+    const statusTxt = !e.result ? '' : e.result.status==='clear' ? '✓' : e.result.status==='marginal' ? '⚠' : e.result.status==='error' ? '!' : '✕';
+    const isActive = S.activeView?.type==='edge' && S.activeView.id===e.id;
+    const row = document.createElement('div'); row.className='edge-row'+(isActive?' active':'');
+    const deselectBtn = isActive ? `<button class="deselect-btn" title="Deselect (Esc)" onclick="event.stopPropagation();clearActiveView()">DESELECT</button>` : '';
+    row.innerHTML=`<div class="edge-dot" style="background:${statusCol}"></div>
+      <div class="edge-label">${escHtml(a.name)} ↔ ${escHtml(b.name)}</div>
+      <div class="edge-status" style="color:${statusCol}">${statusTxt}</div>
+      ${deselectBtn}
+      <button class="edge-del" onclick="removeEdge(${e.id})">✕</button>`;
+    row.style.cursor='pointer';
+    row.onclick = ev => {
+      if (ev.target.classList.contains('edge-del')||!e.profile) return;
+      if (S.activeView?.type==='edge' && S.activeView.id===e.id) { clearActiveView(); return; }
+      S.activeView={type:'edge',id:e.id}; showEdgeProfile(e.id); renderResults(); renderChartTabs(); renderPathsPanel();
+    };
+    panel.appendChild(row);
+  });
+}
+
+function renderPathsPanel() {
+  const panel = document.getElementById('pathsPanel');
+  if (!S.paths.length) { panel.innerHTML='<div class="no-data">No paths defined.</div>'; return; }
+  panel.innerHTML='';
+  S.paths.forEach(p => {
+    // Rebuild name from current node names
+    const names = p.nodeIds.map(id=>S.nodes.find(n=>n.id===id)?.name||'?').join(' → ');
+    const isActive = S.activeView?.type==='path' && S.activeView.id===p.id;
+    const row = document.createElement('div');
+    row.className='path-row'+(isActive?' active':'');
+    const deselectBtn = isActive ? `<button class="deselect-btn" title="Deselect (Esc)" onclick="event.stopPropagation();clearActiveView()">DESELECT</button>` : '';
+    row.innerHTML=`<div class="path-label">${escHtml(names)}</div>
+      ${deselectBtn}
+      <button class="path-del" onclick="event.stopPropagation();removePath(${p.id})">✕</button>`;
+    row.onclick = () => {
+      if (S.activeView?.type==='path' && S.activeView.id===p.id) { clearActiveView(); return; }
+      S.activeView={type:'path',id:p.id}; showPathProfile(p.id); renderChartTabs(); renderPathsPanel(); renderResults();
+    };
+    panel.appendChild(row);
+  });
+  document.getElementById('pathCount').textContent = S.paths.length;
+}
+
+function renameNode(id, name) {
+  const node=S.nodes.find(n=>n.id===id); if(!node) return;
+  node.name=name; if(node.marker) node.marker.setTooltipContent(name);
+}
+function setNodeCoord(id, field, val) {
+  const node=S.nodes.find(n=>n.id===id); if(!node) return;
+  node[field]=val; node.elev=null;
+  if(node.marker) node.marker.setLatLng([node.lat,node.lng]);
+  redrawEdgeLines(); invalidateEdgesForNode(id); fetchElev(node);
+  invalidateNodeCoverage(node, true);
+}
+function setNodeAntH(id, val) {
+  const node=S.nodes.find(n=>n.id===id); if(!node) return;
+  node.antH=val; updateAmslDisplay(node); invalidateEdgesForNode(id);
+  invalidateNodeCoverage(node, true);
+}
+function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+
+// ═══════════════════════════════════════════════════════════
+//  CONTEXT MENU
+// ═══════════════════════════════════════════════════════════
+const ctxMenu=document.getElementById('ctxMenu'), ctxTitle=document.getElementById('ctxTitle');
+
+function buildCtx(title, items) {
+  ctxTitle.textContent=title;
+  while(ctxMenu.children.length>1) ctxMenu.removeChild(ctxMenu.lastChild);
+  items.forEach(item=>{
+    if(item==='sep'){const s=document.createElement('div');s.className='ctx-sep';ctxMenu.appendChild(s);}
+    else{
+      const el=document.createElement('div');
+      el.className='ctx-item'+(item.danger?' danger':'');
+      const icon=document.createElement('span');
+      icon.className='ctx-icon';
+      icon.textContent=item.icon;
+      el.appendChild(icon);
+      el.appendChild(document.createTextNode(item.label));
+      el.onclick=()=>{closeCtx();item.action();};
+      ctxMenu.appendChild(el);
+    }
+  });
+}
+function posCtx(cx,cy){
+  ctxMenu.style.display='block';
+  const mw=ctxMenu.offsetWidth,mh=ctxMenu.offsetHeight,vw=window.innerWidth,vh=window.innerHeight;
+  ctxMenu.style.left=(cx+mw>vw?cx-mw:cx)+'px'; ctxMenu.style.top=(cy+mh>vh?cy-mh:cy)+'px';
+}
+function closeCtx(){ctxMenu.style.display='none';}
+
+function showMapCtx(cx,cy,latlng){
+  const items=[{icon:'＋',label:'Add node here',action:()=>addNode(latlng.lat,latlng.lng)}];
+  if(S.edges.length>=1){items.push('sep');items.push({icon:'▶',label:'Re-analyse',action:runAnalysis});}
+  if(S.nodes.length>0){items.push('sep');items.push({icon:'✕',label:'Clear all',danger:true,action:clearAll});}
+  buildCtx('MAP',items); posCtx(cx,cy);
+}
+
+function showNodeCtx(cx,cy,node){
+  const idx=S.nodes.indexOf(node);
+  // Build connect-to submenu options
+  const connectItems = S.nodes.filter(n=>n.id!==node.id).map(n=>({
+    icon:'↔', label:`Connect to ${n.name}`, action:()=>addEdge(node.id,n.id)
+  }));
+  const items=[
+    {icon:'✎',label:'Rename…',action:()=>{const nm=prompt('Node name:',node.name);if(nm?.trim()){renameNode(node.id,nm.trim());renderNodeList();}}},
+    'sep',
+    ...connectItems,
+    'sep',
+    {icon:'↑',label:'Insert node before',action:()=>insertNodeAt(idx)},
+    {icon:'↓',label:'Insert node after', action:()=>insertNodeAt(idx+1)},
+    'sep',
+    {icon:'🗑',label:`Delete "${node.name}"`,danger:true,action:()=>removeNode(node.id)},
+  ];
+  buildCtx(`NODE ${idx+1}`,items); posCtx(cx,cy);
+}
+
+function showEdgeCtx(cx,cy,edge){
+  const a=S.nodes.find(n=>n.id===edge.aId), b=S.nodes.find(n=>n.id===edge.bId);
+  const items=[
+    {icon:'🗑',label:`Delete link ${a?.name||'?'} ↔ ${b?.name||'?'}`,danger:true,action:()=>removeEdge(edge.id)},
+  ];
+  buildCtx('LINK',items); posCtx(cx,cy);
+}
+
+function attachEdgeHandlers(edge){
+  const target=edge.hitLine||edge.line;
+  if(!target) return;
+  target.on('mousemove',e=>handleMapLineHover(edge,e.latlng));
+  target.on('mouseout',hideProfileCursor);
+  target.on('contextmenu',e=>{
+    L.DomEvent.preventDefault(e.originalEvent);
+    L.DomEvent.stopPropagation(e.originalEvent);
+    showEdgeCtx(e.originalEvent.clientX,e.originalEvent.clientY,edge);
+  });
+}
+
+function insertNodeAt(idx){
+  const ref=S.nodes[Math.min(idx,S.nodes.length-1)];
+  const node={id:S.nextId++,name:DEFAULT_NAMES[S.nodes.length]||`Node ${S.nodes.length+1}`,lat:ref.lat+0.003,lng:ref.lng+0.003,antH:6,elev:null,marker:null,
+    rfOverride:false,txDbm:null,gainDbi:null,rxDbm:null,
+    coverageOn:false,coverageLayer:null,coverageDirty:true,coverageComputed:false};
+  S.nodes.splice(idx,0,node);
+  node.marker=makeMarker(node);
+  refreshAllIcons(); renderNodeList(); fetchElev(node);
+  document.getElementById('wpCount').textContent=S.nodes.length;
+}
+
+document.addEventListener('click',e=>{if(!ctxMenu.contains(e.target))closeCtx();});
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  if(ctxMenu.style.display==='block'){closeCtx();return;}
+  if(document.getElementById('settingsModal')?.classList.contains('open')){closeSettings();return;}
+  if(document.getElementById('shareModal')?.classList.contains('open')){closeShare();return;}
+  if(document.getElementById('helpModal')?.classList.contains('open')){closeHelp();return;}
+  const t=e.target;
+  if(t&&(t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA'||t.isContentEditable)) return;
+  if(S.activeView) clearActiveView();
+});
+document.getElementById('map').addEventListener('contextmenu',e=>e.preventDefault());
+
+// ═══════════════════════════════════════════════════════════
+//  GO TO MY LOCATION
+// ═══════════════════════════════════════════════════════════
+function goToMyLocation(){
+  if(!navigator.geolocation){toast('Geolocation not supported by this browser.',3000);return;}
+  toast('Finding your location…');
+  navigator.geolocation.getCurrentPosition(pos=>{
+    const{latitude:lat,longitude:lng}=pos.coords;
+    S.map.setView([lat,lng],14);
+    hideToast();
+    // Add a temporary pulse circle
+    const circle=L.circle([lat,lng],{radius:50,color:var_accent(),fillColor:var_accent(),fillOpacity:.2,weight:2}).addTo(S.map);
+    setTimeout(()=>S.map.removeLayer(circle),4000);
+  },err=>{hideToast();toast('Could not get location: '+err.message,3000);});
+}
+function var_accent(){return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#00c8f0';}
+
+// ═══════════════════════════════════════════════════════════
+//  ELEVATION — AWS Open Terrain Tiles (Terrarium PNG encoding)
+//  Tiles are fetched once and decoded to Float32 elevation grids.
+//  No API key, no rate limit, ~30 m global resolution.
+// ═══════════════════════════════════════════════════════════
+const TERRAIN_TILE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
+const TERRAIN_Z = 12;            // ~38 m / pixel at the equator
+const TILE_SIZE = 256;
+const _tileCache = new Map();    // key "z/x/y" → Promise<Float32Array(256*256)>
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function lng2tileX(lng, z){ return (lng + 180) / 360 * Math.pow(2, z); }
+function lat2tileY(lat, z){
+  const r = lat * Math.PI / 180;
+  return (1 - Math.log(Math.tan(r) + 1/Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z);
+}
+
+function loadTile(z, x, y){
+  const key = `${z}/${x}/${y}`;
+  if(_tileCache.has(key)) return _tileCache.get(key);
+  const p = new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try{
+        const cvs = document.createElement('canvas');
+        cvs.width = TILE_SIZE; cvs.height = TILE_SIZE;
+        const ctx = cvs.getContext('2d');
+        ctx.drawImage(img, 0, 0, TILE_SIZE, TILE_SIZE);
+        const data = ctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data;
+        const out = new Float32Array(TILE_SIZE * TILE_SIZE);
+        for(let i = 0, j = 0; i < data.length; i += 4, j++){
+          out[j] = (data[i] * 256 + data[i+1] + data[i+2] / 256) - 32768;
+        }
+        resolve(out);
+      }catch(e){ reject(e); }
+    };
+    img.onerror = () => reject(new Error(`Tile load failed: ${key}`));
+    img.src = TERRAIN_TILE_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+  });
+  _tileCache.set(key, p);
+  return p;
+}
+
+async function tileElevAt(lat, lng, z = TERRAIN_Z){
+  const n = Math.pow(2, z);
+  const fx = lng2tileX(lng, z), fy = lat2tileY(lat, z);
+  const tx = ((Math.floor(fx) % n) + n) % n;
+  const ty = Math.max(0, Math.min(n - 1, Math.floor(fy)));
+  const grid = await loadTile(z, tx, ty);
+  // Bilinear interp within the tile
+  const px = (fx - Math.floor(fx)) * TILE_SIZE;
+  const py = (fy - Math.floor(fy)) * TILE_SIZE;
+  const x0 = Math.max(0, Math.min(TILE_SIZE - 1, Math.floor(px)));
+  const y0 = Math.max(0, Math.min(TILE_SIZE - 1, Math.floor(py)));
+  const x1 = Math.min(TILE_SIZE - 1, x0 + 1);
+  const y1 = Math.min(TILE_SIZE - 1, y0 + 1);
+  const dx = px - x0, dy = py - y0;
+  const e00 = grid[y0 * TILE_SIZE + x0];
+  const e10 = grid[y0 * TILE_SIZE + x1];
+  const e01 = grid[y1 * TILE_SIZE + x0];
+  const e11 = grid[y1 * TILE_SIZE + x1];
+  return e00 * (1-dx)*(1-dy) + e10 * dx*(1-dy) + e01 * (1-dx)*dy + e11 * dx*dy;
+}
+
+async function prefetchTilesForBbox(minLat, minLng, maxLat, maxLng, z = TERRAIN_Z){
+  const x0 = Math.floor(lng2tileX(minLng, z));
+  const x1 = Math.floor(lng2tileX(maxLng, z));
+  const y0 = Math.floor(lat2tileY(maxLat, z));   // y inverts at higher lat
+  const y1 = Math.floor(lat2tileY(minLat, z));
+  const promises = [];
+  const n = Math.pow(2, z);
+  for(let x = x0; x <= x1; x++){
+    for(let y = y0; y <= y1; y++){
+      const xx = ((x % n) + n) % n;
+      const yy = Math.max(0, Math.min(n - 1, y));
+      promises.push(loadTile(z, xx, yy));
+    }
+  }
+  await Promise.all(promises);
+}
+
+// Kept for backward compatibility with the LOS analyser path
+async function getElevationBatch(lats, lngs){
+  return Promise.all(lats.map((lat, i) => tileElevAt(+lat, +lngs[i])));
+}
+
+async function fetchElevSingle(lat,lng){
+  const key=`${(+lat).toFixed(5)},${(+lng).toFixed(5)}`;
+  if(S.elevCache[key]!==undefined) return S.elevCache[key];
+  const v=await tileElevAt(+lat,+lng);
+  S.elevCache[key]=v??0; return S.elevCache[key];
+}
+
+async function fetchElev(node){
+  const key=`${(+node.lat).toFixed(5)},${(+node.lng).toFixed(5)}`;
+  try{
+    const elev=await fetchElevSingle(node.lat,node.lng);
+    if(key!==`${(+node.lat).toFixed(5)},${(+node.lng).toFixed(5)}`) return;
+    node.elev=elev;
+  }catch{
+    if(key!==`${(+node.lat).toFixed(5)},${(+node.lng).toFixed(5)}`) return;
+    node.elev=null;
+  }
+  updateElevDisplay(node);
+}
+
+function updateElevDisplay(node){
+  const el=document.getElementById(`elev_${node.id}`);
+  if(el) el.textContent=node.elev!==null?node.elev.toFixed(1)+'m':'?';
+  updateAmslDisplay(node);
+}
+
+function updateAmslDisplay(node){
+  const el=document.getElementById(`amsl_${node.id}`);
+  if(el) el.textContent=node.elev!==null?(node.elev+node.antH).toFixed(1)+'m':'?';
+  // Refresh icon tooltip
+  if(node.marker) node.marker.setTooltipContent(`${node.name}\nGND: ${node.elev?.toFixed(1)}m  ANT: +${node.antH}m  AMSL: ${node.elev!==null?(node.elev+node.antH).toFixed(1)+'m':'?'}`);
+}
+
+async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
+  const profileKey=[lat1,lng1,lat2,lng2,N].map(v=>Number(v).toFixed(5)).join(',');
+  if(S.profileCache[profileKey]) return [...S.profileCache[profileKey]];
+  const lats=[],lngs=[];
+  for(let i=0;i<=N;i++){const t=i/N;lats.push((lat1+(lat2-lat1)*t).toFixed(5));lngs.push((lng1+(lng2-lng1)*t).toFixed(5));}
+  const CHUNK=100; const elevs=[];
+  for(let i=0;i<lats.length;i+=CHUNK){
+    const bl=lats.slice(i,i+CHUNK),bg=lngs.slice(i,i+CHUNK);
+    const batch=await getElevationBatch(bl,bg);
+    if(!Array.isArray(batch)||batch.length!==bl.length||batch.some(v=>v===null||v===undefined||Number.isNaN(Number(v)))) {
+      throw new Error('Elevation profile returned incomplete data');
+    }
+    batch.forEach(v=>elevs.push(Number(v)));
+  }
+  S.profileCache[profileKey]=[...elevs];
+  return elevs;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MATHS
+// ═══════════════════════════════════════════════════════════
+const R_EARTH=6371000;
+const toRad=d=>d*Math.PI/180;
+function haversine(la1,lo1,la2,lo2){
+  const dLa=toRad(la2-la1),dLo=toRad(lo2-lo1);
+  const a=Math.sin(dLa/2)**2+Math.cos(toRad(la1))*Math.cos(toRad(la2))*Math.sin(dLo/2)**2;
+  return 2*R_EARTH*Math.asin(Math.sqrt(a));
+}
+function bulge(d1,d2,K){return d1*d2/(2*K*R_EARTH);}
+function fresnel1(d1,d2,fMHz){const lam=3e8/(fMHz*1e6);return Math.sqrt(lam*d1*d2/(d1+d2));}
+
+// Bearing → destination point on a sphere (great-circle).
+function destPoint(lat, lng, bearingDeg, distM){
+  const R = R_EARTH, br = bearingDeg * Math.PI / 180;
+  const ph1 = lat * Math.PI / 180, la1 = lng * Math.PI / 180;
+  const d = distM / R;
+  const ph2 = Math.asin(Math.sin(ph1)*Math.cos(d) + Math.cos(ph1)*Math.sin(d)*Math.cos(br));
+  const la2 = la1 + Math.atan2(Math.sin(br)*Math.sin(d)*Math.cos(ph1), Math.cos(d) - Math.sin(ph1)*Math.sin(ph2));
+  return [ph2 * 180 / Math.PI, ((la2 * 180 / Math.PI + 540) % 360) - 180];
+}
+
+// Friis free-space range (metres). Returns null if the link budget is non-positive.
+function friisRangeMeters(txDbm, gainTx, gainRx, rxSensDbm, fMHz, marginDb){
+  const allowed = txDbm + gainTx + gainRx - rxSensDbm - (marginDb || 0);
+  if(!isFinite(allowed) || allowed <= 0) return null;
+  // FSPL_dB = 20·log10(d_km) + 20·log10(fMHz) + 32.44
+  const logKm = (allowed - 20 * Math.log10(fMHz) - 32.44) / 20;
+  const m = Math.pow(10, logKm) * 1000;
+  return Math.max(50, Math.min(m, 500000)); // clamp 50 m … 500 km
+}
+
+// ═══════════════════════════════════════════════════════════
+//  COVERAGE  —  per-node radial sweep, polygon rendering
+// ═══════════════════════════════════════════════════════════
+// Per-preset full settings bundle: link budget + coverage modelling defaults.
+// Meshtastic & ham VHF/UHF use Fresnel=40% + 6 dB margin: the Fresnel zone still
+// matters (partial obstruction adds diffraction loss), but these links tolerate
+// some encroachment — the few dB of loss at ~40% clearance is what the 6 dB
+// margin absorbs. Requiring the full 60% here would double-count that margin.
+// Wi-Fi presets use Fresnel=60% + 10 dB margin (sustained-link engineering).
+const PRESET_RF = {
+  '915':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50},
+  '868':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50},
+  '433':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50},
+  '146':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:50},
+  '438':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:30},
+  '2400': {tx:20, gain:2, rx:-85,  margin:10, fresnel:'0.6', maxKm:5},
+  '5800': {tx:20, gain:3, rx:-80,  margin:10, fresnel:'0.6', maxKm:5}
+};
+
+function globalRf(){
+  return {
+    freq: parseFloat(document.getElementById('inpFreq').value) || 915,
+    K: parseFloat(document.getElementById('inpK').value) || 1.333,
+    tx: parseFloat(document.getElementById('inpTx').value),
+    gain: parseFloat(document.getElementById('inpGain').value),
+    rx: parseFloat(document.getElementById('inpRx').value),
+    margin: parseFloat(document.getElementById('inpMargin').value) || 0,
+    rxAntH: parseFloat(document.getElementById('inpRxAntH').value) || 2,
+    rays: parseInt(document.getElementById('inpCovRays').value) || 36,
+    samples: parseInt(document.getElementById('inpCovSamples').value) || 50,
+    fresnelPct: parseFloat(document.getElementById('inpCovFresnel').value),
+    maxKm: Math.max(1, Math.min(100, parseFloat(document.getElementById('inpCovMaxKm').value) || 30))
+  };
+}
+
+function effectiveRf(node){
+  const g = globalRf();
+  if(node.rfOverride){
+    return {
+      tx:   node.txDbm   ?? g.tx,
+      gain: node.gainDbi ?? g.gain,
+      rx:   node.rxDbm   ?? g.rx
+    };
+  }
+  return {tx:g.tx, gain:g.gain, rx:g.rx};
+}
+
+function onGlobalRfChanged(){
+  // Any change to global TX/Gain/Sens/Margin invalidates non-overridden node coverage.
+  S.nodes.forEach(n => { if(!n.rfOverride) invalidateNodeCoverage(n, true); });
+  renderNodeList();
+  refreshSettingsSummary();
+}
+
+// Coverage-shape params (freq, K, Fresnel %, rays, samples, max range, RX ant)
+// affect every node regardless of override status.
+function onCoverageParamChanged(){
+  S.nodes.forEach(n => invalidateNodeCoverage(n, true));
+  renderNodeList();
+  refreshSettingsSummary();
+}
+
+function applyPresetRf(presetVal){
+  const rf = PRESET_RF[presetVal];
+  if(!rf) return;
+  document.getElementById('inpTx').value = rf.tx;
+  document.getElementById('inpGain').value = rf.gain;
+  document.getElementById('inpRx').value = rf.rx;
+  if(rf.margin   != null) document.getElementById('inpMargin').value     = rf.margin;
+  if(rf.fresnel  != null) document.getElementById('inpCovFresnel').value = rf.fresnel;
+  if(rf.maxKm    != null) document.getElementById('inpCovMaxKm').value   = rf.maxKm;
+  // Preset change touches freq + RF + coverage modelling — invalidate every node.
+  S.nodes.forEach(n => invalidateNodeCoverage(n, true));
+  renderNodeList();
+  refreshSettingsSummary();
+}
+
+function setNodeRf(id, field, val){
+  const node = S.nodes.find(n => n.id === id); if(!node) return;
+  node[field] = val;
+  invalidateNodeCoverage(node, true);
+  renderNodeList();
+}
+
+function toggleNodeRfOverride(id){
+  const node = S.nodes.find(n => n.id === id); if(!node) return;
+  node.rfOverride = !node.rfOverride;
+  if(node.rfOverride && node.txDbm == null){
+    const g = globalRf();
+    node.txDbm = g.tx; node.gainDbi = g.gain; node.rxDbm = g.rx;
+  }
+  invalidateNodeCoverage(node, true);
+  renderNodeList();
+}
+
+function invalidateNodeCoverage(node, redraw){
+  node.coverageDirty = true;
+  if(redraw && node.coverageLayer && node.coverageOn){
+    node.coverageLayer.setStyle({dashArray:'4 4', fillOpacity:0.05});
+  }
+  updateCovBtn(node);
+}
+
+function updateCovBtn(node){
+  const b = document.getElementById(`covBtn_${node.id}`);
+  if(!b) return;
+  b.classList.remove('dirty','ok');
+  if(!node.coverageComputed) b.textContent = 'COMPUTE';
+  else if(node.coverageDirty){ b.textContent = 'RECOMPUTE'; b.classList.add('dirty'); }
+  else { b.textContent = '✓ RECOMPUTE'; b.classList.add('ok'); }
+  const st = document.getElementById(`covStat_${node.id}`);
+  if(st) st.textContent = node.coverageComputed ? (node.coverageDirty ? 'stale' : 'cached') : '';
+}
+
+function setNodeCoverageOn(id, on){
+  const node = S.nodes.find(n => n.id === id); if(!node) return;
+  node.coverageOn = on;
+  if(node.coverageLayer){
+    if(on) node.coverageLayer.addTo(S.map);
+    else S.map.removeLayer(node.coverageLayer);
+  }
+  updateCovCount();
+}
+
+function setAllCoverage(on){
+  S.nodes.forEach(n => {
+    n.coverageOn = on;
+    if(n.coverageLayer){
+      if(on) n.coverageLayer.addTo(S.map);
+      else S.map.removeLayer(n.coverageLayer);
+    }
+    const cb = document.getElementById(`cov_${n.id}`); if(cb) cb.checked = on;
+  });
+  updateCovCount();
+}
+
+function updateCovCount(){
+  refreshSettingsSummary();
+}
+
+async function computeNodeCoverage(id){
+  if(S._coverageComputing){ toast('Coverage compute already running.', 2000); return; }
+  S._coverageComputing = true;
+  let node = null, btn = null;
+  try{
+    node = (typeof id === 'object') ? id : S.nodes.find(n => n.id === id);
+    if(!node) return;
+    btn = document.getElementById(`covBtn_${node.id}`);
+    if(btn){ btn.disabled = true; btn.textContent = '…'; }
+    await _computeNodeCoverageImpl(node);
+  }catch(err){
+    console.error('Coverage compute failed', err);
+    toast(`Coverage compute failed: ${err.message||err}`, 5000);
+  }finally{
+    S._coverageComputing = false;
+    if(btn) btn.disabled = false;
+    if(node) updateCovBtn(node);
+  }
+}
+
+async function _computeNodeCoverageImpl(node){
+  const g = globalRf();
+  const rf = effectiveRf(node);
+  const friisRange = friisRangeMeters(rf.tx, rf.gain, rf.gain, rf.rx, g.freq, g.margin);
+  if(!friisRange){ toast(`${node.name}: link budget too low — no coverage`, 3000); return; }
+  // Cap to user-configured search radius so we don't fetch tiles forever
+  const maxRange = Math.min(friisRange, g.maxKm * 1000);
+
+  // Make sure source elevation is available
+  if(node.elev == null){
+    toast(`${node.name}: fetching elevation…`);
+    try{ node.elev = await tileElevAt(node.lat, node.lng); updateElevDisplay(node); }
+    catch(e){ throw new Error(`elevation tile fetch failed (${e.message||e})`); }
+  }
+
+  toast(`${node.name}: computing rays (max ${(maxRange/1000).toFixed(0)} km, Friis would allow ${(friisRange/1000).toFixed(0)} km)…`);
+  const srcH = node.elev + node.antH;
+  const rays = g.rays, samples = g.samples;
+  const reach = [];   // [{az, dist, latlng}]
+
+  for(let r = 0; r < rays; r++){
+    const az = r * 360 / rays;
+    if(r % 6 === 0) toast(`${node.name}: ray ${r+1}/${rays}…`);
+    // Sample terrain along this ray (tiles are lazy-loaded; first hit may pull a few tiles)
+    const dists = [], elevs = [];
+    const points = [];
+    for(let s = 0; s <= samples; s++){
+      const d = maxRange * s / samples;
+      const [la, ln] = destPoint(node.lat, node.lng, az, d);
+      dists.push(d);
+      points.push([la, ln]);
+    }
+    // Fetch elevations for this ray in parallel — duplicate tile requests are de-duped by cache
+    let elArr;
+    try {
+      elArr = await Promise.all(points.map(([la, ln]) => tileElevAt(la, ln)));
+    } catch(e){
+      throw new Error(`terrain tile fetch failed at ray ${r}: ${e.message||e}`);
+    }
+    elArr.forEach(v => elevs.push(v));
+    // Find farthest sample that is still reachable from src
+    let reachIdx = 0;
+    for(let s = 1; s <= samples; s++){
+      const dS = dists[s];
+      const rxAlt = elevs[s] + g.rxAntH;
+      let clearAll = true;
+      for(let j = 1; j < s; j++){
+        const dJ = dists[j];
+        const t = dJ / dS;
+        const los = srcH + (rxAlt - srcH) * t;
+        const eff = elevs[j] + bulge(dJ, dS - dJ, g.K);
+        const fz = g.fresnelPct > 0 ? fresnel1(dJ, dS - dJ, g.freq) * g.fresnelPct : 0;
+        if(los - eff - fz <= 0){ clearAll = false; break; }
+      }
+      if(!clearAll) break;
+      reachIdx = s;
+    }
+    const reachDist = dists[reachIdx];
+    const [la, ln] = destPoint(node.lat, node.lng, az, Math.max(reachDist, 1));
+    reach.push({az, dist:reachDist, latlng:[la, ln]});
+  }
+
+  node.coverageRays = reach;
+  node.coverageMaxRange = maxRange;
+  node.coverageComputed = true;
+  node.coverageDirty = false;
+  hideToast();
+  renderCoveragePolygon(node);
+  updateCovBtn(node);
+}
+
+function renderCoveragePolygon(node){
+  if(node.coverageLayer){ S.map.removeLayer(node.coverageLayer); node.coverageLayer = null; }
+  if(!node.coverageRays || !node.coverageRays.length) return;
+  const idx = S.nodes.indexOf(node);
+  const col = nodeColor(idx);
+  const latlngs = node.coverageRays.map(r => r.latlng);
+  node.coverageLayer = L.polygon(latlngs, {
+    color: col, weight: 1.5, opacity: 0.85,
+    fillColor: col, fillOpacity: 0.18,
+    interactive: false
+  });
+  if(node.coverageOn) node.coverageLayer.addTo(S.map);
+  if(node.coverageLayer.bringToBack) node.coverageLayer.bringToBack();
+}
+
+async function computeAllCoverage(){
+  if(S._coverageComputing){ toast('Coverage compute already running.', 2000); return; }
+  if(!S.nodes.length){ toast('No nodes to compute.', 2000); return; }
+  for(let i = 0; i < S.nodes.length; i++){
+    toast(`Coverage ${i+1}/${S.nodes.length}: ${S.nodes[i].name}`);
+    await computeNodeCoverage(S.nodes[i]);
+    await sleep(20);
+  }
+  toast('Coverage compute complete.', 2500);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ANALYSIS  —  runs on every edge
+// ═══════════════════════════════════════════════════════════
+async function runAnalysis(){
+  if(S._analysing){toast('Analysis is already running. Please wait for it to finish.',2500);return;}
+  if(S.nodes.length<2||S.edges.length<1){toast('Add at least 2 nodes and 1 link.',3000);return;}
+  S._analysing=true;
+  const freq=parseFloat(document.getElementById('inpFreq').value)||900;
+  const K=parseFloat(document.getElementById('inpK').value)||1.333;
+  // Fresnel clearance threshold (preset-driven): 0.4 for forgiving links (Meshtastic/ham VHF/UHF),
+  // 0.6 for engineered links (Wi-Fi). Used to scale the marginal-vs-clear boundary.
+  const fresnelPct=Math.max(0,Math.min(1,parseFloat(document.getElementById('inpCovFresnel').value)||0));
+  const N=80;
+  const MAX_TERRAIN_ERRORS=2;
+  let terrainErrors=0;
+  const preferredView=S.activeView?{...S.activeView}:null;
+  toast('Analysing…');
+  try{
+    for(let ei=0;ei<S.edges.length;ei++){
+      const e=S.edges[ei];
+      const a=S.nodes.find(n=>n.id===e.aId),b=S.nodes.find(n=>n.id===e.bId);
+      if(!a||!b) continue;
+      toast(`Fetching terrain: ${a.name} ↔ ${b.name} (${ei+1}/${S.edges.length})`);
+      const dist=haversine(a.lat,a.lng,b.lat,b.lng);
+      let elevs;
+      try{
+        elevs=await fetchProfile(a.lat,a.lng,b.lat,b.lng,N);
+      }catch(err){
+        terrainErrors++;
+        e.result={dist,status:'error',error:err.message||'Terrain lookup failed'};
+        e.profile=null;
+        if(e.line) e.line.setStyle(edgeBaseStyle(e));
+        renderResults();
+        renderEdgesPanel();
+        if(terrainErrors>=MAX_TERRAIN_ERRORS){
+          toast(`Stopped after ${terrainErrors} terrain lookup failures. Wait a bit, then try Analyse again.`,6000);
+          break;
+        }
+        continue;
+      }
+      terrainErrors=0;
+      const dists=elevs.map((_,s)=>dist*s/N);
+
+      // Ground elevation from profile endpoints (same dataset = consistent datum)
+      const aGnd=elevs[0], bGnd=elevs[N];
+      a.elev=aGnd; updateElevDisplay(a);
+      b.elev=bGnd; updateElevDisplay(b);
+
+      // Antenna tip = ground + antenna height
+      const aH=aGnd+a.antH, bH=bGnd+b.antH;
+
+      let minLosClear=Infinity,minFzClear=Infinity,minScaledFzClear=Infinity;
+      for(let s=1;s<N;s++){
+        const d1=dists[s],d2=dist-dists[s],t=s/N;
+        const eff=elevs[s]+bulge(d1,d2,K);
+        const los=aH+(bH-aH)*t;
+        const clear=los-eff;
+        if(clear<minLosClear) minLosClear=clear;
+        const fz=fresnel1(d1,d2,freq);
+        if(clear-fz<minFzClear) minFzClear=clear-fz;
+        if(clear-fz*fresnelPct<minScaledFzClear) minScaledFzClear=clear-fz*fresnelPct;
+      }
+      const status=minLosClear<=0?'blocked':minScaledFzClear<=0?'marginal':'clear';
+      e.result={dist,minLosClear,minFzClear,minScaledFzClear,fresnelPct,status};
+      e.profile={elevs,dists,dist,aH,bH,a,b,freq,K,N};
+
+      // Colour the line on map
+      if(e.line) e.line.setStyle(edgeBaseStyle(e));
+    }
+
+    if(terrainErrors<MAX_TERRAIN_ERRORS) hideToast();
+    renderResults();
+    renderEdgesPanel();
+    renderChartTabs();
+
+    // Preserve the current chart selection when it is still valid.
+    const preferredPath=preferredView?.type==='path'?S.paths.find(p=>p.id===preferredView.id):null;
+    const preferredEdge=preferredView?.type==='edge'?S.edges.find(e=>e.id===preferredView.id&&e.profile):null;
+    const analysedPath=S.paths.find(pathHasAnalysedProfiles);
+    const analysedEdge=S.edges.find(e=>e.profile);
+    if(preferredPath&&pathHasAnalysedProfiles(preferredPath)){
+      S.activeView={type:'path',id:preferredPath.id};
+      showPathProfile(preferredPath.id);
+    } else if(preferredEdge){
+      S.activeView={type:'edge',id:preferredEdge.id};
+      showEdgeProfile(preferredEdge.id);
+    } else if(analysedPath){
+      S.activeView={type:'path',id:analysedPath.id};
+      showPathProfile(analysedPath.id);
+    } else if(analysedEdge){
+      S.activeView={type:'edge',id:analysedEdge.id};
+      showEdgeProfile(analysedEdge.id);
+    } else {
+      S.activeView=null;
+      clearCanvas();
+    }
+    renderPathsPanel();
+    highlightActiveMapView();
+  }finally{
+    S._analysing=false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RESULTS PANEL
+// ═══════════════════════════════════════════════════════════
+function renderResults(){
+  const el=document.getElementById('resultsArea');
+  const analysed=S.edges.filter(e=>e.result);
+  if(!analysed.length){el.innerHTML='<div class="no-data">Add nodes, links, then analyse.</div>';return;}
+  el.innerHTML='';
+  analysed.forEach(e=>{
+    const r=e.result;
+    const a=S.nodes.find(n=>n.id===e.aId),b=S.nodes.find(n=>n.id===e.bId);
+    const active=S.activeView?.type==='edge'&&S.activeView?.id===e.id;
+    const div=document.createElement('div');
+    div.className='hop-card'+(active?' active-hop':'');
+    if(r.status==='error'){
+      div.innerHTML=`<div class="hop-top">
+        <span class="hop-name">${escHtml(a.name)} ↔ ${escHtml(b.name)}</span>
+        <span class="badge blocked">! TERRAIN ERROR</span>
+      </div>
+      <div class="hop-stats">
+        <div class="hop-stat"><span class="lbl">Dist: </span><span class="val">${(r.dist/1000).toFixed(2)}km</span></div>
+        <div class="hop-stat"><span class="lbl">Error: </span><span class="val" style="color:var(--red)">${escHtml(r.error||'Unable to fetch elevation')}</span></div>
+      </div>`;
+    }else{
+      div.innerHTML=`<div class="hop-top">
+        <span class="hop-name">${escHtml(a.name)} ↔ ${escHtml(b.name)}</span>
+        <span class="badge ${r.status}">${r.status==='clear'?'✓ CLEAR':r.status==='marginal'?'⚠ MARGINAL':'✕ BLOCKED'}</span>
+      </div>
+      <div class="hop-stats">
+        <div class="hop-stat"><span class="lbl">Dist: </span><span class="val">${(r.dist/1000).toFixed(2)}km</span></div>
+        <div class="hop-stat"><span class="lbl">LOS: </span><span class="val" style="color:${r.minLosClear>0?'var(--green)':'var(--red)'}">${r.minLosClear.toFixed(1)}m</span></div>
+        <div class="hop-stat"><span class="lbl">Fz1: </span><span class="val" style="color:${r.minFzClear>0?'var(--green)':'var(--orange)'}">${r.minFzClear.toFixed(1)}m</span></div>
+      </div>`;
+    }
+    div.onclick=()=>{if(!e.profile) return; S.activeView={type:'edge',id:e.id};showEdgeProfile(e.id);renderResults();renderChartTabs();renderPathsPanel();};
+    el.appendChild(div);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CHART TABS
+// ═══════════════════════════════════════════════════════════
+function renderChartTabs(){
+  const tabs=document.getElementById('chartTabs');
+  tabs.innerHTML='';
+  // Path tabs first
+  S.paths.forEach(p=>{
+    const names=p.nodeIds.map(id=>S.nodes.find(n=>n.id===id)?.name||'?').join(' → ');
+    const btn=document.createElement('button');
+    btn.className='chart-tab'+(S.activeView?.type==='path'&&S.activeView?.id===p.id?' active':'');
+    btn.textContent=names; btn.title=names;
+    btn.onclick=()=>{
+      if(S.activeView?.type==='path'&&S.activeView.id===p.id){clearActiveView();return;}
+      S.activeView={type:'path',id:p.id};showPathProfile(p.id);renderChartTabs();renderPathsPanel();renderResults();
+    };
+    tabs.appendChild(btn);
+  });
+  // Individual edge tabs
+  S.edges.filter(e=>e.result&&e.profile).forEach(e=>{
+    const a=S.nodes.find(n=>n.id===e.aId),b=S.nodes.find(n=>n.id===e.bId);
+    const label=`${a?.name||'?'} ↔ ${b?.name||'?'}`;
+    const btn=document.createElement('button');
+    btn.className='chart-tab'+(S.activeView?.type==='edge'&&S.activeView?.id===e.id?' active':'');
+    btn.textContent=label; btn.title=label;
+    btn.onclick=()=>{
+      if(S.activeView?.type==='edge'&&S.activeView.id===e.id){clearActiveView();return;}
+      S.activeView={type:'edge',id:e.id};showEdgeProfile(e.id);renderChartTabs();renderResults();renderPathsPanel();
+    };
+    tabs.appendChild(btn);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PROFILE DRAWING — SINGLE EDGE
+// ═══════════════════════════════════════════════════════════
+function showEdgeProfile(edgeId){
+  const e=S.edges.find(x=>x.id===edgeId);
+  if(!e?.profile) return;
+  S.redrawProfile=()=>showEdgeProfile(edgeId);
+  const{elevs,dists,dist,aH,bH,a,b,freq,K,N}=e.profile;
+  const r=e.result;
+  const title=`${a.name} ↔ ${b.name}  |  ${(dist/1000).toFixed(2)} km  |  GND+ANT: ${aH.toFixed(1)}m → ${bH.toFixed(1)}m`;
+  document.getElementById('chartTitle').textContent=title;
+  drawProfile({elevs,dists,dist,aH,bH,freq,K,N,result:r,labels:[a.name,b.name]});
+  highlightActiveMapView();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PROFILE DRAWING — PATH (multi-hop)
+// ═══════════════════════════════════════════════════════════
+function showPathProfile(pathId){
+  const path=S.paths.find(p=>p.id===pathId);
+  if(!path) return;
+  S.redrawProfile=()=>showPathProfile(pathId);
+  highlightActiveMapView();
+
+  // Collect edges in order — each consecutive pair of nodeIds
+  const hops=[];
+  for(let i=0;i<path.nodeIds.length-1;i++){
+    const aId=path.nodeIds[i],bId=path.nodeIds[i+1];
+    const e=S.edges.find(e2=>(e2.aId===aId&&e2.bId===bId)||(e2.aId===bId&&e2.bId===aId));
+    if(!e?.profile){
+      S.profileHover=null;
+      hideProfileHoverMarker();
+      toast(`Link ${S.nodes.find(n=>n.id===aId)?.name} ↔ ${S.nodes.find(n=>n.id===bId)?.name} not yet analysed. Run Analyse first.`,3000);
+      return;
+    }
+    // Flip if needed so direction matches path order
+    const flip=e.aId===bId;
+    hops.push({e,flip});
+  }
+
+  const names=path.nodeIds.map(id=>S.nodes.find(n=>n.id===id)?.name||'?');
+  const totalDist=hops.reduce((s,h)=>s+h.e.profile.dist,0);
+  document.getElementById('chartTitle').textContent=`${names.join(' → ')}  |  Total ${(totalDist/1000).toFixed(2)} km`;
+
+  drawPathProfile(hops,names,path);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CANVAS DRAWING ENGINE
+// ═══════════════════════════════════════════════════════════
+function setupCanvas(){
+  const canvas=document.getElementById('profileCanvas');
+  const panel=canvas.parentElement;
+  const headerH=panel.querySelector('.chart-header').offsetHeight;
+  const availH=panel.offsetHeight-headerH-2;
+  canvas.style.height=availH+'px';
+  const dpr=window.devicePixelRatio||1;
+  canvas.width=canvas.offsetWidth*dpr;
+  canvas.height=availH*dpr;
+  const ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+  return{ctx,W:canvas.offsetWidth,H:availH};
+}
+
+function drawProfile({elevs,dists,dist,aH,bH,freq,K,N,result,labels}){
+  const{ctx,W,H}=setupCanvas();
+  initProfileHover();
+  const PAD={l:46,r:12,t:14,b:22};
+  const pw=W-PAD.l-PAD.r,ph=H-PAD.t-PAD.b;
+  const activeEdge=S.activeView?.type==='edge'?S.edges.find(e=>e.id===S.activeView.id):null;
+  if(activeEdge?.profile){
+    S.profileHover={PAD,totalDist:dist,segments:[{start:0,dist,a:activeEdge.profile.a,b:activeEdge.profile.b}]};
+  }
+
+  const eff=elevs.map((e,s)=>s===0||s===N?e:e+bulge(dists[s],dist-dists[s],K));
+  const losH=s=>aH+(bH-aH)*(s/N);
+  const fz1=s=>(s===0||s===N)?0:fresnel1(dists[s],dist-dists[s],freq);
+  const allVals=[...eff,aH,bH];
+  for(let s=1;s<N;s++) allVals.push(losH(s)+fz1(s));
+  const minV=Math.min(...allVals)-5,maxV=Math.max(...allVals)+15,rng=maxV-minV||1;
+  const xp=s=>PAD.l+(s/N)*pw, yp=v=>PAD.t+ph-((v-minV)/rng)*ph;
+
+  ctx.fillStyle='#0b0f17';ctx.fillRect(0,0,W,H);
+  drawGrid(ctx,PAD,pw,ph,W,H,minV,rng);
+  drawFresnel(ctx,N,xp,yp,losH,fz1,'#00c8f0');
+  drawTerrain(ctx,N,xp,yp,eff,H);
+  drawBlockedAreas(ctx,N,xp,yp,eff,losH);
+  const losCol=result?(result.status==='clear'?'#2ecc71':result.status==='marginal'?'#f39c12':'#e74c3c'):'#00c8f0';
+  drawLosLine(ctx,xp,yp,0,N,aH,bH,losCol);
+  drawEndpoints(ctx,xp,yp,0,N,aH,bH,losCol,labels[0],labels[1]);
+  drawXAxis(ctx,PAD,pw,H,dist);
+}
+
+function drawPathProfile(hops,names){
+  const{ctx,W,H}=setupCanvas();
+  initProfileHover();
+  const PAD={l:46,r:12,t:14,b:22};
+  const pw=W-PAD.l-PAD.r,ph=H-PAD.t-PAD.b;
+
+  // Stitch samples
+  const totalDist=hops.reduce((s,h)=>s+h.e.profile.dist,0);
+  const samples=[];
+  const hoverSegments=[];
+  let cumDist=0;
+  hops.forEach((h,hi)=>{
+    const{elevs,dists,dist,aH,bH,K,N}=h.e.profile;
+    hoverSegments.push({start:cumDist,dist,a:h.flip?h.e.profile.b:h.e.profile.a,b:h.flip?h.e.profile.a:h.e.profile.b});
+    const eArr=h.flip?[...elevs].reverse():elevs;
+    const dArr=h.flip?dists.map(d=>dist-d).reverse():dists;
+    const hAstart=h.flip?bH:aH, hAend=h.flip?aH:bH;
+    for(let s=0;s<=N;s++){
+      if(hi>0&&s===0) continue;
+      const d1=dArr[s],d2=dist-d1;
+      const eff=(s===0||s===N)?eArr[s]:eArr[s]+bulge(Math.abs(d1),Math.abs(d2),K);
+      const los=hAstart+(hAend-hAstart)*(s/N);
+      samples.push({cumDist:cumDist+dArr[s],elev:eArr[s],eff,los,hopIdx:hi});
+    }
+    cumDist+=dist;
+  });
+  S.profileHover={PAD,totalDist,segments:hoverSegments};
+
+  const allVals=samples.flatMap(s=>[s.eff,s.los]);
+  const minV=Math.min(...allVals)-5,maxV=Math.max(...allVals)+15,rng=maxV-minV||1;
+  const xp=d=>PAD.l+(d/totalDist)*pw, yp=v=>PAD.t+ph-((v-minV)/rng)*ph;
+
+  ctx.fillStyle='#0b0f17';ctx.fillRect(0,0,W,H);
+  drawGrid(ctx,PAD,pw,ph,W,H,minV,rng);
+
+  // Fresnel per hop
+  hops.forEach((h,hi)=>{
+    const{dists,dist,aH,bH,freq,K,N}=h.e.profile;
+    const hAstart=h.flip?bH:aH, hAend=h.flip?aH:bH;
+    const startCum=hops.slice(0,hi).reduce((s,x)=>s+x.e.profile.dist,0);
+    ctx.beginPath();
+    for(let s=0;s<=N;s++){
+      const los=hAstart+(hAend-hAstart)*(s/N);
+      const fz=(s===0||s===N)?0:fresnel1(dists[s],dist-dists[s],freq);
+      const x=xp(startCum+dists[s]),y=yp(los+fz);
+      s===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    for(let s=N;s>=0;s--){
+      const los=hAstart+(hAend-hAstart)*(s/N);
+      const fz=(s===0||s===N)?0:fresnel1(dists[s],dist-dists[s],freq);
+      ctx.lineTo(xp(startCum+dists[s]),yp(los-fz));
+    }
+    ctx.closePath();
+    ctx.fillStyle=hexAlpha(COLORS[hi%COLORS.length],.07);ctx.fill();
+    ctx.strokeStyle=hexAlpha(COLORS[hi%COLORS.length],.2);ctx.lineWidth=1;ctx.stroke();
+  });
+
+  // Terrain
+  ctx.beginPath();
+  ctx.moveTo(xp(samples[0].cumDist),yp(samples[0].eff));
+  samples.forEach(s=>ctx.lineTo(xp(s.cumDist),yp(s.eff)));
+  ctx.lineTo(xp(samples[samples.length-1].cumDist),H);
+  ctx.lineTo(xp(samples[0].cumDist),H);ctx.closePath();
+  const tGrad=ctx.createLinearGradient(0,PAD.t,0,H);
+  tGrad.addColorStop(0,'rgba(80,110,140,.65)');tGrad.addColorStop(1,'rgba(20,35,55,.85)');
+  ctx.fillStyle=tGrad;ctx.fill();
+  ctx.beginPath();ctx.moveTo(xp(samples[0].cumDist),yp(samples[0].eff));
+  samples.forEach(s=>ctx.lineTo(xp(s.cumDist),yp(s.eff)));
+  ctx.strokeStyle='rgba(120,160,190,.8)';ctx.lineWidth=1.5;ctx.stroke();
+
+  // Blocked highlights
+  samples.forEach((s,i)=>{
+    if(i===0) return;
+    const prev=samples[i-1];
+    if(s.los<s.eff){
+      ctx.fillStyle='rgba(231,76,60,.22)';
+      const x0=xp(prev.cumDist),x1=xp(s.cumDist);
+      const tt=Math.min(yp(prev.eff),yp(s.eff)),lb=Math.max(yp(prev.los),yp(s.los));
+      if(tt<lb) ctx.fillRect(x0,tt,x1-x0,lb-tt);
+    }
+  });
+
+  // LOS lines per hop
+  let cum=0;
+  hops.forEach((h,hi)=>{
+    const{dist,aH,bH,N}=h.e.profile;
+    const hAstart=h.flip?bH:aH,hAend=h.flip?aH:bH;
+    const r=h.e.result;
+    const col=r?(r.status==='clear'?'#2ecc71':r.status==='marginal'?'#f39c12':'#e74c3c'):'#00c8f0';
+    ctx.beginPath();ctx.moveTo(xp(cum),yp(hAstart));ctx.lineTo(xp(cum+dist),yp(hAend));
+    ctx.strokeStyle=col;ctx.lineWidth=2;ctx.setLineDash([]);ctx.stroke();
+    cum+=dist;
+  });
+
+  // Waypoint labels + dividers
+  let cumW=0;
+  names.forEach((name,wi)=>{
+    const hopIdx=Math.min(wi,hops.length-1);
+    const h=hops[hopIdx];
+    const prevHop=wi>0?hops[wi-1]:null;
+    const wpH=wi===0
+      ? (h.flip?h.e.profile.bH:h.e.profile.aH)
+      : wi===names.length-1
+        ? (hops[hops.length-1].flip?hops[hops.length-1].e.profile.aH:hops[hops.length-1].e.profile.bH)
+        : (prevHop.flip?prevHop.e.profile.aH:prevHop.e.profile.bH);
+    if(wi>0&&wi<names.length-1){
+      ctx.strokeStyle='rgba(200,218,234,.15)';ctx.lineWidth=1;ctx.setLineDash([4,3]);
+      ctx.beginPath();ctx.moveTo(xp(cumW),PAD.t);ctx.lineTo(xp(cumW),H-PAD.b);ctx.stroke();ctx.setLineDash([]);
+    }
+    ctx.beginPath();ctx.arc(xp(cumW),yp(wpH),4,0,Math.PI*2);
+    ctx.fillStyle=COLORS[Math.min(wi,hops.length-1)%COLORS.length];ctx.fill();
+    ctx.fillStyle='#e0eaf4';ctx.font='bold 9px "Barlow Condensed"';
+    ctx.textAlign=wi===0?'left':wi===names.length-1?'right':'center';
+    ctx.fillText(name,xp(cumW)+(wi===0?5:wi===names.length-1?-5:0),PAD.t-2);
+    if(wi<names.length-1) cumW+=hops[wi].e.profile.dist;
+  });
+
+  drawXAxis(ctx,PAD,pw,H,totalDist);
+}
+
+// ── Drawing helpers ──────────────────────────────────────
+function drawGrid(ctx,PAD,pw,ph,W,H,minV,rng){
+  ctx.strokeStyle='rgba(0,200,240,.06)';ctx.lineWidth=1;
+  for(let g=0;g<=5;g++){
+    const v=minV+(rng/5)*g,y=PAD.t+ph-((v-minV)/rng)*ph;
+    ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+pw,y);ctx.stroke();
+    ctx.fillStyle='rgba(74,98,120,.9)';ctx.font='9px "Share Tech Mono"';ctx.textAlign='right';
+    ctx.fillText(v.toFixed(0)+'m',PAD.l-4,y+3);
+  }
+}
+function drawFresnel(ctx,N,xp,yp,losH,fz1,color){
+  ctx.beginPath();
+  for(let s=0;s<=N;s++) s===0?ctx.moveTo(xp(s),yp(losH(s)+fz1(s))):ctx.lineTo(xp(s),yp(losH(s)+fz1(s)));
+  for(let s=N;s>=0;s--) ctx.lineTo(xp(s),yp(losH(s)-fz1(s)));
+  ctx.closePath();ctx.fillStyle=hexAlpha(color,.07);ctx.fill();
+  ctx.strokeStyle=hexAlpha(color,.2);ctx.lineWidth=1;ctx.stroke();
+}
+function drawTerrain(ctx,N,xp,yp,eff,H){
+  ctx.beginPath();ctx.moveTo(xp(0),yp(eff[0]));
+  for(let s=1;s<=N;s++) ctx.lineTo(xp(s),yp(eff[s]));
+  ctx.lineTo(xp(N),H);ctx.lineTo(xp(0),H);ctx.closePath();
+  const tGrad=ctx.createLinearGradient(0,0,0,H);
+  tGrad.addColorStop(0,'rgba(80,110,140,.65)');tGrad.addColorStop(1,'rgba(20,35,55,.85)');
+  ctx.fillStyle=tGrad;ctx.fill();
+  ctx.beginPath();ctx.moveTo(xp(0),yp(eff[0]));
+  for(let s=1;s<=N;s++) ctx.lineTo(xp(s),yp(eff[s]));
+  ctx.strokeStyle='rgba(120,160,190,.8)';ctx.lineWidth=1.5;ctx.stroke();
+}
+function drawBlockedAreas(ctx,N,xp,yp,eff,losH){
+  for(let s=1;s<=N;s++){
+    if(losH(s)<eff[s]){
+      ctx.fillStyle='rgba(231,76,60,.22)';
+      const x0=xp(s-1),x1=xp(s);
+      const tt=Math.min(yp(eff[s-1]),yp(eff[s])),lb=Math.max(yp(losH(s-1)),yp(losH(s)));
+      if(tt<lb) ctx.fillRect(x0,tt,x1-x0,lb-tt);
+    }
+  }
+}
+function drawLosLine(ctx,xp,yp,s0,sN,aH,bH,color){
+  ctx.beginPath();ctx.moveTo(xp(s0),yp(aH));ctx.lineTo(xp(sN),yp(bH));
+  ctx.strokeStyle=color;ctx.lineWidth=2;ctx.setLineDash([]);ctx.stroke();
+}
+function drawEndpoints(ctx,xp,yp,s0,sN,aH,bH,color,nameA,nameB){
+  [[s0,aH,nameA],[sN,bH,nameB]].forEach(([s,h,nm])=>{
+    ctx.beginPath();ctx.arc(xp(s),yp(h),4,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
+    ctx.fillStyle='#e0eaf4';ctx.font='bold 9px "Barlow Condensed"';
+    ctx.textAlign=s===s0?'left':'right';
+    ctx.fillText(nm,xp(s)+(s===s0?6:-6),yp(h)-7);
+  });
+}
+function drawXAxis(ctx,PAD,pw,H,totalDist){
+  ctx.fillStyle='rgba(74,98,120,.9)';ctx.font='9px "Share Tech Mono"';
+  [0,.25,.5,.75,1].forEach(t=>{ctx.textAlign='center';ctx.fillText(((totalDist/1000)*t).toFixed(1)+'km',PAD.l+pw*t,H-5);});
+}
+function hexAlpha(hex,alpha){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return `rgba(${r},${g},${b},${alpha})`;}
+
+function interpLatLng(a,b,t){
+  return [a.lat+(b.lat-a.lat)*t,a.lng+(b.lng-a.lng)*t];
+}
+
+function ensureProfileHoverMarker(){
+  if(S.hoverMarker) return S.hoverMarker;
+  S.hoverMarker=L.circleMarker([0,0],{
+    radius:10,
+    color:'#ffffff',
+    weight:3,
+    fillColor:'#ff2bd6',
+    fillOpacity:.9,
+    opacity:1,
+    pane:'profileHoverPane'
+  });
+  S.hoverMarker.bindTooltip('Profile cursor',{direction:'top',offset:[0,-10]});
+  return S.hoverMarker;
+}
+
+function hideProfileHoverMarker(){
+  if(S.hoverMarker&&S.map.hasLayer(S.hoverMarker)) S.map.removeLayer(S.hoverMarker);
+}
+
+function handleProfileHover(ev){
+  if(!S.profileHover||!S.map) return;
+  const canvas=document.getElementById('profileCanvas');
+  const rect=canvas.getBoundingClientRect();
+  const x=ev.clientX-rect.left;
+  const {PAD,totalDist,segments}=S.profileHover;
+  const pw=canvas.offsetWidth-PAD.l-PAD.r;
+  if(x<PAD.l||x>PAD.l+pw){hideProfileHoverMarker();return;}
+  const dist=((x-PAD.l)/pw)*totalDist;
+  const seg=segments.find(s=>dist>=s.start&&dist<=s.start+s.dist)||segments[segments.length-1];
+  if(!seg) return;
+  const t=Math.max(0,Math.min(1,(dist-seg.start)/seg.dist));
+  const marker=ensureProfileHoverMarker();
+  marker.setLatLng(interpLatLng(seg.a,seg.b,t));
+  if(!S.map.hasLayer(marker)) marker.addTo(S.map);
+  marker.setStyle({opacity:1,fillOpacity:.9});
+  marker.bringToFront();
+}
+
+function drawProfileCursorAtDistance(dist){
+  if(!S.profileHover||!S.redrawProfile) return;
+  S.redrawProfile();
+  const canvas=document.getElementById('profileCanvas');
+  const ctx=canvas.getContext('2d');
+  const {PAD,totalDist}=S.profileHover;
+  const pw=canvas.offsetWidth-PAD.l-PAD.r;
+  const x=PAD.l+(Math.max(0,Math.min(totalDist,dist))/totalDist)*pw;
+  ctx.save();
+  ctx.strokeStyle='#ff2bd6';
+  ctx.lineWidth=2;
+  ctx.setLineDash([5,3]);
+  ctx.beginPath();
+  ctx.moveTo(x,PAD.t);
+  ctx.lineTo(x,canvas.offsetHeight-PAD.b);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='#ff2bd6';
+  ctx.beginPath();
+  ctx.arc(x,PAD.t+6,4,0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function projectPointToSegment(latlng,a,b){
+  const p=S.map.latLngToLayerPoint(latlng);
+  const p0=S.map.latLngToLayerPoint([a.lat,a.lng]);
+  const p1=S.map.latLngToLayerPoint([b.lat,b.lng]);
+  const vx=p1.x-p0.x,vy=p1.y-p0.y;
+  const len2=vx*vx+vy*vy||1;
+  return Math.max(0,Math.min(1,((p.x-p0.x)*vx+(p.y-p0.y)*vy)/len2));
+}
+
+function profileDistanceForEdgeHover(edge,latlng){
+  if(!S.profileHover) return null;
+  if(S.activeView?.type==='edge'&&S.activeView.id===edge.id){
+    const t=projectPointToSegment(latlng,edge.profile.a,edge.profile.b);
+    return t*edge.profile.dist;
+  }
+  if(S.activeView?.type==='path'){
+    const seg=S.profileHover.segments.find(s=>
+      (s.a.id===edge.aId&&s.b.id===edge.bId)||(s.a.id===edge.bId&&s.b.id===edge.aId)
+    );
+    if(!seg) return null;
+    const t=projectPointToSegment(latlng,seg.a,seg.b);
+    return seg.start+t*seg.dist;
+  }
+  return null;
+}
+
+function handleMapLineHover(edge,latlng){
+  if(!edge.profile) return;
+  const dist=profileDistanceForEdgeHover(edge,latlng);
+  if(dist===null) return;
+  drawProfileCursorAtDistance(dist);
+}
+
+function hideProfileCursor(){
+  if(S.redrawProfile) S.redrawProfile();
+}
+
+function initProfileHover(){
+  const canvas=document.getElementById('profileCanvas');
+  if(canvas.dataset.hoverBound==='1') return;
+  canvas.dataset.hoverBound='1';
+  canvas.addEventListener('mousemove',handleProfileHover);
+  canvas.addEventListener('mouseleave',hideProfileHoverMarker);
+}
+
+function clearCanvas(){
+  const canvas=document.getElementById('profileCanvas');
+  const ctx=canvas.getContext('2d');
+  canvas.width=canvas.offsetWidth;canvas.height=canvas.offsetHeight;
+  ctx.fillStyle='#0b0f17';ctx.fillRect(0,0,canvas.width,canvas.height);
+  document.getElementById('chartTitle').textContent='TERRAIN PROFILE';
+  document.getElementById('chartTabs').innerHTML='';
+  S.profileHover=null;
+  S.redrawProfile=null;
+  hideProfileHoverMarker();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SHARE via URL hash
+// ═══════════════════════════════════════════════════════════
+function openShare(){
+  // Compact v3 schema: short keys + array-indexed refs, then LZ-string compress.
+  // Backwards-compatible with v2 — only adds RF + coverage fields.
+  const idx=new Map(S.nodes.map((n,i)=>[n.id,i]));
+  const data={
+    v:3,
+    f:+document.getElementById('inpFreq').value,
+    k:document.getElementById('inpK').value,
+    tx:+document.getElementById('inpTx').value,
+    gn:+document.getElementById('inpGain').value,
+    rx:+document.getElementById('inpRx').value,
+    mg:+document.getElementById('inpMargin').value,
+    ra:+document.getElementById('inpRxAntH').value,
+    cr:+document.getElementById('inpCovRays').value,
+    cs:+document.getElementById('inpCovSamples').value,
+    cf:+document.getElementById('inpCovFresnel').value,
+    cm:+document.getElementById('inpCovMaxKm').value,
+    // node: [lat, lng, antH, name, rfOverride?, tx?, gain?, rx?, coverageOn?]
+    n:S.nodes.map(n=>{
+      const base=[+n.lat.toFixed(6),+n.lng.toFixed(6),n.antH,n.name];
+      if(n.rfOverride||n.coverageOn){
+        base.push(n.rfOverride?1:0, n.txDbm??null, n.gainDbi??null, n.rxDbm??null, n.coverageOn?1:0);
+      }
+      return base;
+    }),
+    e:S.edges.map(e=>[idx.get(e.aId),idx.get(e.bId)]),
+    p:S.paths.map(p=>[p.name,...p.nodeIds.map(id=>idx.get(id))])
+  };
+  const hash='v3:'+LZString.compressToEncodedURIComponent(JSON.stringify(data));
+  const url=window.location.href.split('#')[0]+'#'+hash;
+  document.getElementById('shareUrl').textContent=url;
+  document.getElementById('shareModal').classList.add('open');
+}
+function closeShare(){document.getElementById('shareModal').classList.remove('open');}
+function openSettings(){ refreshSettingsSummary(); document.getElementById('settingsModal').classList.add('open'); }
+function closeSettings(){ document.getElementById('settingsModal').classList.remove('open'); refreshSettingsSummary(); }
+function refreshSettingsSummary(){
+  const f = document.getElementById('inpFreq')?.value || '915';
+  const tx = document.getElementById('inpTx')?.value || '?';
+  const gn = document.getElementById('inpGain')?.value || '?';
+  const cov = S.nodes.filter(n => n.coverageOn).length;
+  const total = S.nodes.length;
+  const band = document.getElementById('ssBand'); if(band) band.textContent = `${f} MHz`;
+  const bud = document.getElementById('ssBudget'); if(bud) bud.textContent = `${tx} dBm / ${(+gn>=0?'+':'')}${gn} dBi`;
+  const cc = document.getElementById('ssCovCount'); if(cc) cc.textContent = `${cov}/${total}`;
+  const cv = document.getElementById('covCount'); if(cv) cv.textContent = cov;
+}
+function copyShareUrl(){
+  const url=document.getElementById('shareUrl').textContent;
+  navigator.clipboard.writeText(url).then(()=>{toast('Link copied!',2000);closeShare();}).catch(()=>{toast('Copy failed — select & copy manually.',3000);});
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HELP
+// ═══════════════════════════════════════════════════════════
+function openHelp(){document.getElementById('helpModal').classList.add('open');}
+function closeHelp(){
+  document.getElementById('helpModal').classList.remove('open');
+  try{localStorage.setItem('rfLosHelpSeen','1');}catch{}
+}
+function maybeShowHelp(){
+  try{if(!localStorage.getItem('rfLosHelpSeen')&&!window.location.hash) openHelp();}catch{}
+}
+
+// ═══════════════════════════════════════════════════════════
+//  FREQUENCY PRESETS
+// ═══════════════════════════════════════════════════════════
+function applyPreset(){
+  const v=document.getElementById('inpPreset').value;
+  if(v){
+    document.getElementById('inpFreq').value=v;
+    applyPresetRf(v);
+  }
+}
+function syncPresetFromFreq(){
+  const f=document.getElementById('inpFreq').value;
+  const sel=document.getElementById('inpPreset');
+  sel.value=[...sel.options].some(o=>o.value===f)?f:'';
+}
+
+function loadFromHash(){
+  const hash=window.location.hash.slice(1);
+  if(!hash) return;
+  try{
+    let data;
+    const isV3 = hash.startsWith('v3:');
+    const isV2 = hash.startsWith('v2:');
+    if(isV3 || isV2){
+      const raw=JSON.parse(LZString.decompressFromEncodedURIComponent(hash.slice(3)));
+      let id=1;
+      const nIds=(raw.n||[]).map(()=>id++);
+      const eIds=(raw.e||[]).map(()=>id++);
+      const pIds=(raw.p||[]).map(()=>id++);
+      data={
+        freq:raw.f,
+        k:raw.k,
+        tx:raw.tx, gain:raw.gn, rx:raw.rx, margin:raw.mg,
+        rxAntH:raw.ra, covRays:raw.cr, covSamples:raw.cs, covFresnel:raw.cf, covMaxKm:raw.cm,
+        nodes:(raw.n||[]).map((nd,i)=>({
+          id:nIds[i], lat:nd[0], lng:nd[1], antH:nd[2], name:nd[3],
+          rfOverride: !!nd[4], txDbm: nd[5]??null, gainDbi: nd[6]??null, rxDbm: nd[7]??null,
+          coverageOn: !!nd[8]
+        })),
+        edges:(raw.e||[]).map((ed,i)=>({id:eIds[i],aId:nIds[ed[0]],bId:nIds[ed[1]]})),
+        paths:(raw.p||[]).map((p,i)=>({id:pIds[i],name:p[0],nodeIds:p.slice(1).map(j=>nIds[j])})),
+        nextId:id
+      };
+    }else{
+      // Legacy v1 format
+      data=JSON.parse(decodeURIComponent(atob(hash)));
+    }
+    document.getElementById('inpFreq').value=data.freq||915;
+    document.getElementById('inpK').value=data.k||'1.333';
+    if(data.tx!=null) document.getElementById('inpTx').value=data.tx;
+    if(data.gain!=null) document.getElementById('inpGain').value=data.gain;
+    if(data.rx!=null) document.getElementById('inpRx').value=data.rx;
+    if(data.margin!=null) document.getElementById('inpMargin').value=data.margin;
+    if(data.rxAntH!=null) document.getElementById('inpRxAntH').value=data.rxAntH;
+    if(data.covRays!=null) document.getElementById('inpCovRays').value=data.covRays;
+    if(data.covSamples!=null) document.getElementById('inpCovSamples').value=data.covSamples;
+    if(data.covFresnel!=null) document.getElementById('inpCovFresnel').value=data.covFresnel;
+    if(data.covMaxKm!=null) document.getElementById('inpCovMaxKm').value=data.covMaxKm;
+    S.nextId=data.nextId||1;
+    // Restore nodes
+    data.nodes.forEach(nd=>{
+      const node={...nd, elev:null, marker:null,
+        coverageLayer:null, coverageDirty:true, coverageComputed:false};
+      S.nodes.push(node);
+      node.marker=makeMarker(node);
+      fetchElev(node);
+    });
+    refreshAllIcons();
+    // Restore edges (lines only, no profile/result yet)
+    data.edges.forEach(ed=>{
+      const a=S.nodes.find(n=>n.id===ed.aId),b=S.nodes.find(n=>n.id===ed.bId);
+      if(!a||!b) return;
+      const edge={id:ed.id,aId:ed.aId,bId:ed.bId,line:null,hitLine:null,result:null,profile:null};
+      edge.line=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#4a6278',weight:2,opacity:.7,dashArray:'5 4'}).addTo(S.map);
+      edge.hitLine=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#ffffff',weight:24,opacity:0,interactive:true}).addTo(S.map);
+      attachEdgeHandlers(edge);
+      S.edges.push(edge);
+    });
+    // Restore paths
+    data.paths.forEach(p=>S.paths.push({...p}));
+    renderNodeList(); renderEdgesPanel(); renderPathsPanel();
+    document.getElementById('wpCount').textContent=S.nodes.length;
+    document.getElementById('edgeCount').textContent=S.edges.length;
+    document.getElementById('pathCount').textContent=S.paths.length;
+    if(S.nodes.length>0){
+      document.getElementById('mapHint').style.display='none';
+      const lats=S.nodes.map(n=>n.lat),lngs=S.nodes.map(n=>n.lng);
+      const bounds=L.latLngBounds(S.nodes.map(n=>[n.lat,n.lng]));
+      S.map.fitBounds(bounds,{padding:[40,40]});
+    }
+    toast('Map loaded from shared link. Click Analyse to run.',4000);
+  }catch(err){console.warn('Failed to load from hash',err);}
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TOAST
+// ═══════════════════════════════════════════════════════════
+let _toastTimer;
+function toast(msg,duration){
+  const el=document.getElementById('toast');
+  if(!msg){el.style.display='none';return;}
+  el.style.display='block';
+  el.textContent='';
+  const spinner=document.createElement('span');
+  spinner.style.cssText='display:inline-block;width:8px;height:8px;border:2px solid #4a6278;border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;margin-right:8px;vertical-align:middle';
+  el.appendChild(spinner);
+  el.appendChild(document.createTextNode(msg));
+  if(_toastTimer) clearTimeout(_toastTimer);
+  if(duration) _toastTimer=setTimeout(()=>el.style.display='none',duration);
+}
+function hideToast(){document.getElementById('toast').style.display='none';}
+
+// ═══════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════
+function initCollapsibles(){
+  let state={};
+  try{ state=JSON.parse(localStorage.getItem('rfLosSidebar')||'{}'); }catch{}
+  document.querySelectorAll('.sb-toggle').forEach(toggle=>{
+    const key=toggle.dataset.sb;
+    const apply=collapsed=>{
+      toggle.classList.toggle('collapsed',collapsed);
+      document.querySelectorAll(`[data-sb-body="${key}"]`).forEach(el=>{
+        if(collapsed) el.setAttribute('hidden','');
+        else el.removeAttribute('hidden');
+      });
+    };
+    apply(!!state[key]);
+    toggle.addEventListener('click',()=>{
+      const next=!toggle.classList.contains('collapsed');
+      state[key]=next;
+      try{ localStorage.setItem('rfLosSidebar',JSON.stringify(state)); }catch{}
+      apply(next);
+    });
+  });
+}
+
+window.addEventListener('load',()=>{
+  initMap();
+  initProfileHover();
+  initCollapsibles();
+  renderNodeList();
+  setTimeout(()=>S.map.invalidateSize(),200);
+  setTimeout(()=>{S.map.invalidateSize();loadFromHash();syncPresetFromFreq();refreshSettingsSummary();maybeShowHelp();},600);
+});
+window.addEventListener('resize',()=>{
+  if(S.map) S.map.invalidateSize();
+  if(S.activeView){
+    if(S.activeView.type==='edge') showEdgeProfile(S.activeView.id);
+    else if(S.activeView.type==='path') showPathProfile(S.activeView.id);
+  }
+});
+</script>
+</body>
+</html>
