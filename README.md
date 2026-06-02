@@ -29,7 +29,7 @@ This repo is intended to be published with GitHub Pages.
 
 Expected URL:
 
-`https://birdman4512.github.io/rf-los-planner/`
+`https://dea.nbird.com.au/rf-los-planner/`
 
 Enable Pages in the repository settings using the `main` branch and the repository
 root as the source.
