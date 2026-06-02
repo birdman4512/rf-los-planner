@@ -123,7 +123,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .badge.ok{color:var(--green);border-color:var(--green);background:rgba(46,204,113,.1)}
 .badge.marginal{color:var(--orange);border-color:var(--orange);background:rgba(243,156,18,.1)}
 .badge.blocked{color:var(--red);border-color:var(--red);background:rgba(231,76,60,.1)}
-.hop-stats{display:flex;gap:14px}
+.hop-stats{display:flex;flex-wrap:wrap;gap:4px 14px}
 .hop-stat{font-size:11px}
 .hop-stat .lbl{color:var(--muted)}
 .hop-stat .val{font-family:'Share Tech Mono',monospace;font-size:10px}
@@ -230,7 +230,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
     </ol>
     <p style="font-size:12px;color:var(--muted);line-height:1.5">
       <strong style="color:var(--green)">✓ CLEAR</strong> — LOS clear and Fresnel meets preset threshold (40 % for Meshtastic/ham, 60 % for Wi-Fi).&nbsp;
-      <strong style="color:var(--orange)">⚠ MARGINAL</strong> — LOS clear but the 1st Fresnel zone is obstructed below the preset threshold (diffraction loss likely).&nbsp;
+      <strong style="color:var(--orange)">⚠ MARGINAL</strong> — LOS clear but the 1st Fresnel zone is obstructed below the preset threshold. Each link result shows the estimated knife-edge diffraction loss (<em>Diff</em>) in dB.&nbsp;
       <strong style="color:var(--red)">✕ BLOCKED</strong> — terrain in the way.
     </p>
     <p style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">
@@ -356,7 +356,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn" onclick="openSettings()">⚙ SETTINGS</button>
       <button class="btn share" onclick="openShare()">⇪ SHARE</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
-      <span class="hdr-tag" title="Build 20260602-1">BUILD 20260602-1</span>
+      <span class="hdr-tag" title="Build 20260602-2">BUILD 20260602-2</span>
       <button class="btn primary" onclick="runAnalysis()">▶ ANALYSE</button>
     </div>
   </header>
@@ -433,7 +433,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <script>
-const BUILD_ID='20260602-1';
+const BUILD_ID='20260602-2';
 // ═══════════════════════════════════════════════════════════
 //  STATE
 //  Graph model: nodes (waypoints) + edges (links between any two)
@@ -488,11 +488,13 @@ function initMap() {
 // ═══════════════════════════════════════════════════════════
 //  NODES
 // ═══════════════════════════════════════════════════════════
-const DEFAULT_NAMES = ['Site A','Site B','Site C','Site D','Relay 1','Relay 2','Relay 3','Relay 4','Node 5','Node 6'];
+// Default name for a freshly placed node. Uniform "Site N" scheme so the prefix
+// never changes as more nodes are added (N is the 1-based position in the list).
+const defaultNodeName = idx => `Site ${idx + 1}`;
 
 function addNode(lat, lng) {
   const idx = S.nodes.length;
-  const node = { id: S.nextId++, name: DEFAULT_NAMES[idx] || `Node ${idx+1}`, lat, lng, antH: 6, elev: null, marker: null,
+  const node = { id: S.nextId++, name: defaultNodeName(idx), lat, lng, antH: 6, elev: null, marker: null,
     rfOverride: false, txDbm: null, gainDbi: null, rxDbm: null,
     coverageOn: false, coverageLayer: null, coverageDirty: true, coverageComputed: false };
   S.nodes.push(node);
@@ -579,6 +581,7 @@ function clearAll() {
   S.edges.forEach(removeEdgeLayers);
   S.nodes = []; S.edges = []; S.paths = [];
   S.activeView = null;
+  S.nextId = 1;
   updateCovCount();
   renderNodeList(); renderEdgesPanel(); renderPathsPanel();
   document.getElementById('resultsArea').innerHTML = '<div class="no-data">Add nodes, links, then analyse.</div>';
@@ -622,10 +625,8 @@ function removeEdge(id) {
   const e = S.edges[idx];
   removeEdgeLayers(e);
   S.edges.splice(idx, 1);
-  // Clean up paths that used this edge
-  S.paths.forEach(p => {
-    // Check each consecutive pair — remove paths that lose a required edge
-  });
+  // Drop any path that relied on the deleted link: a path is only valid if every
+  // consecutive node pair still has an edge connecting them.
   S.paths = S.paths.filter(p => {
     for (let i=0;i<p.nodeIds.length-1;i++) {
       const a=p.nodeIds[i], b=p.nodeIds[i+1];
@@ -669,8 +670,17 @@ function clearActiveView(){
   renderResults();
 }
 
+// Restyle every link on the map to reflect the current selection.
+// Three cases per link:
+//   1. it IS the selected single edge  → its own status colour, bolder + on top
+//   2. it belongs to the selected path → its own status colour, bolder + on top
+//   3. otherwise                        → its plain base style
+// We deliberately keep each link's status colour (green/orange/red, or grey when
+// un-analysed) and only thicken/opacify it for emphasis, so a "clear" link stays
+// green, a "blocked" link stays red, etc. — selection never recolours the link.
 function highlightActiveMapView(){
   const activePath=S.activeView?.type==='path'?S.paths.find(p=>p.id===S.activeView.id):null;
+  // Collect the edge ids that make up the active path (consecutive node pairs).
   const pathEdgeIds=new Set();
   if(activePath){
     for(let i=0;i<activePath.nodeIds.length-1;i++){
@@ -681,11 +691,12 @@ function highlightActiveMapView(){
   }
   S.edges.forEach(e=>{
     if(!e.line) return;
-    if(S.activeView?.type==='edge'&&S.activeView.id===e.id){
+    const isSelectedEdge=S.activeView?.type==='edge'&&S.activeView.id===e.id;
+    if(isSelectedEdge||pathEdgeIds.has(e.id)){
+      // Emphasise by keeping the link's own colour but making it bolder.
+      // weight:6 (vs the analysed default of 3) reads clearly as "selected"
+      // while preserving the clear/marginal/blocked colour coding.
       e.line.setStyle({...edgeBaseStyle(e),weight:6,opacity:1});
-      e.line.bringToFront();
-    }else if(pathEdgeIds.has(e.id)){
-      e.line.setStyle({color:'#00c8f0',weight:6,opacity:1,dashArray:''});
       e.line.bringToFront();
     }else{
       e.line.setStyle(edgeBaseStyle(e));
@@ -906,6 +917,9 @@ function setNodeCoord(id, field, val) {
   if(node.marker) node.marker.setLatLng([node.lat,node.lng]);
   redrawEdgeLines(); invalidateEdgesForNode(id); fetchElev(node);
   invalidateNodeCoverage(node, true);
+  // Mirror the marker-drag behaviour: a moved node re-runs the analysis so the
+  // links don't sit stale after a manual coordinate edit.
+  if (S.edges.length > 0) runAnalysis();
 }
 function setNodeAntH(id, val) {
   const node=S.nodes.find(n=>n.id===id); if(!node) return;
@@ -992,7 +1006,7 @@ function attachEdgeHandlers(edge){
 
 function insertNodeAt(idx){
   const ref=S.nodes[Math.min(idx,S.nodes.length-1)];
-  const node={id:S.nextId++,name:DEFAULT_NAMES[S.nodes.length]||`Node ${S.nodes.length+1}`,lat:ref.lat+0.003,lng:ref.lng+0.003,antH:6,elev:null,marker:null,
+  const node={id:S.nextId++,name:defaultNodeName(S.nodes.length),lat:ref.lat+0.003,lng:ref.lng+0.003,antH:6,elev:null,marker:null,
     rfOverride:false,txDbm:null,gainDbi:null,rxDbm:null,
     coverageOn:false,coverageLayer:null,coverageDirty:true,coverageComputed:false};
   S.nodes.splice(idx,0,node);
@@ -1181,6 +1195,17 @@ function haversine(la1,lo1,la2,lo2){
 }
 function bulge(d1,d2,K){return d1*d2/(2*K*R_EARTH);}
 function fresnel1(d1,d2,fMHz){const lam=3e8/(fMHz*1e6);return Math.sqrt(lam*d1*d2/(d1+d2));}
+
+// Single knife-edge diffraction loss (dB) from the Fresnel-Kirchhoff diffraction
+// parameter ν, using the ITU-R P.526 approximation J(ν). Valid for ν > -0.78;
+// below that the obstruction clears the LOS line by enough that the loss is
+// negligible (≈0 dB). At ν=0 (terrain grazing the LOS line) this returns ~6 dB,
+// rising as the obstruction intrudes further into the path.
+function knifeEdgeLossDb(nu){
+  if(nu <= -0.78) return 0;
+  const t = Math.sqrt((nu - 0.1)**2 + 1) + nu - 0.1;
+  return 6.9 + 20 * Math.log10(t);
+}
 
 // Bearing → destination point on a sphere (great-circle).
 function destPoint(lat, lng, bearingDeg, distM){
@@ -1402,19 +1427,24 @@ async function _computeNodeCoverageImpl(node){
       throw new Error(`terrain tile fetch failed at ray ${r}: ${e.message||e}`);
     }
     elArr.forEach(v => elevs.push(v));
-    // Find farthest sample that is still reachable from src
+    // Walk outward along the ray and find the farthest sample that still has a
+    // clear path from the source. For each candidate receiver sample `s` we test
+    // every intermediate terrain sample `j` (0<j<s): the straight LOS line from
+    // the source antenna to the receiver antenna must clear the earth-bulge-
+    // corrected terrain, plus the configured fraction of the 1st Fresnel radius.
+    // The first sample that fails ends this ray's reach (terrain shadows the rest).
     let reachIdx = 0;
     for(let s = 1; s <= samples; s++){
-      const dS = dists[s];
-      const rxAlt = elevs[s] + g.rxAntH;
+      const dS = dists[s];                       // distance src→candidate RX
+      const rxAlt = elevs[s] + g.rxAntH;         // RX antenna tip elevation
       let clearAll = true;
       for(let j = 1; j < s; j++){
-        const dJ = dists[j];
-        const t = dJ / dS;
-        const los = srcH + (rxAlt - srcH) * t;
-        const eff = elevs[j] + bulge(dJ, dS - dJ, g.K);
+        const dJ = dists[j];                     // distance src→intermediate point
+        const t = dJ / dS;                       // fraction along the LOS line
+        const los = srcH + (rxAlt - srcH) * t;   // LOS height above the point
+        const eff = elevs[j] + bulge(dJ, dS - dJ, g.K);   // terrain + earth curvature
         const fz = g.fresnelPct > 0 ? fresnel1(dJ, dS - dJ, g.freq) * g.fresnelPct : 0;
-        if(los - eff - fz <= 0){ clearAll = false; break; }
+        if(los - eff - fz <= 0){ clearAll = false; break; }   // obstructed
       }
       if(!clearAll) break;
       reachIdx = s;
@@ -1510,7 +1540,7 @@ async function runAnalysis(){
       // Antenna tip = ground + antenna height
       const aH=aGnd+a.antH, bH=bGnd+b.antH;
 
-      let minLosClear=Infinity,minFzClear=Infinity,minScaledFzClear=Infinity;
+      let minLosClear=Infinity,minFzClear=Infinity,minScaledFzClear=Infinity,maxNu=-Infinity;
       for(let s=1;s<N;s++){
         const d1=dists[s],d2=dist-dists[s],t=s/N;
         const eff=elevs[s]+bulge(d1,d2,K);
@@ -1520,9 +1550,18 @@ async function runAnalysis(){
         const fz=fresnel1(d1,d2,freq);
         if(clear-fz<minFzClear) minFzClear=clear-fz;
         if(clear-fz*fresnelPct<minScaledFzClear) minScaledFzClear=clear-fz*fresnelPct;
+        // Fresnel-Kirchhoff diffraction parameter at this point: the terrain
+        // height above the LOS line is h = -clear, and ν = √2·h/r₁ (r₁ = fz).
+        // Track the dominant (highest-ν) obstruction along the path.
+        const nu=Math.SQRT2*(-clear)/fz;
+        if(nu>maxNu) maxNu=nu;
       }
       const status=minLosClear<=0?'blocked':minScaledFzClear<=0?'marginal':'clear';
-      e.result={dist,minLosClear,minFzClear,minScaledFzClear,fresnelPct,status};
+      // First-order excess loss beyond free space: single knife-edge diffraction
+      // over the dominant obstruction (Deygout principal edge). ≈0 dB on a fully
+      // Fresnel-clear path, ~6 dB at grazing, rising as terrain intrudes.
+      const diffLossDb=knifeEdgeLossDb(maxNu);
+      e.result={dist,minLosClear,minFzClear,minScaledFzClear,fresnelPct,status,diffLossDb};
       e.profile={elevs,dists,dist,aH,bH,a,b,freq,K,N};
 
       // Colour the line on map
@@ -1594,6 +1633,7 @@ function renderResults(){
         <div class="hop-stat"><span class="lbl">Dist: </span><span class="val">${(r.dist/1000).toFixed(2)}km</span></div>
         <div class="hop-stat"><span class="lbl">LOS: </span><span class="val" style="color:${r.minLosClear>0?'var(--green)':'var(--red)'}">${r.minLosClear.toFixed(1)}m</span></div>
         <div class="hop-stat"><span class="lbl">Fz1: </span><span class="val" style="color:${r.minFzClear>0?'var(--green)':'var(--orange)'}">${r.minFzClear.toFixed(1)}m</span></div>
+        <div class="hop-stat" title="Estimated single knife-edge diffraction loss over the dominant obstruction (excess over free space)"><span class="lbl">Diff: </span><span class="val" style="color:${(r.diffLossDb??0)<=0.5?'var(--green)':(r.diffLossDb??0)<6?'var(--orange)':'var(--red)'}">${(r.diffLossDb??0).toFixed(1)}dB</span></div>
       </div>`;
     }
     div.onclick=()=>{if(!e.profile) return; S.activeView={type:'edge',id:e.id};showEdgeProfile(e.id);renderResults();renderChartTabs();renderPathsPanel();};
@@ -1643,7 +1683,8 @@ function showEdgeProfile(edgeId){
   S.redrawProfile=()=>showEdgeProfile(edgeId);
   const{elevs,dists,dist,aH,bH,a,b,freq,K,N}=e.profile;
   const r=e.result;
-  const title=`${a.name} ↔ ${b.name}  |  ${(dist/1000).toFixed(2)} km  |  GND+ANT: ${aH.toFixed(1)}m → ${bH.toFixed(1)}m`;
+  const diffTxt=(r&&r.diffLossDb!=null)?`  |  Diff: ${r.diffLossDb.toFixed(1)} dB`:'';
+  const title=`${a.name} ↔ ${b.name}  |  ${(dist/1000).toFixed(2)} km  |  GND+ANT: ${aH.toFixed(1)}m → ${bH.toFixed(1)}m${diffTxt}`;
   document.getElementById('chartTitle').textContent=title;
   drawProfile({elevs,dists,dist,aH,bH,freq,K,N,result:r,labels:[a.name,b.name]});
   highlightActiveMapView();
@@ -1678,7 +1719,7 @@ function showPathProfile(pathId){
   const totalDist=hops.reduce((s,h)=>s+h.e.profile.dist,0);
   document.getElementById('chartTitle').textContent=`${names.join(' → ')}  |  Total ${(totalDist/1000).toFixed(2)} km`;
 
-  drawPathProfile(hops,names,path);
+  drawPathProfile(hops,names);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1708,12 +1749,17 @@ function drawProfile({elevs,dists,dist,aH,bH,freq,K,N,result,labels}){
     S.profileHover={PAD,totalDist:dist,segments:[{start:0,dist,a:activeEdge.profile.a,b:activeEdge.profile.b}]};
   }
 
+  // Per-sample series: earth-bulge-corrected terrain, the LOS line, and the
+  // upper edge of the Fresnel zone (endpoints have zero Fresnel radius).
   const eff=elevs.map((e,s)=>s===0||s===N?e:e+bulge(dists[s],dist-dists[s],K));
   const losH=s=>aH+(bH-aH)*(s/N);
   const fz1=s=>(s===0||s===N)?0:fresnel1(dists[s],dist-dists[s],freq);
+  // Fit the vertical axis to everything we draw (terrain, endpoints, Fresnel top)
+  // with a little headroom (-5 m below, +15 m above) so nothing clips the panel.
   const allVals=[...eff,aH,bH];
   for(let s=1;s<N;s++) allVals.push(losH(s)+fz1(s));
   const minV=Math.min(...allVals)-5,maxV=Math.max(...allVals)+15,rng=maxV-minV||1;
+  // Sample index → x pixel; elevation value → y pixel (canvas y grows downward).
   const xp=s=>PAD.l+(s/N)*pw, yp=v=>PAD.t+ph-((v-minV)/rng)*ph;
 
   ctx.fillStyle='#0b0f17';ctx.fillRect(0,0,W,H);
