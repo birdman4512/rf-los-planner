@@ -1,0 +1,16 @@
+{
+  "name": "rf-los-planner",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Dev/CI tooling for the RF Line of Sight Planner. The app itself is a single static index.html with no build step; these scripts only run in CI.",
+  "type": "module",
+  "scripts": {
+    "check:js": "node scripts/check-inline-js.mjs index.html",
+    "serve": "node scripts/serve.mjs 8080",
+    "test:smoke": "playwright test",
+    "test": "npm run check:js && npm run test:smoke"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
