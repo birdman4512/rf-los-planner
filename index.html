@@ -7,9 +7,10 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>RF Line of Sight Planner</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js" integrity="sha512-qtX0GLM3qX8rxJN1gyDfcnMFFrKvixfoEOwbBib9VafR5vbChV5LeE5wSI/x+IlCkTY5ZFddFDCCfaVJJNnuKQ==" crossorigin="anonymous"></script>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -105,6 +106,36 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .path-label{flex:1;color:var(--text)}
 .path-del{background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 2px}
 .path-del:hover{color:var(--red)}
+.path-edit{background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 2px}
+.path-edit:hover{color:var(--accent)}
+
+/* ── PATH BUILDER MODAL ── */
+.pb-cols{display:flex;gap:14px}
+.pb-col{flex:1;min-width:0;display:flex;flex-direction:column}
+.pb-col-label{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.pb-list{height:280px;overflow-y:auto;border:1px solid var(--border);background:var(--bg)}
+.pb-list::-webkit-scrollbar{width:3px}
+.pb-list::-webkit-scrollbar-thumb{background:var(--border)}
+.pb-num{width:17px;height:17px;border-radius:50%;border:2px solid;font-family:'Share Tech Mono',monospace;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.pb-node{display:flex;align-items:center;gap:7px;padding:6px 9px;border-bottom:1px solid rgba(30,45,66,.5);cursor:pointer;font-size:13px;color:var(--text)}
+.pb-node:hover{background:rgba(0,200,240,.08);color:#fff}
+.pb-node span{flex:1}
+.pb-node.added{opacity:.4;cursor:default}
+.pb-node.added:hover{background:none;color:var(--text)}
+.pb-tag{flex:0!important;font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);letter-spacing:1px}
+.pb-seq-item{display:flex;align-items:center;gap:6px;padding:6px 9px;border-bottom:1px solid rgba(30,45,66,.5);font-size:13px;color:var(--text)}
+.pb-arrows{display:flex;flex-direction:column;line-height:1}
+.pb-arrows button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:8px;padding:0 2px}
+.pb-arrows button:hover:not(:disabled){color:var(--accent)}
+.pb-arrows button:disabled{opacity:.25;cursor:default}
+.pb-rm{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 2px}
+.pb-rm:hover{color:var(--red)}
+.pb-link{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;padding:1px 0 1px 9px}
+.pb-link.ok{color:var(--green)}
+.pb-link.bad{color:var(--red)}
+.pb-warn{min-height:16px;color:var(--red);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:.5px;margin-top:10px;line-height:1.4}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.primary:disabled:hover{opacity:.4}
 
 /* ── ANALYSE BUTTON ── */
 .analyse-wrap{padding:7px 9px;border-top:1px solid var(--border);flex-shrink:0}
@@ -223,7 +254,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
     <ol style="line-height:1.65;font-size:13px;color:var(--text);padding-left:22px;margin-bottom:14px">
       <li><strong>Add nodes</strong> — right-click anywhere on the map → "Add node here". Each node is a transmitter or receiver. Click the ◎ button to centre on your current location first.</li>
       <li><strong>Set antenna height</strong> — in the sidebar, edit each node's <em>ANT HT</em> (metres above ground). Default is 6 m.</li>
-      <li><strong>Link nodes</strong> — right-click a node marker → "Connect to …" to add a radio link. Links automatically join into paths.</li>
+      <li><strong>Link nodes</strong> — right-click a node marker → "Connect to …" to add a radio link. Each link becomes its own path; use <strong>+ NEW PATH</strong> to chain several into a multi-hop route.</li>
       <li><strong>Pick a band</strong> — top of the sidebar, choose a radio preset (Meshtastic AU 915 MHz by default) or enter a custom frequency.</li>
       <li><strong>Analyse</strong> — click <strong>▶ ANALYSE</strong>. Terrain elevation is fetched along each link and the line-of-sight + 1st Fresnel zone are drawn below the map.</li>
       <li><strong>Coverage layer</strong> — set TX power / antenna gain / RX sensitivity (defaults seeded from the preset), tick the <em>COVERAGE</em> box on a node, then click <em>COMPUTE</em>. A terrain-aware coverage polygon is drawn. Use <em>ALL ON / ALL OFF</em> to toggle every node at once.</li>
@@ -250,6 +281,28 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
     <div class="modal-actions">
       <button class="btn" onclick="copyShareUrl()">COPY LINK</button>
       <button class="btn primary" onclick="closeShare()">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<!-- Path Builder Modal -->
+<div class="modal-bg" id="pathModal">
+  <div class="modal" style="min-width:520px;max-width:620px">
+    <h2 id="pathModalTitle">Build Path</h2>
+    <div class="pb-cols">
+      <div class="pb-col">
+        <div class="pb-col-label">Nodes — click to add</div>
+        <div class="pb-list" id="pbNodeList"></div>
+      </div>
+      <div class="pb-col">
+        <div class="pb-col-label">Path order — drag-free reorder &amp; remove</div>
+        <div class="pb-list" id="pbSeqList"></div>
+      </div>
+    </div>
+    <div class="pb-warn" id="pbWarn"></div>
+    <div class="modal-actions" style="margin-top:8px">
+      <button class="btn" onclick="closePathModal()">CANCEL</button>
+      <button class="btn primary" id="pbSaveBtn" onclick="savePathModal()">CREATE PATH</button>
     </div>
   </div>
 </div>
@@ -356,7 +409,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn" onclick="openSettings()">⚙ SETTINGS</button>
       <button class="btn share" onclick="openShare()">⇪ SHARE</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
-      <span class="hdr-tag" title="Build 20260602-2">BUILD 20260602-2</span>
+      <span class="hdr-tag" title="Build 20260605-2">BUILD 20260605-2</span>
       <button class="btn primary" onclick="runAnalysis()">▶ ANALYSE</button>
     </div>
   </header>
@@ -433,7 +486,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <script>
-const BUILD_ID='20260602-2';
+const BUILD_ID='20260605-2';
 // ═══════════════════════════════════════════════════════════
 //  STATE
 //  Graph model: nodes (waypoints) + edges (links between any two)
@@ -458,6 +511,55 @@ const S = {
 
 const COLORS = ['#00c8f0','#f39c12','#2ecc71','#e74c3c','#9b59b6','#1abc9c','#e67e22','#3498db','#f1c40f','#e91e63'];
 const nodeColor = i => COLORS[i % COLORS.length];
+
+const LIMITS = {
+  hashChars: 50000,
+  nodes: 200,
+  edges: 500,
+  paths: 200,
+  pathNodes: 100,
+  nameChars: 80,
+  antH: 500,
+  freqMin: 1,
+  freqMax: 100000,
+  kMin: 0.1,
+  kMax: 10,
+  rxAntH: 500,
+  covMaxKm: 100,
+  covRays: 360,
+  covSamples: 80
+};
+const COVERAGE_RAY_OPTIONS = [24, 36, 72, 144, 360];
+const COVERAGE_SAMPLE_OPTIONS = [30, 50, 80];
+const FRESNEL_OPTIONS = [0, 0.4, 0.6, 1];
+
+function clampNum(v, min, max, fallback) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+function clampInt(v, min, max, fallback) {
+  return Math.round(clampNum(v, min, max, fallback));
+}
+function optionNum(v, allowed, fallback) {
+  const n = Number(v);
+  return allowed.includes(n) ? n : fallback;
+}
+function validLatLng(lat, lng) {
+  if (lat == null || lng == null) return false;
+  if (String(lat).trim() === '' || String(lng).trim() === '') return false;
+  return Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) &&
+    Number(lat) >= -90 && Number(lat) <= 90 && Number(lng) >= -180 && Number(lng) <= 180;
+}
+function cleanName(name, fallback = 'Site') {
+  const s = String(name ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return (s || fallback).slice(0, LIMITS.nameChars);
+}
+function textNode(value) {
+  const span = document.createElement('span');
+  span.textContent = String(value ?? '');
+  return span;
+}
 
 function removeEdgeLayers(edge){
   if(edge.line) S.map.removeLayer(edge.line);
@@ -520,8 +622,17 @@ function makeMarker(node) {
     if (S.edges.length > 0) runAnalysis();
   });
   marker.on('contextmenu', e => { L.DomEvent.preventDefault(e.originalEvent); L.DomEvent.stopPropagation(e.originalEvent); showNodeCtx(e.originalEvent.clientX, e.originalEvent.clientY, node); });
-  marker.bindTooltip(node.name, { permanent: false, direction: 'top', offset: [0,-14] });
+  bindNodeTooltip(marker, node.name);
   return marker;
+}
+
+function bindNodeTooltip(marker, label) {
+  marker.bindTooltip(textNode(label), { permanent: false, direction: 'top', offset: [0,-14] });
+}
+
+function setNodeTooltip(node, label) {
+  if (!node.marker) return;
+  node.marker.setTooltipContent(textNode(label));
 }
 
 function buildIcon(node) {
@@ -735,20 +846,12 @@ function invalidateEdgesForNode(nodeId) {
 
 // ═══════════════════════════════════════════════════════════
 //  AUTO PATH BUILDING
-//  When an edge is added, try to extend an existing path
-//  that ends/starts at one of the nodes; otherwise create new path.
+//  Every new link gets its own standalone 2-node path. Existing
+//  paths are never touched — to build a multi-hop chain, use the
+//  "+ NEW PATH" builder. This keeps new links from silently
+//  splicing themselves onto a path that shares an endpoint.
 // ═══════════════════════════════════════════════════════════
 function autoExtendPath(aId, bId) {
-  // Try to extend an existing path
-  for (const p of S.paths) {
-    const last = p.nodeIds[p.nodeIds.length-1];
-    const first = p.nodeIds[0];
-    if (last === aId && !p.nodeIds.includes(bId)) { p.nodeIds.push(bId); renderPathsPanel(); return; }
-    if (last === bId && !p.nodeIds.includes(aId)) { p.nodeIds.push(aId); renderPathsPanel(); return; }
-    if (first === bId && !p.nodeIds.includes(aId)) { p.nodeIds.unshift(aId); renderPathsPanel(); return; }
-    if (first === aId && !p.nodeIds.includes(bId)) { p.nodeIds.unshift(bId); renderPathsPanel(); return; }
-  }
-  // Create new path
   const a = S.nodes.find(n=>n.id===aId), b = S.nodes.find(n=>n.id===bId);
   const p = { id: S.nextId++, name: `${a.name} → ${b.name}`, nodeIds: [aId, bId] };
   S.paths.push(p);
@@ -756,26 +859,120 @@ function autoExtendPath(aId, bId) {
   document.getElementById('pathCount').textContent = S.paths.length;
 }
 
-function addPath() {
-  // Show a builder dialog — pick nodes in order
-  if (S.nodes.length < 2) { toast('Need at least 2 nodes to create a path.',3000); return; }
-  const options = S.nodes.map((n,i) => `${i+1}: ${n.name}`).join('\n');
-  const input = prompt(`Enter node numbers for path (comma-separated):\n${options}\n\nExample: 1,2,3`);
-  if (!input) return;
-  const idxs = input.split(',').map(s=>parseInt(s.trim())-1).filter(i=>i>=0&&i<S.nodes.length);
-  if (idxs.length < 2) { toast('Need at least 2 valid nodes.',2000); return; }
-  // Check that edges exist for each consecutive pair
-  for (let i=0;i<idxs.length-1;i++) {
-    const a=S.nodes[idxs[i]].id, b=S.nodes[idxs[i+1]].id;
-    if (!S.edges.some(e=>(e.aId===a&&e.bId===b)||(e.aId===b&&e.bId===a))) {
-      toast(`No link between ${S.nodes[idxs[i]].name} and ${S.nodes[idxs[i+1]].name}. Add the link first.`,3000); return;
-    }
+// ── Path builder modal: click nodes to assemble an ordered, link-checked path ──
+const PB = { editId: null, seq: [] };  // seq = ordered list of nodeIds
+
+function addPath()  { openPathBuilder(null); }
+function editPath(id){ openPathBuilder(id); }
+
+function openPathBuilder(editId) {
+  if (S.nodes.length < 2) { toast('Need at least 2 nodes to build a path.',3000); return; }
+  PB.editId = editId ?? null;
+  if (editId != null) {
+    const p = S.paths.find(p => p.id === editId);
+    PB.seq = p ? p.nodeIds.filter(id => S.nodes.some(n => n.id === id)) : [];
+  } else {
+    PB.seq = [];
   }
-  const nodeIds = idxs.map(i=>S.nodes[i].id);
-  const name = nodeIds.map(id=>S.nodes.find(n=>n.id===id).name).join(' → ');
-  S.paths.push({ id: S.nextId++, name, nodeIds });
-  renderPathsPanel();
-  document.getElementById('pathCount').textContent = S.paths.length;
+  document.getElementById('pathModalTitle').textContent = editId != null ? '✎ Edit Path' : '+ Build Path';
+  document.getElementById('pbSaveBtn').textContent = editId != null ? 'SAVE CHANGES' : 'CREATE PATH';
+  renderPathBuilder();
+  document.getElementById('pathModal').classList.add('open');
+}
+function closePathModal() { document.getElementById('pathModal').classList.remove('open'); }
+
+function pbHasLink(aId, bId) {
+  return S.edges.some(e => (e.aId===aId&&e.bId===bId)||(e.aId===bId&&e.bId===aId));
+}
+function pbAddNode(id) { if (!PB.seq.includes(id)) { PB.seq.push(id); renderPathBuilder(); } }
+function pbRemoveAt(i) { PB.seq.splice(i,1); renderPathBuilder(); }
+function pbMove(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= PB.seq.length) return;
+  [PB.seq[i], PB.seq[j]] = [PB.seq[j], PB.seq[i]];
+  renderPathBuilder();
+}
+
+function renderPathBuilder() {
+  // Left column: every node, click to append (dimmed once added)
+  const nodeList = document.getElementById('pbNodeList');
+  nodeList.innerHTML = '';
+  S.nodes.forEach((n, idx) => {
+    const added = PB.seq.includes(n.id);
+    const div = document.createElement('div');
+    div.className = 'pb-node' + (added ? ' added' : '');
+    div.innerHTML = `<div class="pb-num" style="color:${nodeColor(idx)};border-color:${nodeColor(idx)}">${idx+1}</div>
+      <span>${escHtml(n.name)}</span>${added ? '<span class="pb-tag">added</span>' : ''}`;
+    if (!added) div.onclick = () => pbAddNode(n.id);
+    nodeList.appendChild(div);
+  });
+
+  // Right column: the ordered sequence with reorder/remove + per-hop link status
+  const seqList = document.getElementById('pbSeqList');
+  seqList.innerHTML = '';
+  if (!PB.seq.length) {
+    seqList.innerHTML = '<div class="no-data">Click nodes on the left to add them in order.</div>';
+  }
+  const missing = [];
+  PB.seq.forEach((id, i) => {
+    const node = S.nodes.find(n => n.id === id);
+    const idx = S.nodes.indexOf(node);
+    const item = document.createElement('div');
+    item.className = 'pb-seq-item';
+    item.innerHTML = `<div class="pb-num" style="color:${nodeColor(idx)};border-color:${nodeColor(idx)}">${idx+1}</div>
+      <span style="flex:1">${escHtml(node.name)}</span>
+      <div class="pb-arrows">
+        <button title="Move up" ${i===0?'disabled':''} onclick="pbMove(${i},-1)">▲</button>
+        <button title="Move down" ${i===PB.seq.length-1?'disabled':''} onclick="pbMove(${i},1)">▼</button>
+      </div>
+      <button class="pb-rm" title="Remove" onclick="pbRemoveAt(${i})">✕</button>`;
+    seqList.appendChild(item);
+    if (i < PB.seq.length - 1) {
+      const ok = pbHasLink(id, PB.seq[i+1]);
+      if (!ok) missing.push([node.name, S.nodes.find(n => n.id === PB.seq[i+1]).name]);
+      const lk = document.createElement('div');
+      lk.className = 'pb-link ' + (ok ? 'ok' : 'bad');
+      lk.textContent = ok ? '│ ✓ linked' : '│ ✗ no link';
+      seqList.appendChild(lk);
+    }
+  });
+
+  const warn = document.getElementById('pbWarn');
+  const saveBtn = document.getElementById('pbSaveBtn');
+  if (PB.seq.length < 2) {
+    warn.textContent = 'Add at least 2 nodes to form a path.';
+    saveBtn.disabled = true;
+  } else if (missing.length) {
+    warn.textContent = 'No link for: ' + missing.map(m => `${m[0]} ↔ ${m[1]}`).join(', ') + '. Add the link first, or reorder.';
+    saveBtn.disabled = true;
+  } else {
+    warn.textContent = '';
+    saveBtn.disabled = false;
+  }
+}
+
+function savePathModal() {
+  if (PB.seq.length < 2) return;
+  for (let i=0;i<PB.seq.length-1;i++) if (!pbHasLink(PB.seq[i], PB.seq[i+1])) return;
+  const nodeIds = PB.seq.slice();
+  const name = nodeIds.map(id => S.nodes.find(n=>n.id===id).name).join(' → ');
+  if (PB.editId != null) {
+    const p = S.paths.find(p => p.id === PB.editId);
+    if (p) { p.nodeIds = nodeIds; p.name = name; }
+    closePathModal();
+    renderPathsPanel();
+    renderChartTabs();
+    if (S.activeView?.type==='path' && S.activeView.id===PB.editId) {
+      if (p && pathHasAnalysedProfiles(p)) showPathProfile(PB.editId); else clearCanvas();
+    }
+    highlightActiveMapView();
+  } else {
+    S.paths.push({ id: S.nextId++, name, nodeIds });
+    closePathModal();
+    renderPathsPanel();
+    renderChartTabs();
+    document.getElementById('pathCount').textContent = S.paths.length;
+  }
 }
 
 function removePath(id) {
@@ -818,13 +1015,13 @@ function renderNodeList() {
       </div>
       <div class="wp-grid">
         <div class="wp-field"><label>LATITUDE</label>
-          <input id="lat_${node.id}" type="number" step="0.000001" value="${node.lat.toFixed(6)}" onchange="setNodeCoord(${node.id},'lat',+this.value)"/></div>
+          <input id="lat_${node.id}" type="number" step="0.000001" value="${node.lat.toFixed(6)}" onchange="setNodeCoord(${node.id},'lat',this.value)"/></div>
         <div class="wp-field"><label>LONGITUDE</label>
-          <input id="lng_${node.id}" type="number" step="0.000001" value="${node.lng.toFixed(6)}" onchange="setNodeCoord(${node.id},'lng',+this.value)"/></div>
+          <input id="lng_${node.id}" type="number" step="0.000001" value="${node.lng.toFixed(6)}" onchange="setNodeCoord(${node.id},'lng',this.value)"/></div>
       </div>
       <div class="wp-bottom">
         <label>ANT HT (m)</label>
-        <input type="number" step="0.5" min="0" value="${node.antH}" onchange="setNodeAntH(${node.id},+this.value)"/>
+        <input type="number" step="0.5" min="0" value="${node.antH}" onchange="setNodeAntH(${node.id},this.value)"/>
         <div class="wp-elev">GND:<span id="elev_${node.id}">${node.elev!==null?node.elev.toFixed(1)+'m':'…'}</span></div>
         <div class="wp-amsl">AMSL:<span id="amsl_${node.id}">${amsl}</span></div>
       </div>
@@ -897,6 +1094,7 @@ function renderPathsPanel() {
     const deselectBtn = isActive ? `<button class="deselect-btn" title="Deselect (Esc)" onclick="event.stopPropagation();clearActiveView()">DESELECT</button>` : '';
     row.innerHTML=`<div class="path-label">${escHtml(names)}</div>
       ${deselectBtn}
+      <button class="path-edit" title="Edit path (add/remove/reorder nodes)" onclick="event.stopPropagation();editPath(${p.id})">✎</button>
       <button class="path-del" onclick="event.stopPropagation();removePath(${p.id})">✕</button>`;
     row.onclick = () => {
       if (S.activeView?.type==='path' && S.activeView.id===p.id) { clearActiveView(); return; }
@@ -909,11 +1107,18 @@ function renderPathsPanel() {
 
 function renameNode(id, name) {
   const node=S.nodes.find(n=>n.id===id); if(!node) return;
-  node.name=name; if(node.marker) node.marker.setTooltipContent(name);
+  node.name=cleanName(name, node.name); setNodeTooltip(node, node.name);
 }
 function setNodeCoord(id, field, val) {
   const node=S.nodes.find(n=>n.id===id); if(!node) return;
-  node[field]=val; node.elev=null;
+  const nextLat = field === 'lat' ? val : node.lat;
+  const nextLng = field === 'lng' ? val : node.lng;
+  if (!validLatLng(nextLat, nextLng)) {
+    toast('Enter a valid latitude (-90..90) and longitude (-180..180).', 3000);
+    updateNodeFields(node);
+    return;
+  }
+  node[field]=Number(val); node.elev=null;
   if(node.marker) node.marker.setLatLng([node.lat,node.lng]);
   redrawEdgeLines(); invalidateEdgesForNode(id); fetchElev(node);
   invalidateNodeCoverage(node, true);
@@ -923,7 +1128,7 @@ function setNodeCoord(id, field, val) {
 }
 function setNodeAntH(id, val) {
   const node=S.nodes.find(n=>n.id===id); if(!node) return;
-  node.antH=val; updateAmslDisplay(node); invalidateEdgesForNode(id);
+  node.antH=clampNum(val, 0, LIMITS.antH, node.antH || 0); updateAmslDisplay(node); invalidateEdgesForNode(id);
   invalidateNodeCoverage(node, true);
 }
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
@@ -1021,6 +1226,7 @@ document.addEventListener('keydown',e=>{
   if(ctxMenu.style.display==='block'){closeCtx();return;}
   if(document.getElementById('settingsModal')?.classList.contains('open')){closeSettings();return;}
   if(document.getElementById('shareModal')?.classList.contains('open')){closeShare();return;}
+  if(document.getElementById('pathModal')?.classList.contains('open')){closePathModal();return;}
   if(document.getElementById('helpModal')?.classList.contains('open')){closeHelp();return;}
   const t=e.target;
   if(t&&(t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA'||t.isContentEditable)) return;
@@ -1162,7 +1368,7 @@ function updateAmslDisplay(node){
   const el=document.getElementById(`amsl_${node.id}`);
   if(el) el.textContent=node.elev!==null?(node.elev+node.antH).toFixed(1)+'m':'?';
   // Refresh icon tooltip
-  if(node.marker) node.marker.setTooltipContent(`${node.name}\nGND: ${node.elev?.toFixed(1)}m  ANT: +${node.antH}m  AMSL: ${node.elev!==null?(node.elev+node.antH).toFixed(1)+'m':'?'}`);
+  setNodeTooltip(node, `${node.name}\nGND: ${node.elev!==null?node.elev.toFixed(1):'?'}m  ANT: +${node.antH}m  AMSL: ${node.elev!==null?(node.elev+node.antH).toFixed(1)+'m':'?'}`);
 }
 
 async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
@@ -1248,17 +1454,17 @@ const PRESET_RF = {
 
 function globalRf(){
   return {
-    freq: parseFloat(document.getElementById('inpFreq').value) || 915,
-    K: parseFloat(document.getElementById('inpK').value) || 1.333,
-    tx: parseFloat(document.getElementById('inpTx').value),
-    gain: parseFloat(document.getElementById('inpGain').value),
-    rx: parseFloat(document.getElementById('inpRx').value),
-    margin: parseFloat(document.getElementById('inpMargin').value) || 0,
-    rxAntH: parseFloat(document.getElementById('inpRxAntH').value) || 2,
-    rays: parseInt(document.getElementById('inpCovRays').value) || 36,
-    samples: parseInt(document.getElementById('inpCovSamples').value) || 50,
-    fresnelPct: parseFloat(document.getElementById('inpCovFresnel').value),
-    maxKm: Math.max(1, Math.min(100, parseFloat(document.getElementById('inpCovMaxKm').value) || 30))
+    freq: clampNum(document.getElementById('inpFreq').value, LIMITS.freqMin, LIMITS.freqMax, 915),
+    K: clampNum(document.getElementById('inpK').value, LIMITS.kMin, LIMITS.kMax, 1.333),
+    tx: clampNum(document.getElementById('inpTx').value, -100, 100, 22),
+    gain: clampNum(document.getElementById('inpGain').value, -100, 100, 0),
+    rx: clampNum(document.getElementById('inpRx').value, -200, 0, -130),
+    margin: clampNum(document.getElementById('inpMargin').value, 0, 100, 0),
+    rxAntH: clampNum(document.getElementById('inpRxAntH').value, 0, LIMITS.rxAntH, 2),
+    rays: optionNum(parseInt(document.getElementById('inpCovRays').value), COVERAGE_RAY_OPTIONS, 72),
+    samples: optionNum(parseInt(document.getElementById('inpCovSamples').value), COVERAGE_SAMPLE_OPTIONS, 50),
+    fresnelPct: optionNum(parseFloat(document.getElementById('inpCovFresnel').value), FRESNEL_OPTIONS, 0.4),
+    maxKm: clampNum(document.getElementById('inpCovMaxKm').value, 1, LIMITS.covMaxKm, 30)
   };
 }
 
@@ -2155,53 +2361,185 @@ function syncPresetFromFreq(){
   sel.value=[...sel.options].some(o=>o.value===f)?f:'';
 }
 
+function setInputValue(id, value) {
+  if (value == null) return;
+  const el = document.getElementById(id);
+  if (el) el.value = value;
+}
+
+function edgeKey(aId, bId) {
+  return aId < bId ? `${aId}:${bId}` : `${bId}:${aId}`;
+}
+
+function normaliseV3Hash(raw) {
+  if (!raw || typeof raw !== 'object') throw new Error('Shared data is not an object');
+  const rawNodes = Array.isArray(raw.n) ? raw.n.slice(0, LIMITS.nodes) : [];
+  const rawEdges = Array.isArray(raw.e) ? raw.e.slice(0, LIMITS.edges) : [];
+  const rawPaths = Array.isArray(raw.p) ? raw.p.slice(0, LIMITS.paths) : [];
+  const presetRf = PRESET_RF[String(raw.f)];
+  const legacyCoverageDefaults = raw.cm == null && raw.cf === 0 && presetRf;
+  let id = 1;
+  const indexToId = new Map();
+  const nodes = [];
+
+  rawNodes.forEach((nd, i) => {
+    if (!Array.isArray(nd) || !validLatLng(nd[0], nd[1])) return;
+    const nodeId = id++;
+    indexToId.set(i, nodeId);
+    const rfOverride = !!nd[4];
+    nodes.push({
+      id: nodeId,
+      lat: clampNum(nd[0], -90, 90, 0),
+      lng: clampNum(nd[1], -180, 180, 0),
+      antH: clampNum(nd[2], 0, LIMITS.antH, 6),
+      name: cleanName(nd[3], defaultNodeName(nodes.length)),
+      rfOverride,
+      txDbm: rfOverride ? clampNum(nd[5], -100, 100, null) : null,
+      gainDbi: rfOverride ? clampNum(nd[6], -100, 100, null) : null,
+      rxDbm: rfOverride ? clampNum(nd[7], -200, 0, null) : null,
+      coverageOn: !!nd[8]
+    });
+  });
+
+  const edgeKeys = new Set();
+  const edges = [];
+  rawEdges.forEach(ed => {
+    if (!Array.isArray(ed)) return;
+    const aId = indexToId.get(Number(ed[0]));
+    const bId = indexToId.get(Number(ed[1]));
+    if (!aId || !bId || aId === bId) return;
+    const key = edgeKey(aId, bId);
+    if (edgeKeys.has(key)) return;
+    edgeKeys.add(key);
+    edges.push({ id: id++, aId, bId });
+  });
+
+  const paths = [];
+  rawPaths.forEach(p => {
+    if (!Array.isArray(p) || p.length < 3) return;
+    const nodeIds = p.slice(1, LIMITS.pathNodes + 1).map(j => indexToId.get(Number(j))).filter(Boolean);
+    if (nodeIds.length < 2 || new Set(nodeIds).size !== nodeIds.length) return;
+    if (!nodeIds.slice(0, -1).every((nid, i) => edgeKeys.has(edgeKey(nid, nodeIds[i + 1])))) return;
+    paths.push({ id: id++, name: cleanName(p[0], 'Path'), nodeIds });
+  });
+
+  return {
+    freq: clampNum(raw.f, LIMITS.freqMin, LIMITS.freqMax, 915),
+    k: clampNum(raw.k, LIMITS.kMin, LIMITS.kMax, 1.333),
+    tx: clampNum(raw.tx, -100, 100, presetRf?.tx ?? 22),
+    gain: clampNum(raw.gn, -100, 100, presetRf?.gain ?? 2),
+    rx: clampNum(raw.rx, -200, 0, presetRf?.rx ?? -130),
+    margin: clampNum(raw.mg, 0, 100, presetRf?.margin ?? 6),
+    rxAntH: clampNum(raw.ra, 0, LIMITS.rxAntH, 2),
+    covRays: optionNum(parseInt(raw.cr), COVERAGE_RAY_OPTIONS, 72),
+    covSamples: optionNum(parseInt(raw.cs), COVERAGE_SAMPLE_OPTIONS, 50),
+    covFresnel: optionNum(parseFloat(legacyCoverageDefaults ? presetRf.fresnel : raw.cf), FRESNEL_OPTIONS, 0.4),
+    covMaxKm: clampNum(raw.cm ?? presetRf?.maxKm, 1, LIMITS.covMaxKm, 30),
+    nodes,
+    edges,
+    paths,
+    nextId: id
+  };
+}
+
+function normaliseLegacyHash(raw) {
+  if (!raw || typeof raw !== 'object') throw new Error('Shared data is not an object');
+  const rawNodes = Array.isArray(raw.nodes) ? raw.nodes.slice(0, LIMITS.nodes) : [];
+  const rawEdges = Array.isArray(raw.edges) ? raw.edges.slice(0, LIMITS.edges) : [];
+  const rawPaths = Array.isArray(raw.paths) ? raw.paths.slice(0, LIMITS.paths) : [];
+  let id = 1;
+  const oldToId = new Map();
+  const nodes = [];
+
+  rawNodes.forEach((nd, i) => {
+    const lat = nd?.lat ?? nd?.[0];
+    const lng = nd?.lng ?? nd?.[1];
+    if (!validLatLng(lat, lng)) return;
+    const nodeId = id++;
+    const oldId = nd?.id ?? i;
+    oldToId.set(oldId, nodeId);
+    oldToId.set(String(oldId), nodeId);
+    oldToId.set(i, nodeId);
+    oldToId.set(String(i), nodeId);
+    nodes.push({
+      id: nodeId,
+      lat: clampNum(lat, -90, 90, 0),
+      lng: clampNum(lng, -180, 180, 0),
+      antH: clampNum(nd?.antH ?? nd?.[2], 0, LIMITS.antH, 6),
+      name: cleanName(nd?.name ?? nd?.[3], defaultNodeName(nodes.length)),
+      rfOverride: false, txDbm: null, gainDbi: null, rxDbm: null, coverageOn: false
+    });
+  });
+
+  const edgeKeys = new Set();
+  const edges = [];
+  rawEdges.forEach(ed => {
+    const aId = oldToId.get(ed?.aId ?? ed?.a ?? ed?.[0]);
+    const bId = oldToId.get(ed?.bId ?? ed?.b ?? ed?.[1]);
+    if (!aId || !bId || aId === bId) return;
+    const key = edgeKey(aId, bId);
+    if (edgeKeys.has(key)) return;
+    edgeKeys.add(key);
+    edges.push({ id: id++, aId, bId });
+  });
+
+  const paths = [];
+  rawPaths.forEach(p => {
+    const ids = Array.isArray(p?.nodeIds) ? p.nodeIds : Array.isArray(p) ? p.slice(1) : [];
+    const nodeIds = ids.slice(0, LIMITS.pathNodes).map(nid => oldToId.get(nid)).filter(Boolean);
+    if (nodeIds.length < 2 || new Set(nodeIds).size !== nodeIds.length) return;
+    if (!nodeIds.slice(0, -1).every((nid, i) => edgeKeys.has(edgeKey(nid, nodeIds[i + 1])))) return;
+    paths.push({ id: id++, name: cleanName(p?.name ?? p?.[0], 'Path'), nodeIds });
+  });
+
+  return {
+    freq: clampNum(raw.freq, LIMITS.freqMin, LIMITS.freqMax, 915),
+    k: clampNum(raw.k, LIMITS.kMin, LIMITS.kMax, 1.333),
+    tx: clampNum(raw.tx, -100, 100, 22),
+    gain: clampNum(raw.gain, -100, 100, 2),
+    rx: clampNum(raw.rx, -200, 0, -130),
+    margin: clampNum(raw.margin, 0, 100, 6),
+    rxAntH: clampNum(raw.rxAntH, 0, LIMITS.rxAntH, 2),
+    covRays: optionNum(parseInt(raw.covRays), COVERAGE_RAY_OPTIONS, 72),
+    covSamples: optionNum(parseInt(raw.covSamples), COVERAGE_SAMPLE_OPTIONS, 50),
+    covFresnel: optionNum(parseFloat(raw.covFresnel), FRESNEL_OPTIONS, 0.4),
+    covMaxKm: clampNum(raw.covMaxKm, 1, LIMITS.covMaxKm, 30),
+    nodes,
+    edges,
+    paths,
+    nextId: id
+  };
+}
+
+function parseSharedHash(hash) {
+  if (hash.length > LIMITS.hashChars) throw new Error('Shared link is too large');
+  const isV3 = hash.startsWith('v3:');
+  const isV2 = hash.startsWith('v2:');
+  if (isV3 || isV2) {
+    const json = LZString.decompressFromEncodedURIComponent(hash.slice(3));
+    if (!json || json.length > LIMITS.hashChars * 4) throw new Error('Shared link could not be decompressed');
+    return normaliseV3Hash(JSON.parse(json));
+  }
+  return normaliseLegacyHash(JSON.parse(decodeURIComponent(atob(hash))));
+}
+
 function loadFromHash(){
   const hash=window.location.hash.slice(1);
   if(!hash) return;
   try{
-    let data;
-    const isV3 = hash.startsWith('v3:');
-    const isV2 = hash.startsWith('v2:');
-    if(isV3 || isV2){
-      const raw=JSON.parse(LZString.decompressFromEncodedURIComponent(hash.slice(3)));
-      let id=1;
-      const nIds=(raw.n||[]).map(()=>id++);
-      const eIds=(raw.e||[]).map(()=>id++);
-      const pIds=(raw.p||[]).map(()=>id++);
-      const presetRf=PRESET_RF[String(raw.f)];
-      const legacyCoverageDefaults=raw.cm==null&&raw.cf===0&&presetRf;
-      data={
-        freq:raw.f,
-        k:raw.k,
-        tx:raw.tx, gain:raw.gn, rx:raw.rx, margin:raw.mg,
-        rxAntH:raw.ra, covRays:raw.cr, covSamples:raw.cs,
-        covFresnel:legacyCoverageDefaults?presetRf.fresnel:raw.cf,
-        covMaxKm:raw.cm??presetRf?.maxKm,
-        nodes:(raw.n||[]).map((nd,i)=>({
-          id:nIds[i], lat:nd[0], lng:nd[1], antH:nd[2], name:nd[3],
-          rfOverride: !!nd[4], txDbm: nd[5]??null, gainDbi: nd[6]??null, rxDbm: nd[7]??null,
-          coverageOn: !!nd[8]
-        })),
-        edges:(raw.e||[]).map((ed,i)=>({id:eIds[i],aId:nIds[ed[0]],bId:nIds[ed[1]]})),
-        paths:(raw.p||[]).map((p,i)=>({id:pIds[i],name:p[0],nodeIds:p.slice(1).map(j=>nIds[j])})),
-        nextId:id
-      };
-    }else{
-      // Legacy v1 format
-      data=JSON.parse(decodeURIComponent(atob(hash)));
-    }
-    document.getElementById('inpFreq').value=data.freq||915;
-    document.getElementById('inpK').value=data.k||'1.333';
-    if(data.tx!=null) document.getElementById('inpTx').value=data.tx;
-    if(data.gain!=null) document.getElementById('inpGain').value=data.gain;
-    if(data.rx!=null) document.getElementById('inpRx').value=data.rx;
-    if(data.margin!=null) document.getElementById('inpMargin').value=data.margin;
-    if(data.rxAntH!=null) document.getElementById('inpRxAntH').value=data.rxAntH;
-    if(data.covRays!=null) document.getElementById('inpCovRays').value=data.covRays;
-    if(data.covSamples!=null) document.getElementById('inpCovSamples').value=data.covSamples;
-    if(data.covFresnel!=null) document.getElementById('inpCovFresnel').value=data.covFresnel;
-    if(data.covMaxKm!=null) document.getElementById('inpCovMaxKm').value=data.covMaxKm;
-    S.nextId=data.nextId||1;
+    const data=parseSharedHash(hash);
+    setInputValue('inpFreq',data.freq);
+    setInputValue('inpK',data.k);
+    setInputValue('inpTx',data.tx);
+    setInputValue('inpGain',data.gain);
+    setInputValue('inpRx',data.rx);
+    setInputValue('inpMargin',data.margin);
+    setInputValue('inpRxAntH',data.rxAntH);
+    setInputValue('inpCovRays',data.covRays);
+    setInputValue('inpCovSamples',data.covSamples);
+    setInputValue('inpCovFresnel',data.covFresnel);
+    setInputValue('inpCovMaxKm',data.covMaxKm);
+    S.nextId=data.nextId;
     // Restore nodes
     data.nodes.forEach(nd=>{
       const node={...nd, elev:null, marker:null,
@@ -2234,7 +2572,10 @@ function loadFromHash(){
       S.map.fitBounds(bounds,{padding:[40,40]});
     }
     toast('Map loaded from shared link. Click Analyse to run.',4000);
-  }catch(err){console.warn('Failed to load from hash',err);}
+  }catch(err){
+    console.warn('Failed to load from hash',err);
+    toast('Shared link was rejected: invalid or unsafe data.',5000);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
