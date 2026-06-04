@@ -1,4 +1,4 @@
-name: CI
+name: CI & Deploy
 
 on:
   push:
@@ -7,10 +7,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# This is a safety-check pipeline only — it does NOT deploy. GitHub Pages
-# continues to publish from the main branch as before. Once these checks have
-# proven stable, the Pages deploy can be gated on this workflow.
+# Least-privilege default; the deploy job widens its own permissions below.
+permissions:
+  contents: read
+
 jobs:
+  # ── Safety checks: run on every push and PR to main ──
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -40,3 +42,41 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  # ── Gated deploy: publishes to GitHub Pages ONLY if `verify` passed,
+  #    and only for main (never for PRs). If the tests fail, the live site
+  #    keeps serving the previous good deploy. ──
+  deploy:
+    needs: verify
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      # Publish only the static site, not the dev tooling (scripts/, tests/,
+      # package.json, workflows) — keeps those off the public Pages URL.
+      - name: Assemble static site
+        run: |
+          mkdir -p _site
+          cp index.html _site/index.html
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
