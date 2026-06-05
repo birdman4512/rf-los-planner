@@ -414,7 +414,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <button class="btn primary" onclick="computeAllCoverage()">▶ COMPUTE ALL</button>
       </div>
       <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:1px;line-height:1.4">
-        Compute downloads terrain tiles (AWS Open Terrain, ~30 m global). Toggle ON/OFF is instant once cached.
+        Heatmap: green strong, orange marginal, red below margin. Compute downloads terrain tiles (AWS Open Terrain, ~30 m global).
       </div>
     </div>
 
@@ -694,10 +694,7 @@ function buildIcon(node) {
 function refreshAllIcons() {
   S.nodes.forEach((n, i) => {
     if (n.marker) n.marker.setIcon(buildIcon(n));
-    if (n.coverageLayer){
-      const c = nodeColor(i);
-      n.coverageLayer.setStyle({color:c, fillColor:c});
-    }
+    if (n.coverageLayer) styleCoverageLayer(n.coverageLayer,{});
   });
 }
 
@@ -1812,6 +1809,18 @@ function knifeEdgeLossDb(nu){
   return 6.9 + 20 * Math.log10(t);
 }
 
+function fsplDb(distM, fMHz){
+  return 20*Math.log10(Math.max(distM,1)/1000)+20*Math.log10(fMHz)+32.44;
+}
+
+function coverageMarginColor(marginDb){
+  if(marginDb >= 12) return '#2ecc71';
+  if(marginDb >= 3) return '#a3d977';
+  if(marginDb >= 0) return '#f39c12';
+  if(marginDb >= -6) return '#e67e22';
+  return '#e74c3c';
+}
+
 // Bearing → destination point on a sphere (great-circle).
 function destPoint(lat, lng, bearingDeg, distM){
   const R = R_EARTH, br = bearingDeg * Math.PI / 180;
@@ -1930,9 +1939,14 @@ function toggleNodeRfOverride(id){
 function invalidateNodeCoverage(node, redraw){
   node.coverageDirty = true;
   if(redraw && node.coverageLayer && node.coverageOn){
-    node.coverageLayer.setStyle({dashArray:'4 4', fillOpacity:0.05});
+    styleCoverageLayer(node.coverageLayer,{dashArray:'4 4', fillOpacity:0.05});
   }
   updateCovBtn(node);
+}
+
+function styleCoverageLayer(layer, style){
+  if(layer?.setStyle) layer.setStyle(style);
+  else layer?.eachLayer?.(child=>child.setStyle?.(style));
 }
 
 function updateCovBtn(node){
@@ -2026,6 +2040,7 @@ async function _computeNodeCoverageImpl(node){
     : `cap ${(searchCap/1000).toFixed(0)} km, Friis ${(friisRange/1000).toFixed(0)} km`;
   toast(`${node.name}: computing rays (${rangeReason}, ${(maxRange/samples).toFixed(0)} m steps)…`);
   const reach = [];   // [{az, dist, latlng}]
+  const heatRays = []; // [{az, samples:[{dist, latlng, marginDb, diffLossDb}]}]
 
   for(let r = 0; r < rays; r++){
     const az = r * 360 / rays;
@@ -2047,30 +2062,40 @@ async function _computeNodeCoverageImpl(node){
       throw new Error(`terrain tile fetch failed at ray ${r}: ${e.message||e}`);
     }
     elArr.forEach(v => elevs.push(v));
-    // Walk outward along the ray and keep the farthest sample that has a clear
-    // path from the source. A near low receiver can be blocked while a farther
-    // receiver on higher ground is clear, so do not stop at the first failure.
+    const raySamples = [{dist:0, latlng:[node.lat,node.lng], marginDb:Infinity, diffLossDb:0}];
+    // Walk outward along the ray and keep the farthest sample with non-negative
+    // link margin. A near low receiver can be blocked while a farther receiver
+    // on higher ground is usable, so do not stop at the first failure.
     let reachIdx = 0;
     for(let s = 1; s <= samples; s++){
       const dS = dists[s];                       // distance src→candidate RX
       const rxAlt = elevs[s] + g.rxAntH;         // RX antenna tip elevation
-      let clearAll = true;
+      let maxNu = -Infinity;
       for(let j = 1; j < s; j++){
         const dJ = dists[j];                     // distance src→intermediate point
         const t = dJ / dS;                       // fraction along the LOS line
         const los = srcH + (rxAlt - srcH) * t;   // LOS height above the point
         const eff = elevs[j] + bulge(dJ, dS - dJ, g.K);   // terrain + earth curvature
-        const fz = g.fresnelPct > 0 ? fresnel1(dJ, dS - dJ, g.freq) * g.fresnelPct : 0;
-        if(los - eff - fz <= 0){ clearAll = false; break; }   // obstructed
+        const fz = fresnel1(dJ, dS - dJ, g.freq);
+        const clear = los - eff;
+        const nu = fz > 0 ? Math.SQRT2*(-clear)/fz : -Infinity;
+        if(nu > maxNu) maxNu = nu;
       }
-      if(clearAll) reachIdx = s;
+      const diffLossDb = knifeEdgeLossDb(maxNu);
+      const pathLossDb = fsplDb(dS, g.freq) + diffLossDb;
+      const rxPowerDbm = rf.tx + rf.gain + rf.gain - pathLossDb;
+      const marginDb = rxPowerDbm - rf.rx - g.margin;
+      raySamples.push({dist:dS, latlng:points[s], marginDb, diffLossDb});
+      if(marginDb >= 0) reachIdx = s;
     }
     const reachDist = dists[reachIdx];
     const [la, ln] = destPoint(node.lat, node.lng, az, Math.max(reachDist, 1));
     reach.push({az, dist:reachDist, latlng:[la, ln]});
+    heatRays.push({az, samples:raySamples});
   }
 
   node.coverageRays = reach;
+  node.coverageHeatRays = heatRays;
   node.coverageMaxRange = maxRange;
   node.coverageSearchCap = searchCap;
   node.coverageFriisRange = friisRange;
@@ -2088,17 +2113,39 @@ async function _computeNodeCoverageImpl(node){
 
 function renderCoveragePolygon(node){
   if(node.coverageLayer){ S.map.removeLayer(node.coverageLayer); node.coverageLayer = null; }
-  if(!node.coverageRays || !node.coverageRays.length) return;
+  if(!node.coverageHeatRays || node.coverageHeatRays.length < 2) return;
   const idx = S.nodes.indexOf(node);
   const col = nodeColor(idx);
-  const latlngs = node.coverageRays.map(r => r.latlng);
-  node.coverageLayer = L.polygon(latlngs, {
-    color: col, weight: 1.5, opacity: 0.85,
-    fillColor: col, fillOpacity: 0.18,
-    interactive: false
-  });
+  const group = L.layerGroup();
+  const rays = node.coverageHeatRays;
+  for(let r=0;r<rays.length;r++){
+    const a = rays[r].samples;
+    const b = rays[(r+1)%rays.length].samples;
+    const n = Math.min(a.length,b.length);
+    for(let s=1;s<n;s++){
+      const marginDb = Math.min(a[s].marginDb,b[s].marginDb);
+      const fillColor = coverageMarginColor(marginDb);
+      const cell = L.polygon([a[s-1].latlng,b[s-1].latlng,b[s].latlng,a[s].latlng], {
+        color: fillColor,
+        weight: 0,
+        opacity: 0,
+        fillColor,
+        fillOpacity: marginDb >= 0 ? 0.2 : 0.1,
+        interactive: false
+      });
+      group.addLayer(cell);
+    }
+  }
+  if(node.coverageRays?.length){
+    const outline = node.coverageRays.map(r=>r.latlng);
+    outline.push(node.coverageRays[0].latlng);
+    group.addLayer(L.polyline(outline, {
+      color: col, weight: 1.5, opacity: 0.85, interactive: false
+    }));
+  }
+  node.coverageLayer = group;
   if(node.coverageOn) node.coverageLayer.addTo(S.map);
-  if(node.coverageLayer.bringToBack) node.coverageLayer.bringToBack();
+  node.coverageLayer.eachLayer?.(layer=>layer.bringToBack?.());
 }
 
 async function computeAllCoverage(){
