@@ -63,7 +63,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .wp-card:active{cursor:grabbing}
 .wp-card.active{background:rgba(0,200,240,.08);border-color:var(--accent)}
 .wp-card.drag-over{border-color:var(--accent)!important}
-.wp-card input{user-select:text}
+.wp-card input{user-select:text;cursor:text}
 .wp-card button,.wp-card label{user-select:none}
 
 .wp-row1{display:flex;align-items:center;gap:5px;margin-bottom:5px}
@@ -1115,14 +1115,30 @@ function renderNodeList() {
         <div><label>Gain dBi</label><input type="number" step="0.5" value="${rf.gain}" onchange="setNodeRf(${node.id},'gainDbi',+this.value)"/></div>
         <div><label>RX dBm</label><input type="number" step="1" value="${rf.rx}" onchange="setNodeRf(${node.id},'rxDbm',+this.value)"/></div>
       </div>`;
-    card.querySelectorAll('input,button,label,select,textarea').forEach(el=>{
+    const cardControlSelector = 'input,button,label,select,textarea';
+    const restoreCardDrag = () => { card.draggable = true; };
+    card.querySelectorAll(cardControlSelector).forEach(el=>{
       el.draggable=false;
       el.addEventListener('click', e=>e.stopPropagation());
-      el.addEventListener('mousedown', e=>e.stopPropagation());
+      el.addEventListener('mousedown', e=>{
+        card.draggable=false;
+        e.stopPropagation();
+      });
+      el.addEventListener('pointerdown', e=>{
+        card.draggable=false;
+        e.stopPropagation();
+        document.addEventListener('pointerup', restoreCardDrag, { once:true });
+      });
+      el.addEventListener('focus', () => { card.draggable=false; });
+      el.addEventListener('blur', restoreCardDrag);
+      el.addEventListener('dragstart', e=>e.preventDefault());
+    });
+    card.addEventListener('pointerdown', e => {
+      if(!e.target.closest(cardControlSelector)) card.draggable=true;
     });
     card.addEventListener('click', () => selectNodeView(node.id));
     card.addEventListener('dragstart', e => {
-      if(e.target.closest('input,button,label,select,textarea')){
+      if(e.target.closest(cardControlSelector)){
         e.preventDefault();
         S._dragId=null;
         return;
