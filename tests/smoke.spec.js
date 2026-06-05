@@ -74,4 +74,107 @@ test.describe('RF LOS Planner — smoke', () => {
 
     expect(pageErrors, `Uncaught page errors:\n${pageErrors.join('\n')}`).toEqual([]);
   });
+
+  test('path visibility does not accidentally hide shared links', async ({ page }) => {
+    const pageErrors = trackErrors(page);
+    await page.goto('/index.html', { waitUntil: 'load' });
+
+    const visibility = await page.evaluate(() => {
+      const a = addNode(-37.81, 144.96);
+      const b = addNode(-37.79, 144.99);
+      addEdge(a.id, b.id);
+      const St = window.S || S;
+      const autoPath = St.paths[0];
+      St.paths.push({ id: St.nextId++, name: 'Shared link path', hidden: false, nodeIds: [a.id, b.id] });
+
+      setPathHidden(autoPath.id, true);
+      const afterHide = {
+        autoPathHidden: autoPath.hidden,
+        sharedPathHidden: St.paths[1].hidden,
+        edgeHidden: St.edges[0].hidden,
+        edgeVisible: isEdgeVisible(St.edges[0])
+      };
+
+      const c = addNode(-37.83, 144.93);
+      const d = addNode(-37.84, 144.94);
+      const e = addNode(-37.85, 144.95);
+      addEdge(c.id, d.id);
+      addEdge(d.id, e.id);
+      const multiPath = { id: St.nextId++, name: 'Multi-hop path', hidden: false, nodeIds: [c.id, d.id, e.id] };
+      St.paths.push(multiPath);
+      const multiEdges = pathEdges(multiPath);
+
+      setEdgeHidden(multiEdges[0].id, true);
+      const afterPartialLinkHide = { multiPathHidden: multiPath.hidden };
+
+      setEdgeHidden(multiEdges[1].id, true);
+      const afterAllLinkHide = { multiPathHidden: multiPath.hidden };
+
+      hideAllPaths();
+      const afterHideAll = {
+        autoPathHidden: St.paths[0].hidden,
+        sharedPathHidden: St.paths[1].hidden,
+        edgeHidden: St.edges[0].hidden,
+        edgeVisible: isEdgeVisible(St.edges[0])
+      };
+
+      showOnlyEdge(St.edges[0].id);
+      const selectedSingleWeight = St.edges[0].line.options.weight;
+
+      return { afterHide, afterPartialLinkHide, afterAllLinkHide, afterHideAll, selectedSingleWeight };
+    });
+
+    expect(visibility.afterHide).toEqual({
+      autoPathHidden: true,
+      sharedPathHidden: false,
+      edgeHidden: false,
+      edgeVisible: true
+    });
+    expect(visibility.afterPartialLinkHide).toEqual({ multiPathHidden: false });
+    expect(visibility.afterAllLinkHide).toEqual({ multiPathHidden: true });
+    expect(visibility.afterHideAll).toEqual({
+      autoPathHidden: true,
+      sharedPathHidden: true,
+      edgeHidden: true,
+      edgeVisible: false
+    });
+    expect(visibility.selectedSingleWeight).toBe(2);
+
+    expect(pageErrors, `Uncaught page errors:\n${pageErrors.join('\n')}`).toEqual([]);
+  });
+
+  test('coverage rays keep scanning after a near blocked sample', async ({ page }) => {
+    const pageErrors = trackErrors(page);
+    await page.goto('/index.html', { waitUntil: 'load' });
+
+    const reachKm = await page.evaluate(async () => {
+      document.getElementById('inpCovMaxKm').value = '10';
+      document.getElementById('inpCovRays').value = '24';
+      document.getElementById('inpCovSamples').value = '30';
+      document.getElementById('inpCovFresnel').value = '0';
+
+      const node = addNode(0, 0);
+      node.elev = 0;
+      node.antH = 6;
+      node.coverageOn = true;
+
+      const originalTileElevAt = tileElevAt;
+      tileElevAt = async (lat, lng) => {
+        const d = haversine(0, 0, lat, lng);
+        if (d > 250 && d < 500) return 100;      // blocks the first short candidate
+        if (d > 9000 && d < 11000) return 4000;  // farther high ground is clear
+        return 0;
+      };
+
+      try {
+        await _computeNodeCoverageImpl(node);
+        return node.coverageReachMax / 1000;
+      } finally {
+        tileElevAt = originalTileElevAt;
+      }
+    });
+
+    expect(reachKm).toBeGreaterThan(9);
+    expect(pageErrors, `Uncaught page errors:\n${pageErrors.join('\n')}`).toEqual([]);
+  });
 });

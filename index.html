@@ -163,7 +163,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .hop-top{display:flex;align-items:center;gap:5px;margin-bottom:3px}
 .hop-name{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--accent);flex:1}
 .badge{font-family:'Share Tech Mono',monospace;font-size:9px;font-weight:700;padding:1px 5px;border-radius:2px;border:1px solid;letter-spacing:1px}
-.badge.ok{color:var(--green);border-color:var(--green);background:rgba(46,204,113,.1)}
+.badge.clear{color:var(--green);border-color:var(--green);background:rgba(46,204,113,.1)}
 .badge.marginal{color:var(--orange);border-color:var(--orange);background:rgba(243,156,18,.1)}
 .badge.blocked{color:var(--red);border-color:var(--red);background:rgba(231,76,60,.1)}
 .hop-stats{display:flex;flex-wrap:wrap;gap:4px 14px}
@@ -380,8 +380,8 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <div class="field-row" style="margin-bottom:6px">
         <label>RX Ant (m)</label>
         <input type="number" id="inpRxAntH" value="2" step="0.5" min="0" style="width:58px" onchange="onCoverageParamChanged()">
-        <label>Max (km)</label>
-        <input type="number" id="inpCovMaxKm" value="50" step="1" min="1" max="100" style="width:58px" title="Cap the search radius. Larger = slower compute + more tile downloads." onchange="onCoverageParamChanged()">
+        <label>Search cap (km)</label>
+        <input type="number" id="inpCovMaxKm" value="50" step="1" min="1" max="100" style="width:58px" title="Maximum distance to test, not guaranteed coverage. Terrain, Fresnel clearance, and link budget can stop coverage sooner." onchange="onCoverageParamChanged()">
       </div>
       <div class="field-row" style="margin-bottom:6px">
         <label>Rays</label>
@@ -518,7 +518,6 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <script>
-const BUILD_ID='20260605-14';
 // ═══════════════════════════════════════════════════════════
 //  STATE
 //  Graph model: nodes (waypoints) + edges (links between any two)
@@ -538,6 +537,7 @@ const S = {
   hoverMarker: null,
   profileHover: null,
   redrawProfile: null,
+  profileCursorHideFrame: null,
   _dragId: null,
   showLinks: true,
   showPaths: true
@@ -571,9 +571,6 @@ function clampNum(v, min, max, fallback) {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, n));
-}
-function clampInt(v, min, max, fallback) {
-  return Math.round(clampNum(v, min, max, fallback));
 }
 function optionNum(v, allowed, fallback) {
   const n = Number(v);
@@ -767,7 +764,7 @@ function addEdge(aId, bId) {
   const edge = { id: S.nextId++, aId, bId, hidden: false, line: null, hitLine: null, result: null, profile: null };
   S.edges.push(edge);
   const a = S.nodes.find(n=>n.id===aId), b = S.nodes.find(n=>n.id===bId);
-  edge.line = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#4a6278', weight:2, opacity:.7, dashArray:'5 4' }).addTo(S.map);
+  edge.line = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#4a6278', weight:2, opacity:.7, dashArray:'5 4', interactive:false }).addTo(S.map);
   edge.hitLine = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#ffffff', weight:24, opacity:0, interactive:true }).addTo(S.map);
   attachEdgeHandlers(edge);
   highlightActiveMapView();
@@ -805,8 +802,9 @@ function removeEdge(id) {
 }
 
 function redrawEdgeLines() {
+  const nodesById=nodeByIdMap();
   S.edges.forEach(e => {
-    const a = S.nodes.find(n=>n.id===e.aId), b = S.nodes.find(n=>n.id===e.bId);
+    const a = nodesById.get(e.aId), b = nodesById.get(e.bId);
     if (a && b && e.line) e.line.setLatLngs([[a.lat,a.lng],[b.lat,b.lng]]);
     if (a && b && e.hitLine) e.hitLine.setLatLngs([[a.lat,a.lng],[b.lat,b.lng]]);
   });
@@ -816,15 +814,66 @@ function isEdgeVisible(edge){
   return !!edge && S.showLinks && !edge.hidden;
 }
 
-function pathEdges(path){
+function visibleEdgeCount(){
+  return S.edges.reduce((count,e)=>count+(isEdgeVisible(e)?1:0),0);
+}
+
+function nodeByIdMap(){
+  return new Map(S.nodes.map(n=>[n.id,n]));
+}
+
+function edgePairKey(aId,bId){
+  return aId<bId?`${aId}|${bId}`:`${bId}|${aId}`;
+}
+
+function edgeByNodePairMap(){
+  const edgesByPair=new Map();
+  S.edges.forEach(e=>edgesByPair.set(edgePairKey(e.aId,e.bId),e));
+  return edgesByPair;
+}
+
+function edgeBetween(aId,bId,edgesByPair=edgeByNodePairMap()){
+  return edgesByPair.get(edgePairKey(aId,bId));
+}
+
+function pathLabel(path,nodesById=nodeByIdMap()){
+  return path.nodeIds.map(id=>nodesById.get(id)?.name||'?').join(' → ');
+}
+
+function pathEdges(path,edgesByPair=edgeByNodePairMap()){
   const found=[];
   if(!path) return found;
   for(let i=0;i<path.nodeIds.length-1;i++){
-    const aId=path.nodeIds[i], bId=path.nodeIds[i+1];
-    const edge=S.edges.find(e=>(e.aId===aId&&e.bId===bId)||(e.aId===bId&&e.bId===aId));
+    const edge=edgeBetween(path.nodeIds[i],path.nodeIds[i+1],edgesByPair);
     if(edge) found.push(edge);
   }
   return found;
+}
+
+function pathUsesEdge(path, edge){
+  if(!path||!edge) return false;
+  for(let i=0;i<path.nodeIds.length-1;i++){
+    const aId=path.nodeIds[i], bId=path.nodeIds[i+1];
+    if((edge.aId===aId&&edge.bId===bId)||(edge.aId===bId&&edge.bId===aId)) return true;
+  }
+  return false;
+}
+
+function edgeHasVisiblePath(edge, exceptPathId=null){
+  return S.paths.some(p=>p.id!==exceptPathId&&!p.hidden&&pathUsesEdge(p, edge));
+}
+
+function syncPathHiddenFromEdges(){
+  let activePathHidden=false;
+  const edgesByPair=edgeByNodePairMap();
+  S.paths.forEach(p=>{
+    const edges=pathEdges(p,edgesByPair);
+    if(edges.length&&edges.every(e=>e.hidden)){
+      p.hidden=true;
+      if(S.activeView?.type==='path'&&S.activeView.id===p.id) activePathHidden=true;
+    }
+  });
+  if(activePathHidden) clearActiveView();
 }
 
 function setEdgeHidden(id, hidden){
@@ -832,7 +881,9 @@ function setEdgeHidden(id, hidden){
   if(!edge) return;
   edge.hidden=!!hidden;
   if(edge.hidden&&S.activeView?.type==='edge'&&S.activeView.id===id) clearActiveView();
+  syncPathHiddenFromEdges();
   renderEdgesPanel();
+  renderPathsPanel();
   renderChartTabs();
   renderResults();
   highlightActiveMapView();
@@ -864,7 +915,9 @@ function showAllLinks(){
 function hideAllLinks(){
   S.edges.forEach(e=>{e.hidden=true;});
   if(S.activeView?.type==='edge') clearActiveView();
+  syncPathHiddenFromEdges();
   renderEdgesPanel();
+  renderPathsPanel();
   renderChartTabs();
   renderResults();
   highlightActiveMapView();
@@ -874,7 +927,9 @@ function setPathHidden(id, hidden){
   const path=S.paths.find(p=>p.id===id);
   if(!path) return;
   path.hidden=!!hidden;
-  pathEdges(path).forEach(e=>{e.hidden=!!hidden;});
+  pathEdges(path).forEach(e=>{
+    e.hidden=path.hidden?!edgeHasVisiblePath(e, path.id):false;
+  });
   if(path.hidden&&S.activeView?.type==='path'&&S.activeView.id===id) clearActiveView();
   renderEdgesPanel();
   renderPathsPanel();
@@ -903,7 +958,8 @@ function showOnlyPath(id){
 
 function showAllPaths(){
   S.paths.forEach(p=>{p.hidden=false;});
-  S.paths.forEach(p=>pathEdges(p).forEach(e=>{e.hidden=false;}));
+  const edgesByPair=edgeByNodePairMap();
+  S.paths.forEach(p=>pathEdges(p,edgesByPair).forEach(e=>{e.hidden=false;}));
   S.showLinks=true;
   S.showPaths=true;
   const links=document.getElementById('inpShowLinks'); if(links) links.checked=true;
@@ -917,7 +973,8 @@ function showAllPaths(){
 
 function hideAllPaths(){
   S.paths.forEach(p=>{p.hidden=true;});
-  S.paths.forEach(p=>pathEdges(p).forEach(e=>{e.hidden=true;}));
+  const edgesByPair=edgeByNodePairMap();
+  S.paths.forEach(p=>pathEdges(p,edgesByPair).forEach(e=>{e.hidden=true;}));
   if(S.activeView?.type==='path') clearActiveView();
   renderEdgesPanel();
   renderPathsPanel();
@@ -1032,12 +1089,13 @@ function clearActiveView(){
 // green, a "blocked" link stays red, etc. — selection never recolours the link.
 function highlightActiveMapView(){
   const activePath=S.activeView?.type==='path'?S.paths.find(p=>p.id===S.activeView.id):null;
+  const shouldEmphasizeSelected=visibleEdgeCount()>1;
+  const edgesByPair=edgeByNodePairMap();
   // Collect the edge ids that make up the active path (consecutive node pairs).
   const pathEdgeIds=new Set();
   if(activePath){
     for(let i=0;i<activePath.nodeIds.length-1;i++){
-      const aId=activePath.nodeIds[i],bId=activePath.nodeIds[i+1];
-      const edge=S.edges.find(e=>(e.aId===aId&&e.bId===bId)||(e.aId===bId&&e.bId===aId));
+      const edge=edgeBetween(activePath.nodeIds[i],activePath.nodeIds[i+1],edgesByPair);
       if(edge) pathEdgeIds.add(edge.id);
     }
   }
@@ -1049,7 +1107,7 @@ function highlightActiveMapView(){
       return;
     }
     const isSelectedEdge=S.activeView?.type==='edge'&&S.activeView.id===e.id;
-    if(isSelectedEdge||pathEdgeIds.has(e.id)){
+    if(shouldEmphasizeSelected&&(isSelectedEdge||pathEdgeIds.has(e.id))){
       // Emphasise by keeping the link's own colour but making it bolder.
       // weight:6 (vs the analysed default of 3) reads clearly as "selected"
       // while preserving the clear/marginal/blocked colour coding.
@@ -1120,7 +1178,8 @@ function openPathBuilder(editId) {
   PB.editId = editId ?? null;
   if (editId != null) {
     const p = S.paths.find(p => p.id === editId);
-    PB.seq = p ? p.nodeIds.filter(id => S.nodes.some(n => n.id === id)) : [];
+    const nodesById=nodeByIdMap();
+    PB.seq = p ? p.nodeIds.filter(id => nodesById.has(id)) : [];
   } else {
     PB.seq = [];
   }
@@ -1131,8 +1190,8 @@ function openPathBuilder(editId) {
 }
 function closePathModal() { document.getElementById('pathModal').classList.remove('open'); }
 
-function pbHasLink(aId, bId) {
-  return S.edges.some(e => (e.aId===aId&&e.bId===bId)||(e.aId===bId&&e.bId===aId));
+function pbHasLink(aId, bId, edgesByPair=edgeByNodePairMap()) {
+  return !!edgeBetween(aId,bId,edgesByPair);
 }
 function pbAddNode(id) { if (!PB.seq.includes(id)) { PB.seq.push(id); renderPathBuilder(); } }
 function pbRemoveAt(i) { PB.seq.splice(i,1); renderPathBuilder(); }
@@ -1144,6 +1203,8 @@ function pbMove(i, dir) {
 }
 
 function renderPathBuilder() {
+  const nodesById=nodeByIdMap();
+  const edgesByPair=edgeByNodePairMap();
   // Left column: every node, click to append (dimmed once added)
   const nodeList = document.getElementById('pbNodeList');
   nodeList.innerHTML = '';
@@ -1165,7 +1226,8 @@ function renderPathBuilder() {
   }
   const missing = [];
   PB.seq.forEach((id, i) => {
-    const node = S.nodes.find(n => n.id === id);
+    const node = nodesById.get(id);
+    if(!node) return;
     const idx = S.nodes.indexOf(node);
     const item = document.createElement('div');
     item.className = 'pb-seq-item';
@@ -1178,8 +1240,9 @@ function renderPathBuilder() {
       <button class="pb-rm" title="Remove" onclick="pbRemoveAt(${i})">✕</button>`;
     seqList.appendChild(item);
     if (i < PB.seq.length - 1) {
-      const ok = pbHasLink(id, PB.seq[i+1]);
-      if (!ok) missing.push([node.name, S.nodes.find(n => n.id === PB.seq[i+1]).name]);
+      const nextNode = nodesById.get(PB.seq[i+1]);
+      const ok = pbHasLink(id, PB.seq[i+1], edgesByPair);
+      if (!ok) missing.push([node.name, nextNode?.name||'?']);
       const lk = document.createElement('div');
       lk.className = 'pb-link ' + (ok ? 'ok' : 'bad');
       lk.textContent = ok ? '│ ✓ linked' : '│ ✗ no link';
@@ -1203,9 +1266,11 @@ function renderPathBuilder() {
 
 function savePathModal() {
   if (PB.seq.length < 2) return;
-  for (let i=0;i<PB.seq.length-1;i++) if (!pbHasLink(PB.seq[i], PB.seq[i+1])) return;
+  const nodesById=nodeByIdMap();
+  const edgesByPair=edgeByNodePairMap();
+  for (let i=0;i<PB.seq.length-1;i++) if (!pbHasLink(PB.seq[i], PB.seq[i+1], edgesByPair)) return;
   const nodeIds = PB.seq.slice();
-  const name = nodeIds.map(id => S.nodes.find(n=>n.id===id).name).join(' → ');
+  const name = nodeIds.map(id => nodesById.get(id)?.name||'?').join(' → ');
   if (PB.editId != null) {
     const p = S.paths.find(p => p.id === PB.editId);
     if (p) { p.nodeIds = nodeIds; p.name = name; }
@@ -1234,10 +1299,10 @@ function removePath(id) {
   document.getElementById('pathCount').textContent = S.paths.length;
 }
 
-function pathHasAnalysedProfiles(path){
+function pathHasAnalysedProfiles(path,edgesByPair=edgeByNodePairMap()){
   return !!path&&path.nodeIds.slice(0,-1).every((id,i)=>{
     const nextId=path.nodeIds[i+1];
-    return S.edges.some(e=>e.profile&&((e.aId===id&&e.bId===nextId)||(e.aId===nextId&&e.bId===id)));
+    return !!edgeBetween(id,nextId,edgesByPair)?.profile;
   });
 }
 
@@ -1281,7 +1346,7 @@ function renderNodeList() {
         <input type="checkbox" id="cov_${node.id}" ${node.coverageOn?'checked':''} onchange="setNodeCoverageOn(${node.id},this.checked)"/>
         <label for="cov_${node.id}" style="cursor:pointer">COVERAGE</label>
         <button class="wp-cov-btn ${covBtnClass}" id="covBtn_${node.id}" onclick="computeNodeCoverage(${node.id})">${covBtnLabel}</button>
-        <span class="wp-cov-status" id="covStat_${node.id}">${node.coverageComputed?'cached':''}</span>
+        <span class="wp-cov-status" id="covStat_${node.id}">${coverageStatusText(node)}</span>
       </div>
       <div class="wp-rf-toggle ${node.rfOverride?'open':''}" onclick="toggleNodeRfOverride(${node.id})">
         <span class="chev">▸</span> RF OVERRIDE ${node.rfOverride?'(custom)':'(using global)'}
@@ -1339,9 +1404,10 @@ function renderEdgesPanel() {
   const panel = document.getElementById('edgesPanel');
   if (!S.showLinks) { panel.innerHTML='<div class="no-data">Links hidden.</div>'; return; }
   if (!S.edges.length) { panel.innerHTML='<div class="no-data">No links yet.</div>'; return; }
+  const nodesById=nodeByIdMap();
   panel.innerHTML='';
   S.edges.forEach(e => {
-    const a=S.nodes.find(n=>n.id===e.aId), b=S.nodes.find(n=>n.id===e.bId);
+    const a=nodesById.get(e.aId), b=nodesById.get(e.bId);
     if (!a||!b) return;
     const statusCol = !e.result ? '#4a6278' : e.result.status==='clear' ? '#2ecc71' : e.result.status==='marginal' ? '#f39c12' : '#e74c3c';
     const statusTxt = !e.result ? '' : e.result.status==='clear' ? '✓' : e.result.status==='marginal' ? '⚠' : e.result.status==='error' ? '!' : '✕';
@@ -1374,10 +1440,11 @@ function renderPathsPanel() {
   const panel = document.getElementById('pathsPanel');
   if (!S.showPaths) { panel.innerHTML='<div class="no-data">Paths hidden.</div>'; return; }
   if (!S.paths.length) { panel.innerHTML='<div class="no-data">No paths defined.</div>'; return; }
+  const nodesById=nodeByIdMap();
   panel.innerHTML='';
   S.paths.forEach(p => {
     // Rebuild name from current node names
-    const names = p.nodeIds.map(id=>S.nodes.find(n=>n.id===id)?.name||'?').join(' → ');
+    const names = pathLabel(p,nodesById);
     const isActive = S.activeView?.type==='path' && S.activeView.id===p.id;
     const row = document.createElement('div');
     row.className='path-row'+(isActive?' active':'')+(p.hidden?' hidden':'');
@@ -1665,23 +1732,6 @@ async function tileElevAt(lat, lng, z = TERRAIN_Z){
   return e00 * (1-dx)*(1-dy) + e10 * dx*(1-dy) + e01 * (1-dx)*dy + e11 * dx*dy;
 }
 
-async function prefetchTilesForBbox(minLat, minLng, maxLat, maxLng, z = TERRAIN_Z){
-  const x0 = Math.floor(lng2tileX(minLng, z));
-  const x1 = Math.floor(lng2tileX(maxLng, z));
-  const y0 = Math.floor(lat2tileY(maxLat, z));   // y inverts at higher lat
-  const y1 = Math.floor(lat2tileY(minLat, z));
-  const promises = [];
-  const n = Math.pow(2, z);
-  for(let x = x0; x <= x1; x++){
-    for(let y = y0; y <= y1; y++){
-      const xx = ((x % n) + n) % n;
-      const yy = Math.max(0, Math.min(n - 1, y));
-      promises.push(loadTile(z, xx, yy));
-    }
-  }
-  await Promise.all(promises);
-}
-
 // Kept for backward compatibility with the LOS analyser path
 async function getElevationBatch(lats, lngs){
   return Promise.all(lats.map((lat, i) => tileElevAt(+lat, +lngs[i])));
@@ -1893,7 +1943,14 @@ function updateCovBtn(node){
   else if(node.coverageDirty){ b.textContent = 'RECOMPUTE'; b.classList.add('dirty'); }
   else { b.textContent = '✓ RECOMPUTE'; b.classList.add('ok'); }
   const st = document.getElementById(`covStat_${node.id}`);
-  if(st) st.textContent = node.coverageComputed ? (node.coverageDirty ? 'stale' : 'cached') : '';
+  if(st) st.textContent = coverageStatusText(node);
+}
+
+function coverageStatusText(node){
+  if(!node.coverageComputed) return '';
+  if(node.coverageDirty) return 'stale';
+  if(node.coverageReachMax == null || node.coverageMaxRange == null) return 'cached';
+  return `max ${(node.coverageReachMax/1000).toFixed(1)}/${(node.coverageMaxRange/1000).toFixed(0)}km`;
 }
 
 function setNodeCoverageOn(id, on){
@@ -1957,9 +2014,9 @@ async function _computeNodeCoverageImpl(node){
     catch(e){ throw new Error(`elevation tile fetch failed (${e.message||e})`); }
   }
 
-  toast(`${node.name}: computing rays (max ${(maxRange/1000).toFixed(0)} km, Friis would allow ${(friisRange/1000).toFixed(0)} km)…`);
   const srcH = node.elev + node.antH;
   const rays = g.rays, samples = g.samples;
+  toast(`${node.name}: computing rays (cap ${(maxRange/1000).toFixed(0)} km, ${(maxRange/samples).toFixed(0)} m steps, Friis ${(friisRange/1000).toFixed(0)} km)…`);
   const reach = [];   // [{az, dist, latlng}]
 
   for(let r = 0; r < rays; r++){
@@ -1982,12 +2039,9 @@ async function _computeNodeCoverageImpl(node){
       throw new Error(`terrain tile fetch failed at ray ${r}: ${e.message||e}`);
     }
     elArr.forEach(v => elevs.push(v));
-    // Walk outward along the ray and find the farthest sample that still has a
-    // clear path from the source. For each candidate receiver sample `s` we test
-    // every intermediate terrain sample `j` (0<j<s): the straight LOS line from
-    // the source antenna to the receiver antenna must clear the earth-bulge-
-    // corrected terrain, plus the configured fraction of the 1st Fresnel radius.
-    // The first sample that fails ends this ray's reach (terrain shadows the rest).
+    // Walk outward along the ray and keep the farthest sample that has a clear
+    // path from the source. A near low receiver can be blocked while a farther
+    // receiver on higher ground is clear, so do not stop at the first failure.
     let reachIdx = 0;
     for(let s = 1; s <= samples; s++){
       const dS = dists[s];                       // distance src→candidate RX
@@ -2001,8 +2055,7 @@ async function _computeNodeCoverageImpl(node){
         const fz = g.fresnelPct > 0 ? fresnel1(dJ, dS - dJ, g.freq) * g.fresnelPct : 0;
         if(los - eff - fz <= 0){ clearAll = false; break; }   // obstructed
       }
-      if(!clearAll) break;
-      reachIdx = s;
+      if(clearAll) reachIdx = s;
     }
     const reachDist = dists[reachIdx];
     const [la, ln] = destPoint(node.lat, node.lng, az, Math.max(reachDist, 1));
@@ -2011,9 +2064,10 @@ async function _computeNodeCoverageImpl(node){
 
   node.coverageRays = reach;
   node.coverageMaxRange = maxRange;
+  node.coverageReachMax = reach.reduce((m,r)=>Math.max(m,r.dist),0);
   node.coverageComputed = true;
   node.coverageDirty = false;
-  hideToast();
+  toast(`${node.name}: terrain-limited max ${(node.coverageReachMax/1000).toFixed(2)} km of ${(maxRange/1000).toFixed(0)} km cap.`, 3500);
   renderCoveragePolygon(node);
   updateCovBtn(node);
 }
@@ -2062,9 +2116,10 @@ async function runAnalysis(){
   const preferredView=S.activeView?{...S.activeView}:null;
   toast('Analysing…');
   try{
+    const nodesById=nodeByIdMap();
     for(let ei=0;ei<S.edges.length;ei++){
       const e=S.edges[ei];
-      const a=S.nodes.find(n=>n.id===e.aId),b=S.nodes.find(n=>n.id===e.bId);
+      const a=nodesById.get(e.aId),b=nodesById.get(e.bId);
       if(!a||!b) continue;
       toast(`Fetching terrain: ${a.name} ↔ ${b.name} (${ei+1}/${S.edges.length})`);
       const dist=haversine(a.lat,a.lng,b.lat,b.lng);
@@ -2129,15 +2184,16 @@ async function runAnalysis(){
     renderChartTabs();
 
     // Preserve the current chart selection when it is still valid.
+    const edgesByPair=edgeByNodePairMap();
     const preferredPath=S.showPaths&&preferredView?.type==='path'?S.paths.find(p=>p.id===preferredView.id&&!p.hidden):null;
     const preferredEdge=preferredView?.type==='edge'?S.edges.find(e=>e.id===preferredView.id&&!e.hidden&&e.profile):null;
-    const preferredNode=preferredView?.type==='node'?S.nodes.find(n=>n.id===preferredView.id):null;
-    const analysedPath=S.showPaths?S.paths.find(p=>!p.hidden&&pathHasAnalysedProfiles(p)):null;
+    const preferredNode=preferredView?.type==='node'?nodesById.get(preferredView.id):null;
+    const analysedPath=S.showPaths?S.paths.find(p=>!p.hidden&&pathHasAnalysedProfiles(p,edgesByPair)):null;
     const analysedEdge=S.edges.find(e=>!e.hidden&&e.profile);
     if(preferredNode){
       S.activeView={type:'node',id:preferredNode.id};
       clearCanvas();
-    } else if(preferredPath&&pathHasAnalysedProfiles(preferredPath)){
+    } else if(preferredPath&&pathHasAnalysedProfiles(preferredPath,edgesByPair)){
       S.activeView={type:'path',id:preferredPath.id};
       showPathProfile(preferredPath.id);
     } else if(preferredEdge){
@@ -2170,10 +2226,11 @@ function renderResults(){
     el.innerHTML=S.edges.some(e=>e.result)?'<div class="no-data">No visible analysed links.</div>':'<div class="no-data">Add nodes, links, then analyse.</div>';
     return;
   }
+  const nodesById=nodeByIdMap();
   el.innerHTML='';
   analysed.forEach(e=>{
     const r=e.result;
-    const a=S.nodes.find(n=>n.id===e.aId),b=S.nodes.find(n=>n.id===e.bId);
+    const a=nodesById.get(e.aId),b=nodesById.get(e.bId);
     const active=S.activeView?.type==='edge'&&S.activeView?.id===e.id;
     const div=document.createElement('div');
     div.className='hop-card'+(active?' active-hop':'');
@@ -2208,11 +2265,12 @@ function renderResults(){
 // ═══════════════════════════════════════════════════════════
 function renderChartTabs(){
   const tabs=document.getElementById('chartTabs');
+  const nodesById=nodeByIdMap();
   tabs.innerHTML='';
   // Path tabs first
   if(S.showPaths){
     S.paths.filter(p=>!p.hidden).forEach(p=>{
-      const names=p.nodeIds.map(id=>S.nodes.find(n=>n.id===id)?.name||'?').join(' → ');
+      const names=pathLabel(p,nodesById);
       const btn=document.createElement('button');
       btn.className='chart-tab'+(S.activeView?.type==='path'&&S.activeView?.id===p.id?' active':'');
       btn.textContent=names; btn.title=names;
@@ -2223,7 +2281,7 @@ function renderChartTabs(){
   // Individual edge tabs
   if(S.showLinks){
     S.edges.filter(e=>!e.hidden&&e.result&&e.profile).forEach(e=>{
-      const a=S.nodes.find(n=>n.id===e.aId),b=S.nodes.find(n=>n.id===e.bId);
+      const a=nodesById.get(e.aId),b=nodesById.get(e.bId);
       const label=`${a?.name||'?'} ↔ ${b?.name||'?'}`;
       const btn=document.createElement('button');
       btn.className='chart-tab'+(S.activeView?.type==='edge'&&S.activeView?.id===e.id?' active':'');
@@ -2260,14 +2318,16 @@ function showPathProfile(pathId){
   highlightActiveMapView();
 
   // Collect edges in order — each consecutive pair of nodeIds
+  const nodesById=nodeByIdMap();
+  const edgesByPair=edgeByNodePairMap();
   const hops=[];
   for(let i=0;i<path.nodeIds.length-1;i++){
     const aId=path.nodeIds[i],bId=path.nodeIds[i+1];
-    const e=S.edges.find(e2=>(e2.aId===aId&&e2.bId===bId)||(e2.aId===bId&&e2.bId===aId));
+    const e=edgeBetween(aId,bId,edgesByPair);
     if(!e?.profile){
       S.profileHover=null;
       hideProfileHoverMarker();
-      toast(`Link ${S.nodes.find(n=>n.id===aId)?.name} ↔ ${S.nodes.find(n=>n.id===bId)?.name} not yet analysed. Run Analyse first.`,3000);
+      toast(`Link ${nodesById.get(aId)?.name} ↔ ${nodesById.get(bId)?.name} not yet analysed. Run Analyse first.`,3000);
       return;
     }
     // Flip if needed so direction matches path order
@@ -2275,7 +2335,7 @@ function showPathProfile(pathId){
     hops.push({e,flip});
   }
 
-  const names=path.nodeIds.map(id=>S.nodes.find(n=>n.id===id)?.name||'?');
+  const names=path.nodeIds.map(id=>nodesById.get(id)?.name||'?');
   const totalDist=hops.reduce((s,h)=>s+h.e.profile.dist,0);
   document.getElementById('chartTitle').textContent=`${names.join(' → ')}  |  Total ${(totalDist/1000).toFixed(2)} km`;
 
@@ -2603,13 +2663,21 @@ function profileDistanceForEdgeHover(edge,latlng){
 
 function handleMapLineHover(edge,latlng){
   if(!edge.profile) return;
+  if(S.profileCursorHideFrame){
+    cancelAnimationFrame(S.profileCursorHideFrame);
+    S.profileCursorHideFrame=null;
+  }
   const dist=profileDistanceForEdgeHover(edge,latlng);
   if(dist===null) return;
   drawProfileCursorAtDistance(dist);
 }
 
 function hideProfileCursor(){
-  if(S.redrawProfile) S.redrawProfile();
+  if(S.profileCursorHideFrame) cancelAnimationFrame(S.profileCursorHideFrame);
+  S.profileCursorHideFrame=requestAnimationFrame(()=>{
+    S.profileCursorHideFrame=null;
+    if(S.redrawProfile) S.redrawProfile();
+  });
 }
 
 function initProfileHover(){
@@ -2918,7 +2986,7 @@ function loadFromHash(){
       const a=S.nodes.find(n=>n.id===ed.aId),b=S.nodes.find(n=>n.id===ed.bId);
       if(!a||!b) return;
       const edge={id:ed.id,aId:ed.aId,bId:ed.bId,hidden:!!ed.hidden,line:null,hitLine:null,result:null,profile:null};
-      edge.line=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#4a6278',weight:2,opacity:.7,dashArray:'5 4'}).addTo(S.map);
+      edge.line=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#4a6278',weight:2,opacity:.7,dashArray:'5 4',interactive:false}).addTo(S.map);
       edge.hitLine=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#ffffff',weight:24,opacity:0,interactive:true}).addTo(S.map);
       attachEdgeHandlers(edge);
       S.edges.push(edge);
