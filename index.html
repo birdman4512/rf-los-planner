@@ -388,12 +388,12 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <select id="inpCovRays" style="width:90px" title="More rays = smoother polygon. Diminishing returns past 180 (DEM is ~30 m)." onchange="onCoverageParamChanged()">
           <option value="24">24 (15°)</option>
           <option value="36">36 (10°)</option>
-          <option value="72" selected>72 (5°)</option>
+          <option value="72">72 (5°)</option>
           <option value="144">144 (2.5°)</option>
-          <option value="360">360 (1°)</option>
+          <option value="360" selected>360 (1°)</option>
         </select>
         <label>Samples / ray</label>
-        <select id="inpCovSamples" style="width:60px" title="Samples per ray — fewer = faster but coarser" onchange="onCoverageParamChanged()">
+        <select id="inpCovSamples" style="width:60px" title="Minimum samples per ray (floor). The sweep auto-samples terrain at ~40 m steps to resolve near hills, so raising this only matters for very short ranges." onchange="onCoverageParamChanged()">
           <option value="30">30</option>
           <option value="50" selected>50</option>
           <option value="80">80</option>
@@ -414,7 +414,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <button class="btn primary" onclick="computeAllCoverage()">▶ COMPUTE ALL</button>
       </div>
       <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:1px;line-height:1.4">
-        Heatmap: green strong, orange marginal, red below margin. Compute downloads terrain tiles (AWS Open Terrain, ~30 m global).
+        Heatmap fades green (strong) → yellow → red (marginal) with signal fade; areas with no usable coverage (e.g. terrain shadow) are left blank. Compute downloads terrain tiles (AWS Open Terrain, ~30 m global).
       </div>
     </div>
 
@@ -565,6 +565,11 @@ const LIMITS = {
 };
 const COVERAGE_RAY_OPTIONS = [24, 36, 72, 144, 360];
 const COVERAGE_SAMPLE_OPTIONS = [30, 50, 80];
+// Target terrain sample step (m) along each coverage ray — roughly the DEM
+// pixel size so near-field hills are resolved. The Samples setting is a floor;
+// COVERAGE_MAX_SAMPLES caps total samples per ray so large radii stay fast.
+const COVERAGE_STEP_M = 40;
+const COVERAGE_MAX_SAMPLES = 1600;
 const FRESNEL_OPTIONS = [0, 0.4, 0.6, 1];
 
 function clampNum(v, min, max, fallback) {
@@ -1813,12 +1818,23 @@ function fsplDb(distM, fMHz){
   return 20*Math.log10(Math.max(distM,1)/1000)+20*Math.log10(fMHz)+32.44;
 }
 
+// Map link margin (dB) to a heatmap colour. Below 0 dB the link budget does not
+// close, so there is NO coverage to paint — return null and let the renderer
+// leave that cell blank, instead of flooding the terrain shadow with red out to
+// the search cap. From 0 dB upward the colour fades red → orange → yellow →
+// green as the fade margin grows, so signal quality reads straight off the map:
+// strong green near the node, fading through yellow to a red fringe at the edge
+// of usable coverage.
+const COVERAGE_GREEN_DB = 24;   // margin (dB) at/above which coverage is solid green
+const COVERAGE_MARGIN_BIN = 3;  // dB quantisation so adjacent samples share a colour and merge into runs
 function coverageMarginColor(marginDb){
-  if(marginDb >= 12) return '#2ecc71';
-  if(marginDb >= 3) return '#a3d977';
-  if(marginDb >= 0) return '#f39c12';
-  if(marginDb >= -6) return '#e67e22';
-  return '#e74c3c';
+  if(!(marginDb >= 0)) return null;                 // no coverage — paint nothing
+  // Quantise the margin so neighbouring samples along a ray land on the same
+  // colour and can be merged into a single polygon (keeps the render cheap while
+  // letting colour boundaries sit on the true 40 m sample transitions).
+  const binned = Math.min(COVERAGE_GREEN_DB, Math.floor(marginDb / COVERAGE_MARGIN_BIN) * COVERAGE_MARGIN_BIN);
+  const hue = Math.round(binned / COVERAGE_GREEN_DB * 120);   // 0 = red, 60 = yellow, 120 = green
+  return `hsl(${hue}, 95%, 42%)`;
 }
 
 // Bearing → destination point on a sphere (great-circle).
@@ -2034,20 +2050,30 @@ async function _computeNodeCoverageImpl(node){
   }
 
   const srcH = node.elev + node.antH;
-  const rays = g.rays, samples = g.samples;
+  const rays = g.rays;
+  // The terrain sample step must resolve near-field hills, not just divide the
+  // whole search radius into a fixed count. At a 50 km cap, 50 samples = 1 km
+  // steps, which steps clean over every hill in the first kilometre and reports
+  // false coverage straight through them. The DEM is ~30-40 m, so step at about
+  // that resolution. The Samples setting acts as a quality floor; a hard cap
+  // keeps very large search radii responsive.
+  const samples = Math.max(g.samples, Math.min(COVERAGE_MAX_SAMPLES,
+    Math.ceil(maxRange / COVERAGE_STEP_M)));
   const rangeReason = limitedByBudget
     ? `budget ${(friisRange/1000).toFixed(1)} km, cap ${(searchCap/1000).toFixed(0)} km`
     : `cap ${(searchCap/1000).toFixed(0)} km, Friis ${(friisRange/1000).toFixed(0)} km`;
   toast(`${node.name}: computing rays (${rangeReason}, ${(maxRange/samples).toFixed(0)} m steps)…`);
   const reach = [];   // [{az, dist, latlng}]
-  const heatRays = []; // [{az, samples:[{dist, latlng, marginDb, diffLossDb}]}]
+  const heatRays = []; // [{az, samples:[{dist, latlng, marginDb}]}]
+  // Free-space link budget (constant across the sweep): TX + both antenna gains
+  // − RX sensitivity − required margin. marginDb = linkBudget − path loss.
+  const linkBudget = rf.tx + rf.gain + rf.gain - rf.rx - g.margin;
 
   for(let r = 0; r < rays; r++){
     const az = r * 360 / rays;
     if(r % 6 === 0) toast(`${node.name}: ray ${r+1}/${rays}…`);
     // Sample terrain along this ray (tiles are lazy-loaded; first hit may pull a few tiles)
-    const dists = [], elevs = [];
-    const points = [];
+    const dists = [], points = [];
     for(let s = 0; s <= samples; s++){
       const d = maxRange * s / samples;
       const [la, ln] = destPoint(node.lat, node.lng, az, d);
@@ -2055,42 +2081,53 @@ async function _computeNodeCoverageImpl(node){
       points.push([la, ln]);
     }
     // Fetch elevations for this ray in parallel — duplicate tile requests are de-duped by cache
-    let elArr;
+    let elevs;
     try {
-      elArr = await Promise.all(points.map(([la, ln]) => tileElevAt(la, ln)));
+      elevs = await Promise.all(points.map(([la, ln]) => tileElevAt(la, ln)));
     } catch(e){
       throw new Error(`terrain tile fetch failed at ray ${r}: ${e.message||e}`);
     }
-    elArr.forEach(v => elevs.push(v));
-    const raySamples = [{dist:0, latlng:[node.lat,node.lng], marginDb:Infinity, diffLossDb:0}];
-    // Walk outward along the ray and keep the farthest sample with non-negative
-    // link margin. A near low receiver can be blocked while a farther receiver
-    // on higher ground is usable, so do not stop at the first failure.
-    let reachIdx = 0;
+    const raySamples = [{dist:0, latlng:[node.lat,node.lng], marginDb:Infinity}];
+    // Walk outward computing the link margin at every sample. The heatmap paints
+    // every covered sample (so a usable far hilltop beyond a shadow still shows).
+    // `reachIdx` is the farthest *contiguous* covered sample from the node (drives
+    // the outline, so it hugs the main blob); `farthestIdx` is the farthest
+    // covered sample overall (drives the headline max-range figure).
+    let reachIdx = 0, farthestIdx = 0;
     for(let s = 1; s <= samples; s++){
       const dS = dists[s];                       // distance src→candidate RX
       const rxAlt = elevs[s] + g.rxAntH;         // RX antenna tip elevation
-      let maxNu = -Infinity;
+      // Optical line-of-sight gate, matching the link analyser's "blocked" rule
+      // (minLosClear <= 0 ⟺ maxNu >= 0): once terrain rises to or above the
+      // straight LOS line the path is obstructed. A single knife-edge diffraction
+      // estimate caps at ~30 dB even behind a whole mountain range, so without
+      // this gate the generous link budget "leaks" coverage straight through the
+      // terrain. As soon as any intermediate point crosses the LOS line we can
+      // stop scanning: this sample has no usable coverage regardless of the rest.
+      let maxNu = -Infinity, blocked = false;
       for(let j = 1; j < s; j++){
         const dJ = dists[j];                     // distance src→intermediate point
         const t = dJ / dS;                       // fraction along the LOS line
         const los = srcH + (rxAlt - srcH) * t;   // LOS height above the point
         const eff = elevs[j] + bulge(dJ, dS - dJ, g.K);   // terrain + earth curvature
         const fz = fresnel1(dJ, dS - dJ, g.freq);
-        const clear = los - eff;
-        const nu = fz > 0 ? Math.SQRT2*(-clear)/fz : -Infinity;
+        const nu = fz > 0 ? Math.SQRT2*(eff - los)/fz : -Infinity;
+        if(nu >= 0){ blocked = true; break; }
         if(nu > maxNu) maxNu = nu;
       }
-      const diffLossDb = knifeEdgeLossDb(maxNu);
-      const pathLossDb = fsplDb(dS, g.freq) + diffLossDb;
-      const rxPowerDbm = rf.tx + rf.gain + rf.gain - pathLossDb;
-      const marginDb = rxPowerDbm - rf.rx - g.margin;
-      raySamples.push({dist:dS, latlng:points[s], marginDb, diffLossDb});
-      if(marginDb >= 0) reachIdx = s;
+      // Below the LOS line: free-space loss plus the (≤6 dB) grazing diffraction
+      // loss from the dominant near-LOS obstruction.
+      const marginDb = blocked ? -Infinity
+        : linkBudget - fsplDb(dS, g.freq) - knifeEdgeLossDb(maxNu);
+      raySamples.push({dist:dS, latlng:points[s], marginDb});
+      if(marginDb >= 0){
+        farthestIdx = s;
+        if(reachIdx === s-1) reachIdx = s;   // outline extends only while contiguous
+      }
     }
     const reachDist = dists[reachIdx];
     const [la, ln] = destPoint(node.lat, node.lng, az, Math.max(reachDist, 1));
-    reach.push({az, dist:reachDist, latlng:[la, ln]});
+    reach.push({az, dist:reachDist, latlng:[la, ln], farthest:dists[farthestIdx]});
     heatRays.push({az, samples:raySamples});
   }
 
@@ -2100,7 +2137,7 @@ async function _computeNodeCoverageImpl(node){
   node.coverageSearchCap = searchCap;
   node.coverageFriisRange = friisRange;
   node.coverageLimitedByBudget = limitedByBudget;
-  node.coverageReachMax = reach.reduce((m,r)=>Math.max(m,r.dist),0);
+  node.coverageReachMax = reach.reduce((m,r)=>Math.max(m,r.farthest),0);
   node.coverageComputed = true;
   node.coverageDirty = false;
   const limitText = limitedByBudget
@@ -2114,28 +2151,38 @@ async function _computeNodeCoverageImpl(node){
 function renderCoveragePolygon(node){
   if(node.coverageLayer){ S.map.removeLayer(node.coverageLayer); node.coverageLayer = null; }
   if(!node.coverageHeatRays || node.coverageHeatRays.length < 2) return;
-  const idx = S.nodes.indexOf(node);
-  const col = nodeColor(idx);
+  const col = nodeColor(S.nodes.indexOf(node));
   const group = L.layerGroup();
   const rays = node.coverageHeatRays;
+  // Samples are fine (~40 m). Rather than draw one polygon per sample (1000+ ×
+  // rays would choke Leaflet) or collapse them into wide bands coloured by a
+  // single edge sample (which blanks real coverage near the node), walk each
+  // ray at full resolution and merge consecutive same-colour samples into one
+  // quad. Colour boundaries land on the true 40 m transitions; blank (no-
+  // coverage) stretches are simply skipped, so near-node gaps reflect terrain,
+  // not the renderer.
+  const addCell = (a, b, i0, i1, fillColor) => {
+    group.addLayer(L.polygon([a[i0].latlng, b[i0].latlng, b[i1].latlng, a[i1].latlng], {
+      color: fillColor, weight: 0, opacity: 0, fillColor, fillOpacity: 0.6, interactive: false
+    }));
+  };
   for(let r=0;r<rays.length;r++){
     const a = rays[r].samples;
     const b = rays[(r+1)%rays.length].samples;
     const n = Math.min(a.length,b.length);
-    for(let s=1;s<n;s++){
-      const marginDb = Math.min(a[s].marginDb,b[s].marginDb);
-      const fillColor = coverageMarginColor(marginDb);
-      const cell = L.polygon([a[s-1].latlng,b[s-1].latlng,b[s].latlng,a[s].latlng], {
-        color: fillColor,
-        weight: 0,
-        opacity: 0,
-        fillColor,
-        fillOpacity: marginDb >= 0 ? 0.2 : 0.1,
-        interactive: false
-      });
-      group.addLayer(cell);
+    let runStart = 1, runColor = coverageMarginColor(Math.min(a[1].marginDb, b[1].marginDb));
+    for(let s=2;s<n;s++){
+      const color = coverageMarginColor(Math.min(a[s].marginDb, b[s].marginDb));
+      if(color !== runColor){
+        if(runColor) addCell(a, b, runStart-1, s-1, runColor);
+        runStart = s; runColor = color;
+      }
     }
+    if(runColor) addCell(a, b, runStart-1, n-1, runColor);
   }
+  // Outline the contiguous coverage edge (reach point per ray). coverageRays
+  // stores the farthest *contiguous* covered sample, so the line hugs the filled
+  // blob instead of spiking out to disconnected far patches.
   if(node.coverageRays?.length){
     const outline = node.coverageRays.map(r=>r.latlng);
     outline.push(node.coverageRays[0].latlng);
