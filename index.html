@@ -28,7 +28,7 @@ header h1{font-size:17px;font-weight:700;letter-spacing:2px;text-transform:upper
 header h1 em{color:var(--accent);font-style:normal}
 .hdr-tag{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:3px}
 .hdr-right{margin-left:auto;display:flex;gap:6px;align-items:center}
-.btn{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:1px;padding:5px 11px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;text-transform:uppercase;transition:all .15s;white-space:nowrap}
+.btn{font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:1px;padding:7px 13px;min-height:31px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text);cursor:pointer;text-transform:uppercase;transition:all .15s;white-space:nowrap}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn.primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:700}
 .btn.primary:hover{opacity:.85}
@@ -42,12 +42,16 @@ header h1 em{color:var(--accent);font-style:normal}
 
 /* ── SIDEBAR ── */
 .sidebar{width:300px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
-.sb-section{padding:9px 11px;border-bottom:1px solid var(--border);flex-shrink:0}
-.section-label{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sb-section{padding:9px 11px;border-top:1px solid rgba(0,200,240,.14);border-bottom:1px solid rgba(74,98,120,.55);background:linear-gradient(180deg,rgba(255,255,255,.025),rgba(0,0,0,0));flex-shrink:0}
+.sidebar>.sb-section:first-child{border-top:none}
+.section-label{font-family:'Share Tech Mono',monospace;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text);margin-bottom:5px}
 .sb-toggle{cursor:pointer;user-select:none}
 .sb-toggle:hover{color:var(--accent)}
 .sb-chev{display:inline-block;font-size:9px;color:var(--muted);transition:transform .15s;width:9px;margin-right:5px;text-align:center}
 .sb-toggle.collapsed .sb-chev{transform:rotate(-90deg)}
+.title-actions{display:flex;align-items:center;gap:5px;margin-left:auto}
+.title-action{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;padding:5px 9px;min-height:29px;border:1px solid var(--border);border-radius:5px;background:rgba(11,15,23,.65);color:var(--muted);cursor:pointer}
+.title-action:hover{border-color:var(--accent);color:var(--accent)}
 [hidden]{display:none!important}
 .field-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .field-row label{font-size:11px;color:var(--muted);white-space:nowrap}
@@ -55,7 +59,7 @@ input[type=number],input[type=text],select{font-family:'Share Tech Mono',monospa
 input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border-color:var(--accent)}
 
 /* ── NODES LIST ── */
-.wp-scroll{flex:1;overflow-y:auto;padding:7px 9px}
+.wp-scroll{flex:1;overflow-y:auto;padding:7px 9px;border-bottom:2px solid rgba(0,200,240,.12)}
 .wp-scroll::-webkit-scrollbar{width:3px}
 .wp-scroll::-webkit-scrollbar-thumb{background:var(--border)}
 
@@ -70,7 +74,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .wp-num{width:17px;height:17px;border-radius:50%;border:2px solid;font-family:'Share Tech Mono',monospace;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .wp-name{flex:1;font-size:12px;font-weight:600;background:transparent;border:none;border-bottom:1px solid transparent;color:#fff;padding:0 2px}
 .wp-name:focus{outline:none;border-bottom-color:var(--accent)}
-.wp-del{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 2px}
+.wp-del{background:rgba(11,15,23,.55);border:1px solid var(--border);border-radius:5px;color:var(--muted);cursor:pointer;font-size:12px;min-width:25px;min-height:25px;padding:2px 6px}
 .wp-del:hover{color:var(--red)}
 
 .wp-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:4px}
@@ -86,30 +90,34 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .wp-amsl span{color:#f39c12}
 
 /* ── EDGES / PATHS ── */
-.edges-panel{flex-shrink:0;border-top:1px solid var(--border);max-height:130px;overflow-y:auto}
+.edges-panel{flex-shrink:0;border-top:1px solid var(--border);border-bottom:2px solid rgba(0,200,240,.12);max-height:130px;overflow-y:auto}
 .edges-panel::-webkit-scrollbar{width:3px}
 .edges-panel::-webkit-scrollbar-thumb{background:var(--border)}
 .edge-row{display:flex;align-items:center;gap:5px;padding:4px 10px;border-bottom:1px solid rgba(30,45,66,.5);font-size:11px}
 .edge-row.active{background:rgba(0,200,240,.08)}
+.edge-row.hidden,.path-row.hidden{opacity:.48}
 .edge-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .edge-label{flex:1;color:var(--text)}
 .edge-status{font-family:'Share Tech Mono',monospace;font-size:9px}
-.edge-del{background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 2px;flex-shrink:0}
+.edge-del,.edge-vis,.edge-only,.path-vis,.path-only{background:rgba(11,15,23,.55);border:1px solid var(--border);border-radius:5px;color:var(--muted);cursor:pointer;font-size:11px;min-height:27px;padding:4px 8px;flex-shrink:0}
 .edge-del:hover{color:var(--red)}
+.edge-vis:hover,.edge-only:hover,.path-vis:hover,.path-only:hover{color:var(--accent)}
+.edge-only,.path-only,.edge-vis,.path-vis{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px}
 
 /* ── PATHS LIST ── */
-.paths-panel{flex-shrink:0;border-top:1px solid var(--border);max-height:100px;overflow-y:auto}
+.paths-panel{flex-shrink:0;border-top:1px solid var(--border);border-bottom:2px solid rgba(0,200,240,.12);max-height:100px;overflow-y:auto}
 .paths-panel::-webkit-scrollbar{width:3px}
 .paths-panel::-webkit-scrollbar-thumb{background:var(--border)}
-.path-row{display:flex;align-items:center;gap:5px;padding:4px 10px;border-bottom:1px solid rgba(30,45,66,.5);font-size:11px;cursor:pointer}
+.path-row{display:flex;flex-direction:column;align-items:stretch;gap:5px;padding:6px 10px;border-bottom:1px solid rgba(30,45,66,.5);font-size:11px;cursor:pointer}
 .path-row:hover{background:rgba(0,200,240,.05)}
 .path-row.active{background:rgba(0,200,240,.08)}
 .deselect-btn{background:none;border:1px solid var(--accent);color:var(--accent);cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:8px;padding:1px 5px;letter-spacing:1px;margin-right:3px}
 .deselect-btn:hover{background:var(--accent);color:#000}
-.path-label{flex:1;color:var(--text)}
-.path-del{background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 2px}
+.path-label{color:var(--text);line-height:1.35;word-break:break-word}
+.path-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;flex-wrap:wrap}
+.path-del{background:rgba(11,15,23,.55);border:1px solid var(--border);border-radius:5px;color:var(--muted);cursor:pointer;font-size:11px;min-width:28px;min-height:27px;padding:4px 8px}
 .path-del:hover{color:var(--red)}
-.path-edit{background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 2px}
+.path-edit{background:rgba(11,15,23,.55);border:1px solid var(--border);border-radius:5px;color:var(--muted);cursor:pointer;font-size:12px;min-width:28px;min-height:27px;padding:4px 8px}
 .path-edit:hover{color:var(--accent)}
 
 /* ── PATH BUILDER MODAL ── */
@@ -142,10 +150,10 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 
 /* ── ANALYSE BUTTON ── */
 .analyse-wrap{padding:7px 9px;border-top:1px solid var(--border);flex-shrink:0}
-.analyse-wrap .btn{width:100%;font-size:12px;padding:7px}
+.analyse-wrap .btn{width:100%;font-size:13px;padding:9px}
 
 /* ── RESULTS ── */
-.results-area{flex-shrink:0;border-top:1px solid var(--border);max-height:150px;overflow-y:auto}
+.results-area{flex-shrink:0;border-top:1px solid var(--border);border-bottom:2px solid rgba(0,200,240,.12);max-height:150px;overflow-y:auto}
 .results-area::-webkit-scrollbar{width:3px}
 .results-area::-webkit-scrollbar-thumb{background:var(--border)}
 .hop-card{padding:6px 10px;border-bottom:1px solid var(--border);cursor:pointer}
@@ -180,7 +188,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 
 /* ── FLOATING BUTTONS ── */
 .fab-group{position:absolute;bottom:210px;right:10px;z-index:600;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
-.fab{width:34px;height:34px;border-radius:50%;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,.5);transition:all .15s}
+.fab{width:40px;height:40px;border-radius:50%;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 2px 8px rgba(0,0,0,.5);transition:all .15s}
 .fab:hover{border-color:var(--accent);color:var(--accent);background:#0b0f17}
 .fab.loc{font-size:14px}
 
@@ -197,14 +205,15 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .modal-actions{display:flex;gap:8px;justify-content:flex-end}
 
 /* ── CONTEXT MENU ── */
-#ctxMenu{position:fixed;z-index:9999;background:#111824;border:1px solid #1e2d42;box-shadow:0 6px 24px rgba(0,0,0,.6);min-width:190px;padding:4px 0;display:none;user-select:none}
-.ctx-header{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#4a6278;padding:5px 14px 4px;border-bottom:1px solid #1e2d42}
-.ctx-item{display:flex;align-items:center;gap:9px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:500;padding:6px 14px;color:#c8daea;cursor:pointer;transition:background .1s}
+#ctxMenu{position:fixed;z-index:9999;background:#111824;border:1px solid #1e2d42;border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.6);min-width:220px;padding:5px;display:none;user-select:none}
+.ctx-header{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#4a6278;padding:7px 12px 6px;border-bottom:1px solid #1e2d42}
+.ctx-item{display:flex;align-items:center;gap:10px;border-radius:5px;font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:600;min-height:34px;padding:8px 12px;color:#c8daea;cursor:pointer;transition:background .1s}
 .ctx-item:hover{background:rgba(0,200,240,.08);color:#fff}
-.ctx-item .ctx-icon{font-size:12px;width:14px;text-align:center;flex-shrink:0}
+.ctx-item .ctx-icon{font-size:14px;width:18px;text-align:center;flex-shrink:0}
 .ctx-item.danger{color:#e74c3c}
 .ctx-item.danger:hover{background:rgba(231,76,60,.1)}
 .ctx-sep{height:1px;background:#1e2d42;margin:3px 0}
+.ctx-check{margin-left:auto;color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:10px}
 
 /* leaflet marker */
 .lf-marker{background:none!important;border:none!important}
@@ -214,7 +223,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .wp-cov{display:flex;align-items:center;gap:5px;margin-top:4px;padding-top:4px;border-top:1px dashed rgba(74,98,120,.35)}
 .wp-cov label{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);letter-spacing:1px}
 .wp-cov input[type=checkbox]{accent-color:var(--accent);width:11px;height:11px;margin:0;cursor:pointer}
-.wp-cov-btn{font-family:'Share Tech Mono',monospace;font-size:8px;letter-spacing:1px;padding:2px 6px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;text-transform:uppercase}
+.wp-cov-btn{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;padding:4px 8px;min-height:25px;border:1px solid var(--border);border-radius:5px;background:rgba(11,15,23,.55);color:var(--text);cursor:pointer;text-transform:uppercase}
 .wp-cov-btn:hover{border-color:var(--accent);color:var(--accent)}
 .wp-cov-btn.dirty{border-color:var(--orange);color:var(--orange)}
 .wp-cov-btn.ok{border-color:var(--green);color:var(--green)}
@@ -230,7 +239,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .cov-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px}
 .cov-row label{font-size:11px;color:var(--muted)}
 .cov-btn-row{display:flex;gap:5px;margin-top:6px}
-.cov-btn-row .btn{flex:1;font-size:10px;padding:5px}
+.cov-btn-row .btn{flex:1;font-size:11px;padding:7px}
 
 /* ── SETTINGS MODAL + SUMMARY ── */
 .settings-group{border:1px solid var(--border);padding:10px 12px;margin-bottom:12px;background:rgba(11,15,23,.5)}
@@ -243,6 +252,9 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .ss-sep{color:var(--border)}
 .ss-gear{margin-left:auto;font-size:14px;color:var(--muted)}
 .settings-summary:hover .ss-gear{color:var(--accent)}
+.display-toggles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.display-toggle{display:flex;align-items:center;gap:7px;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text);letter-spacing:1px;cursor:pointer;user-select:none}
+.display-toggle input{accent-color:var(--accent);width:13px;height:13px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -257,7 +269,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
     <ol style="line-height:1.65;font-size:13px;color:var(--text);padding-left:22px;margin-bottom:14px">
       <li><strong>Add nodes</strong> — right-click anywhere on the map → "Add node here". Each node is a transmitter or receiver. Click the ◎ button to centre on your current location first.</li>
       <li><strong>Set antenna height</strong> — in the sidebar, edit each node's <em>ANT HT</em> (metres above ground). Default is 6 m.</li>
-      <li><strong>Link nodes</strong> — right-click a node marker → "Connect to …" to add a radio link. Each link becomes its own path; use <strong>+ NEW PATH</strong> to chain several into a multi-hop route.</li>
+      <li><strong>Link nodes</strong> — right-click a node marker → "Connect to …" to add a radio link. Right-click a link to hide, isolate, or delete it. Each link becomes its own path; use <strong>+ NEW PATH</strong> to chain several into a multi-hop route.</li>
       <li><strong>Pick a band</strong> — top of the sidebar, choose a radio preset (Meshtastic AU 915 MHz by default) or enter a custom frequency.</li>
       <li><strong>Analyse</strong> — click <strong>▶ ANALYSE</strong>. Terrain elevation is fetched along each link and the line-of-sight + 1st Fresnel zone are drawn below the map.</li>
       <li><strong>Coverage layer</strong> — set TX power / antenna gain / RX sensitivity (defaults seeded from the preset), tick the <em>COVERAGE</em> box on a node, then click <em>COMPUTE</em>. A terrain-aware coverage polygon is drawn. Use <em>ALL ON / ALL OFF</em> to toggle every node at once.</li>
@@ -355,6 +367,14 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
     </div>
 
     <div class="settings-group">
+      <div class="settings-label">Display</div>
+      <div class="display-toggles">
+        <label class="display-toggle"><input type="checkbox" id="inpShowLinks" checked onchange="setDisplayVisibility('links',this.checked)"> SHOW LINKS</label>
+        <label class="display-toggle"><input type="checkbox" id="inpShowPaths" checked onchange="setDisplayVisibility('paths',this.checked)"> SHOW PATHS</label>
+      </div>
+    </div>
+
+    <div class="settings-group">
       <div class="settings-label">Coverage <span id="covCount" style="color:var(--accent)">0</span> active</div>
       <div class="field-row" style="margin-bottom:6px">
         <label>RX Ant (m)</label>
@@ -412,7 +432,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn" onclick="openSettings()">⚙ SETTINGS</button>
       <button class="btn share" onclick="openShare()">⇪ SHARE</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
-      <span class="hdr-tag" title="Build 20260605-3">BUILD 20260605-3</span>
+      <span class="hdr-tag" title="Build 20260605-14">BUILD 20260605-14</span>
       <button class="btn primary" onclick="runAnalysis()">▶ ANALYSE</button>
     </div>
   </header>
@@ -440,15 +460,23 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <div class="wp-scroll" id="wpList" data-sb-body="nodes"></div>
 
       <!-- Edges -->
-      <div class="sb-section" style="padding:5px 11px">
-        <div class="section-label sb-toggle" data-sb="links" style="margin-bottom:0"><span class="sb-chev">▾</span>LINKS <span id="edgeCount" style="color:var(--accent)">0</span> <span style="color:var(--muted);font-size:8px">(right-click node to connect · right-click link to delete)</span></div>
+      <div class="sb-section" style="display:flex;align-items:center;gap:6px;padding:5px 11px">
+        <div class="section-label sb-toggle" data-sb="links" style="margin-bottom:0"><span class="sb-chev">▾</span>LINKS <span id="edgeCount" style="color:var(--accent)">0</span></div>
+        <div class="title-actions">
+          <button class="title-action" title="Show all links" onclick="event.stopPropagation();showAllLinks()">ALL</button>
+          <button class="title-action" title="Hide all links" onclick="event.stopPropagation();hideAllLinks()">NONE</button>
+        </div>
       </div>
       <div class="edges-panel" id="edgesPanel" data-sb-body="links"><div class="no-data">No links yet.</div></div>
 
       <!-- Paths -->
       <div class="sb-section" style="display:flex;align-items:center;justify-content:space-between;padding:5px 11px">
         <div class="section-label sb-toggle" data-sb="paths" style="margin:0"><span class="sb-chev">▾</span>PATHS <span id="pathCount" style="color:var(--accent)">0</span></div>
-        <button class="btn" style="font-size:9px;padding:2px 8px" onclick="addPath()">+ NEW PATH</button>
+        <div style="display:flex;align-items:center;gap:4px">
+          <button class="title-action" title="Show all paths" onclick="event.stopPropagation();showAllPaths()">ALL</button>
+          <button class="title-action" title="Hide all paths" onclick="event.stopPropagation();hideAllPaths()">NONE</button>
+          <button class="btn" style="font-size:10px;padding:5px 10px;min-height:29px" onclick="addPath()">+ NEW PATH</button>
+        </div>
       </div>
       <div class="paths-panel" id="pathsPanel" data-sb-body="paths"><div class="no-data">No paths defined.</div></div>
 
@@ -489,7 +517,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <script>
-const BUILD_ID='20260605-3';
+const BUILD_ID='20260605-14';
 // ═══════════════════════════════════════════════════════════
 //  STATE
 //  Graph model: nodes (waypoints) + edges (links between any two)
@@ -498,8 +526,8 @@ const BUILD_ID='20260605-3';
 const S = {
   map: null,
   nodes: [],       // {id, name, lat, lng, antH, elev, marker, rfOverride, txDbm, gainDbi, rxDbm, coverageOn, coverageLayer, coverageDirty, coverageComputed}
-  edges: [],       // {id, aId, bId, line, result, profile}
-  paths: [],       // {id, name, nodeIds[]}  — user-defined chains for chart
+  edges: [],       // {id, aId, bId, hidden, line, result, profile}
+  paths: [],       // {id, name, hidden, nodeIds[]}  — user-defined chains for chart
   nextId: 1,
   activeView: null, // {type:'edge'|'path', id}
   elevCache: {},
@@ -509,7 +537,9 @@ const S = {
   hoverMarker: null,
   profileHover: null,
   redrawProfile: null,
-  _dragId: null
+  _dragId: null,
+  showLinks: true,
+  showPaths: true
 };
 
 const COLORS = ['#00c8f0','#f39c12','#2ecc71','#e74c3c','#9b59b6','#1abc9c','#e67e22','#3498db','#f1c40f','#e91e63'];
@@ -733,12 +763,13 @@ function addEdge(aId, bId) {
   // Prevent duplicate edges
   if (S.edges.some(e => (e.aId===aId&&e.bId===bId)||(e.aId===bId&&e.bId===aId))) { toast('Link already exists.',2000); return; }
   if (aId === bId) { toast('Cannot link a node to itself.',2000); return; }
-  const edge = { id: S.nextId++, aId, bId, line: null, hitLine: null, result: null, profile: null };
+  const edge = { id: S.nextId++, aId, bId, hidden: false, line: null, hitLine: null, result: null, profile: null };
   S.edges.push(edge);
   const a = S.nodes.find(n=>n.id===aId), b = S.nodes.find(n=>n.id===bId);
   edge.line = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#4a6278', weight:2, opacity:.7, dashArray:'5 4' }).addTo(S.map);
   edge.hitLine = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#ffffff', weight:24, opacity:0, interactive:true }).addTo(S.map);
   attachEdgeHandlers(edge);
+  highlightActiveMapView();
   renderEdgesPanel();
   document.getElementById('edgeCount').textContent = S.edges.length;
 
@@ -780,11 +811,146 @@ function redrawEdgeLines() {
   });
 }
 
+function isEdgeVisible(edge){
+  return !!edge && S.showLinks && !edge.hidden;
+}
+
+function pathEdges(path){
+  const found=[];
+  if(!path) return found;
+  for(let i=0;i<path.nodeIds.length-1;i++){
+    const aId=path.nodeIds[i], bId=path.nodeIds[i+1];
+    const edge=S.edges.find(e=>(e.aId===aId&&e.bId===bId)||(e.aId===bId&&e.bId===aId));
+    if(edge) found.push(edge);
+  }
+  return found;
+}
+
+function setEdgeHidden(id, hidden){
+  const edge=S.edges.find(e=>e.id===id);
+  if(!edge) return;
+  edge.hidden=!!hidden;
+  if(edge.hidden&&S.activeView?.type==='edge'&&S.activeView.id===id) clearActiveView();
+  renderEdgesPanel();
+  renderChartTabs();
+  renderResults();
+  highlightActiveMapView();
+}
+
+function showOnlyEdge(id){
+  S.edges.forEach(e=>{e.hidden=e.id!==id;});
+  S.paths.forEach(p=>{p.hidden=true;});
+  S.showLinks=true;
+  const links=document.getElementById('inpShowLinks'); if(links) links.checked=true;
+  selectEdgeView(id);
+  renderEdgesPanel();
+  renderPathsPanel();
+  renderChartTabs();
+  renderResults();
+  highlightActiveMapView();
+}
+
+function showAllLinks(){
+  S.edges.forEach(e=>{e.hidden=false;});
+  S.showLinks=true;
+  const links=document.getElementById('inpShowLinks'); if(links) links.checked=true;
+  renderEdgesPanel();
+  renderChartTabs();
+  renderResults();
+  highlightActiveMapView();
+}
+
+function hideAllLinks(){
+  S.edges.forEach(e=>{e.hidden=true;});
+  if(S.activeView?.type==='edge') clearActiveView();
+  renderEdgesPanel();
+  renderChartTabs();
+  renderResults();
+  highlightActiveMapView();
+}
+
+function setPathHidden(id, hidden){
+  const path=S.paths.find(p=>p.id===id);
+  if(!path) return;
+  path.hidden=!!hidden;
+  pathEdges(path).forEach(e=>{e.hidden=!!hidden;});
+  if(path.hidden&&S.activeView?.type==='path'&&S.activeView.id===id) clearActiveView();
+  renderEdgesPanel();
+  renderPathsPanel();
+  renderChartTabs();
+  renderResults();
+  highlightActiveMapView();
+}
+
+function showOnlyPath(id){
+  const path=S.paths.find(p=>p.id===id);
+  if(!path) return;
+  const visibleEdgeIds=new Set(pathEdges(path).map(e=>e.id));
+  S.paths.forEach(p=>{p.hidden=p.id!==id;});
+  S.edges.forEach(e=>{e.hidden=!visibleEdgeIds.has(e.id);});
+  S.showLinks=true;
+  S.showPaths=true;
+  const links=document.getElementById('inpShowLinks'); if(links) links.checked=true;
+  const paths=document.getElementById('inpShowPaths'); if(paths) paths.checked=true;
+  selectPathView(id);
+  renderEdgesPanel();
+  renderPathsPanel();
+  renderChartTabs();
+  renderResults();
+  highlightActiveMapView();
+}
+
+function showAllPaths(){
+  S.paths.forEach(p=>{p.hidden=false;});
+  S.paths.forEach(p=>pathEdges(p).forEach(e=>{e.hidden=false;}));
+  S.showLinks=true;
+  S.showPaths=true;
+  const links=document.getElementById('inpShowLinks'); if(links) links.checked=true;
+  const paths=document.getElementById('inpShowPaths'); if(paths) paths.checked=true;
+  renderEdgesPanel();
+  renderPathsPanel();
+  renderChartTabs();
+  renderResults();
+  highlightActiveMapView();
+}
+
+function hideAllPaths(){
+  S.paths.forEach(p=>{p.hidden=true;});
+  S.paths.forEach(p=>pathEdges(p).forEach(e=>{e.hidden=true;}));
+  if(S.activeView?.type==='path') clearActiveView();
+  renderEdgesPanel();
+  renderPathsPanel();
+  renderChartTabs();
+  renderResults();
+  highlightActiveMapView();
+}
+
 function edgeBaseStyle(edge){
+  if(!isEdgeVisible(edge)) return {color:'#4a6278',weight:0,opacity:0,dashArray:''};
   if(!edge.result) return {color:'#4a6278',weight:2,opacity:.7,dashArray:'5 4'};
   if(edge.result.status==='error') return {color:'#e74c3c',weight:2,opacity:.8,dashArray:'3 5'};
   const col=edge.result.status==='clear'?'#2ecc71':edge.result.status==='marginal'?'#f39c12':'#e74c3c';
   return {color:col,weight:3,opacity:.9,dashArray:''};
+}
+
+function setDisplayVisibility(kind, visible) {
+  if (kind === 'links') {
+    S.showLinks = !!visible;
+    const inp = document.getElementById('inpShowLinks');
+    if (inp) inp.checked = S.showLinks;
+    if (!S.showLinks && S.activeView?.type === 'edge') clearActiveView();
+  } else if (kind === 'paths') {
+    S.showPaths = !!visible;
+    const inp = document.getElementById('inpShowPaths');
+    if (inp) inp.checked = S.showPaths;
+    if (!S.showPaths && S.activeView?.type === 'path') clearActiveView();
+  }
+  renderEdgesPanel();
+  renderPathsPanel();
+  renderChartTabs();
+  renderResults();
+  highlightActiveMapView();
+  toast(`${kind === 'links' ? 'Links' : 'Paths'} ${visible ? 'shown' : 'hidden'}.`, 1200);
 }
 
 function selectNodeView(id, opts={}){
@@ -876,6 +1042,11 @@ function highlightActiveMapView(){
   }
   S.edges.forEach(e=>{
     if(!e.line) return;
+    if(!isEdgeVisible(e)){
+      e.line.setStyle(edgeBaseStyle(e));
+      if(e.hitLine) e.hitLine.setStyle({weight:0,opacity:0});
+      return;
+    }
     const isSelectedEdge=S.activeView?.type==='edge'&&S.activeView.id===e.id;
     if(isSelectedEdge||pathEdgeIds.has(e.id)){
       // Emphasise by keeping the link's own colour but making it bolder.
@@ -886,7 +1057,10 @@ function highlightActiveMapView(){
     }else{
       e.line.setStyle(edgeBaseStyle(e));
     }
-    if(e.hitLine) e.hitLine.bringToFront();
+    if(e.hitLine){
+      e.hitLine.setStyle({weight:24,opacity:0});
+      e.hitLine.bringToFront();
+    }
   });
   refreshAllIcons();
 }
@@ -928,7 +1102,7 @@ function invalidateEdgesForNode(nodeId) {
 // ═══════════════════════════════════════════════════════════
 function autoExtendPath(aId, bId) {
   const a = S.nodes.find(n=>n.id===aId), b = S.nodes.find(n=>n.id===bId);
-  const p = { id: S.nextId++, name: `${a.name} → ${b.name}`, nodeIds: [aId, bId] };
+  const p = { id: S.nextId++, name: `${a.name} → ${b.name}`, hidden: false, nodeIds: [aId, bId] };
   S.paths.push(p);
   renderPathsPanel();
   document.getElementById('pathCount').textContent = S.paths.length;
@@ -1042,7 +1216,7 @@ function savePathModal() {
     }
     highlightActiveMapView();
   } else {
-    S.paths.push({ id: S.nextId++, name, nodeIds });
+    S.paths.push({ id: S.nextId++, name, hidden: false, nodeIds });
     closePathModal();
     renderPathsPanel();
     renderChartTabs();
@@ -1162,6 +1336,7 @@ function renderNodeList() {
 
 function renderEdgesPanel() {
   const panel = document.getElementById('edgesPanel');
+  if (!S.showLinks) { panel.innerHTML='<div class="no-data">Links hidden.</div>'; return; }
   if (!S.edges.length) { panel.innerHTML='<div class="no-data">No links yet.</div>'; return; }
   panel.innerHTML='';
   S.edges.forEach(e => {
@@ -1170,17 +1345,25 @@ function renderEdgesPanel() {
     const statusCol = !e.result ? '#4a6278' : e.result.status==='clear' ? '#2ecc71' : e.result.status==='marginal' ? '#f39c12' : '#e74c3c';
     const statusTxt = !e.result ? '' : e.result.status==='clear' ? '✓' : e.result.status==='marginal' ? '⚠' : e.result.status==='error' ? '!' : '✕';
     const isActive = S.activeView?.type==='edge' && S.activeView.id===e.id;
-    const row = document.createElement('div'); row.className='edge-row'+(isActive?' active':'');
+    const row = document.createElement('div'); row.className='edge-row'+(isActive?' active':'')+(e.hidden?' hidden':'');
     const deselectBtn = isActive ? `<button class="deselect-btn" title="Deselect (Esc)" onclick="event.stopPropagation();clearActiveView()">DESELECT</button>` : '';
     row.innerHTML=`<div class="edge-dot" style="background:${statusCol}"></div>
       <div class="edge-label">${escHtml(a.name)} ↔ ${escHtml(b.name)}</div>
       <div class="edge-status" style="color:${statusCol}">${statusTxt}</div>
       ${deselectBtn}
+      <button class="edge-only" title="Show only this link" onclick="event.stopPropagation();showOnlyEdge(${e.id})">ONLY</button>
+      <button class="edge-vis" title="${e.hidden?'Show link':'Hide link'}" onclick="event.stopPropagation();setEdgeHidden(${e.id},${!e.hidden})">${e.hidden?'SHOW':'HIDE'}</button>
       <button class="edge-del" onclick="removeEdge(${e.id})">✕</button>`;
     row.style.cursor='pointer';
     row.onclick = ev => {
       if (ev.target.classList.contains('edge-del')) return;
+      if (e.hidden) { setEdgeHidden(e.id, false); return; }
       selectEdgeView(e.id);
+    };
+    row.oncontextmenu = ev => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      showEdgeCtx(ev.clientX, ev.clientY, e);
     };
     panel.appendChild(row);
   });
@@ -1188,6 +1371,7 @@ function renderEdgesPanel() {
 
 function renderPathsPanel() {
   const panel = document.getElementById('pathsPanel');
+  if (!S.showPaths) { panel.innerHTML='<div class="no-data">Paths hidden.</div>'; return; }
   if (!S.paths.length) { panel.innerHTML='<div class="no-data">No paths defined.</div>'; return; }
   panel.innerHTML='';
   S.paths.forEach(p => {
@@ -1195,13 +1379,25 @@ function renderPathsPanel() {
     const names = p.nodeIds.map(id=>S.nodes.find(n=>n.id===id)?.name||'?').join(' → ');
     const isActive = S.activeView?.type==='path' && S.activeView.id===p.id;
     const row = document.createElement('div');
-    row.className='path-row'+(isActive?' active':'');
+    row.className='path-row'+(isActive?' active':'')+(p.hidden?' hidden':'');
     const deselectBtn = isActive ? `<button class="deselect-btn" title="Deselect (Esc)" onclick="event.stopPropagation();clearActiveView()">DESELECT</button>` : '';
     row.innerHTML=`<div class="path-label">${escHtml(names)}</div>
-      ${deselectBtn}
-      <button class="path-edit" title="Edit path (add/remove/reorder nodes)" onclick="event.stopPropagation();editPath(${p.id})">✎</button>
-      <button class="path-del" onclick="event.stopPropagation();removePath(${p.id})">✕</button>`;
-    row.onclick = () => selectPathView(p.id);
+      <div class="path-actions">
+        ${deselectBtn}
+        <button class="path-only" title="Show only this path" onclick="event.stopPropagation();showOnlyPath(${p.id})">ONLY</button>
+        <button class="path-vis" title="${p.hidden?'Show path':'Hide path'}" onclick="event.stopPropagation();setPathHidden(${p.id},${!p.hidden})">${p.hidden?'SHOW':'HIDE'}</button>
+        <button class="path-edit" title="Edit path (add/remove/reorder nodes)" onclick="event.stopPropagation();editPath(${p.id})">✎</button>
+        <button class="path-del" onclick="event.stopPropagation();removePath(${p.id})">✕</button>
+      </div>`;
+    row.onclick = () => {
+      if (p.hidden) { setPathHidden(p.id, false); return; }
+      selectPathView(p.id);
+    };
+    row.oncontextmenu = ev => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      showPathCtx(ev.clientX, ev.clientY, p);
+    };
     panel.appendChild(row);
   });
   document.getElementById('pathCount').textContent = S.paths.length;
@@ -1253,6 +1449,12 @@ function buildCtx(title, items) {
       icon.textContent=item.icon;
       el.appendChild(icon);
       el.appendChild(document.createTextNode(item.label));
+      if (item.checked != null) {
+        const check=document.createElement('span');
+        check.className='ctx-check';
+        check.textContent=item.checked?'ON':'OFF';
+        el.appendChild(check);
+      }
       el.onclick=()=>{closeCtx();item.action();};
       ctxMenu.appendChild(el);
     }
@@ -1294,9 +1496,24 @@ function showNodeCtx(cx,cy,node){
 function showEdgeCtx(cx,cy,edge){
   const a=S.nodes.find(n=>n.id===edge.aId), b=S.nodes.find(n=>n.id===edge.bId);
   const items=[
+    {icon:edge.hidden?'◌':'●',label:edge.hidden?'Show link':'Hide link',action:()=>setEdgeHidden(edge.id,!edge.hidden)},
+    {icon:'◉',label:'Show only this link',action:()=>showOnlyEdge(edge.id)},
+    'sep',
     {icon:'🗑',label:`Delete link ${a?.name||'?'} ↔ ${b?.name||'?'}`,danger:true,action:()=>removeEdge(edge.id)},
   ];
   buildCtx('LINK',items); posCtx(cx,cy);
+}
+
+function showPathCtx(cx,cy,path){
+  const names=path.nodeIds.map(id=>S.nodes.find(n=>n.id===id)?.name||'?').join(' → ');
+  const items=[
+    {icon:path.hidden?'◌':'●',label:path.hidden?'Show path':'Hide path',action:()=>setPathHidden(path.id,!path.hidden)},
+    {icon:'◉',label:'Show only this path',action:()=>showOnlyPath(path.id)},
+    'sep',
+    {icon:'✎',label:'Edit path',action:()=>editPath(path.id)},
+    {icon:'🗑',label:`Delete path ${names}`,danger:true,action:()=>removePath(path.id)},
+  ];
+  buildCtx('PATH',items); posCtx(cx,cy);
 }
 
 function attachEdgeHandlers(edge){
@@ -1911,11 +2128,11 @@ async function runAnalysis(){
     renderChartTabs();
 
     // Preserve the current chart selection when it is still valid.
-    const preferredPath=preferredView?.type==='path'?S.paths.find(p=>p.id===preferredView.id):null;
-    const preferredEdge=preferredView?.type==='edge'?S.edges.find(e=>e.id===preferredView.id&&e.profile):null;
+    const preferredPath=S.showPaths&&preferredView?.type==='path'?S.paths.find(p=>p.id===preferredView.id&&!p.hidden):null;
+    const preferredEdge=preferredView?.type==='edge'?S.edges.find(e=>e.id===preferredView.id&&!e.hidden&&e.profile):null;
     const preferredNode=preferredView?.type==='node'?S.nodes.find(n=>n.id===preferredView.id):null;
-    const analysedPath=S.paths.find(pathHasAnalysedProfiles);
-    const analysedEdge=S.edges.find(e=>e.profile);
+    const analysedPath=S.showPaths?S.paths.find(p=>!p.hidden&&pathHasAnalysedProfiles(p)):null;
+    const analysedEdge=S.edges.find(e=>!e.hidden&&e.profile);
     if(preferredNode){
       S.activeView={type:'node',id:preferredNode.id};
       clearCanvas();
@@ -1947,8 +2164,11 @@ async function runAnalysis(){
 // ═══════════════════════════════════════════════════════════
 function renderResults(){
   const el=document.getElementById('resultsArea');
-  const analysed=S.edges.filter(e=>e.result);
-  if(!analysed.length){el.innerHTML='<div class="no-data">Add nodes, links, then analyse.</div>';return;}
+  const analysed=S.edges.filter(e=>S.showLinks&&!e.hidden&&e.result);
+  if(!analysed.length){
+    el.innerHTML=S.edges.some(e=>e.result)?'<div class="no-data">No visible analysed links.</div>':'<div class="no-data">Add nodes, links, then analyse.</div>';
+    return;
+  }
   el.innerHTML='';
   analysed.forEach(e=>{
     const r=e.result;
@@ -1989,24 +2209,28 @@ function renderChartTabs(){
   const tabs=document.getElementById('chartTabs');
   tabs.innerHTML='';
   // Path tabs first
-  S.paths.forEach(p=>{
-    const names=p.nodeIds.map(id=>S.nodes.find(n=>n.id===id)?.name||'?').join(' → ');
-    const btn=document.createElement('button');
-    btn.className='chart-tab'+(S.activeView?.type==='path'&&S.activeView?.id===p.id?' active':'');
-    btn.textContent=names; btn.title=names;
-    btn.onclick=()=>selectPathView(p.id);
-    tabs.appendChild(btn);
-  });
+  if(S.showPaths){
+    S.paths.filter(p=>!p.hidden).forEach(p=>{
+      const names=p.nodeIds.map(id=>S.nodes.find(n=>n.id===id)?.name||'?').join(' → ');
+      const btn=document.createElement('button');
+      btn.className='chart-tab'+(S.activeView?.type==='path'&&S.activeView?.id===p.id?' active':'');
+      btn.textContent=names; btn.title=names;
+      btn.onclick=()=>selectPathView(p.id);
+      tabs.appendChild(btn);
+    });
+  }
   // Individual edge tabs
-  S.edges.filter(e=>e.result&&e.profile).forEach(e=>{
-    const a=S.nodes.find(n=>n.id===e.aId),b=S.nodes.find(n=>n.id===e.bId);
-    const label=`${a?.name||'?'} ↔ ${b?.name||'?'}`;
-    const btn=document.createElement('button');
-    btn.className='chart-tab'+(S.activeView?.type==='edge'&&S.activeView?.id===e.id?' active':'');
-    btn.textContent=label; btn.title=label;
-    btn.onclick=()=>selectEdgeView(e.id);
-    tabs.appendChild(btn);
-  });
+  if(S.showLinks){
+    S.edges.filter(e=>!e.hidden&&e.result&&e.profile).forEach(e=>{
+      const a=S.nodes.find(n=>n.id===e.aId),b=S.nodes.find(n=>n.id===e.bId);
+      const label=`${a?.name||'?'} ↔ ${b?.name||'?'}`;
+      const btn=document.createElement('button');
+      btn.className='chart-tab'+(S.activeView?.type==='edge'&&S.activeView?.id===e.id?' active':'');
+      btn.textContent=label; btn.title=label;
+      btn.onclick=()=>selectEdgeView(e.id);
+      tabs.appendChild(btn);
+    });
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2411,11 +2635,10 @@ function clearCanvas(){
 //  SHARE via URL hash
 // ═══════════════════════════════════════════════════════════
 function openShare(){
-  // Compact v3 schema: short keys + array-indexed refs, then LZ-string compress.
-  // Backwards-compatible with v2 — only adds RF + coverage fields.
+  // Compact schema: short keys + array-indexed refs, then LZ-string compress.
   const idx=new Map(S.nodes.map((n,i)=>[n.id,i]));
   const data={
-    v:3,
+    v:4,
     f:+document.getElementById('inpFreq').value,
     k:document.getElementById('inpK').value,
     tx:+document.getElementById('inpTx').value,
@@ -2435,16 +2658,23 @@ function openShare(){
       }
       return base;
     }),
-    e:S.edges.map(e=>[idx.get(e.aId),idx.get(e.bId)]),
-    p:S.paths.map(p=>[p.name,...p.nodeIds.map(id=>idx.get(id))])
+    e:S.edges.map(e=>[idx.get(e.aId),idx.get(e.bId),e.hidden?1:0]),
+    p:S.paths.map(p=>[p.name,p.hidden?1:0,...p.nodeIds.map(id=>idx.get(id))])
   };
-  const hash='v3:'+LZString.compressToEncodedURIComponent(JSON.stringify(data));
+  const hash='v4:'+LZString.compressToEncodedURIComponent(JSON.stringify(data));
   const url=window.location.href.split('#')[0]+'#'+hash;
   document.getElementById('shareUrl').textContent=url;
   document.getElementById('shareModal').classList.add('open');
 }
 function closeShare(){document.getElementById('shareModal').classList.remove('open');}
-function openSettings(){ refreshSettingsSummary(); document.getElementById('settingsModal').classList.add('open'); }
+function openSettings(){
+  refreshSettingsSummary();
+  const links=document.getElementById('inpShowLinks');
+  const paths=document.getElementById('inpShowPaths');
+  if(links) links.checked=S.showLinks;
+  if(paths) paths.checked=S.showPaths;
+  document.getElementById('settingsModal').classList.add('open');
+}
 function closeSettings(){ document.getElementById('settingsModal').classList.remove('open'); refreshSettingsSummary(); }
 function refreshSettingsSummary(){
   const f = document.getElementById('inpFreq')?.value || '915';
@@ -2471,7 +2701,7 @@ function closeHelp(){
   try{localStorage.setItem('rfLosHelpSeen','1');}catch{}
 }
 function maybeShowHelp(){
-  try{if(!localStorage.getItem('rfLosHelpSeen')&&!window.location.hash) openHelp();}catch{}
+  if(!window.location.hash.slice(1).trim()) openHelp();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2502,6 +2732,7 @@ function edgeKey(aId, bId) {
 
 function normaliseV3Hash(raw) {
   if (!raw || typeof raw !== 'object') throw new Error('Shared data is not an object');
+  const v = Number(raw.v) || 3;
   const rawNodes = Array.isArray(raw.n) ? raw.n.slice(0, LIMITS.nodes) : [];
   const rawEdges = Array.isArray(raw.e) ? raw.e.slice(0, LIMITS.edges) : [];
   const rawPaths = Array.isArray(raw.p) ? raw.p.slice(0, LIMITS.paths) : [];
@@ -2540,16 +2771,18 @@ function normaliseV3Hash(raw) {
     const key = edgeKey(aId, bId);
     if (edgeKeys.has(key)) return;
     edgeKeys.add(key);
-    edges.push({ id: id++, aId, bId });
+    edges.push({ id: id++, aId, bId, hidden: v >= 4 ? !!ed[2] : false });
   });
 
   const paths = [];
   rawPaths.forEach(p => {
     if (!Array.isArray(p) || p.length < 3) return;
-    const nodeIds = p.slice(1, LIMITS.pathNodes + 1).map(j => indexToId.get(Number(j))).filter(Boolean);
+    const hidden = v >= 4 ? !!p[1] : false;
+    const ids = v >= 4 ? p.slice(2) : p.slice(1);
+    const nodeIds = ids.slice(0, LIMITS.pathNodes).map(j => indexToId.get(Number(j))).filter(Boolean);
     if (nodeIds.length < 2 || new Set(nodeIds).size !== nodeIds.length) return;
     if (!nodeIds.slice(0, -1).every((nid, i) => edgeKeys.has(edgeKey(nid, nodeIds[i + 1])))) return;
-    paths.push({ id: id++, name: cleanName(p[0], 'Path'), nodeIds });
+    paths.push({ id: id++, name: cleanName(p[0], 'Path'), hidden, nodeIds });
   });
 
   return {
@@ -2609,7 +2842,7 @@ function normaliseLegacyHash(raw) {
     const key = edgeKey(aId, bId);
     if (edgeKeys.has(key)) return;
     edgeKeys.add(key);
-    edges.push({ id: id++, aId, bId });
+    edges.push({ id: id++, aId, bId, hidden: !!(ed?.hidden ?? ed?.[2]) });
   });
 
   const paths = [];
@@ -2618,7 +2851,7 @@ function normaliseLegacyHash(raw) {
     const nodeIds = ids.slice(0, LIMITS.pathNodes).map(nid => oldToId.get(nid)).filter(Boolean);
     if (nodeIds.length < 2 || new Set(nodeIds).size !== nodeIds.length) return;
     if (!nodeIds.slice(0, -1).every((nid, i) => edgeKeys.has(edgeKey(nid, nodeIds[i + 1])))) return;
-    paths.push({ id: id++, name: cleanName(p?.name ?? p?.[0], 'Path'), nodeIds });
+    paths.push({ id: id++, name: cleanName(p?.name ?? p?.[0], 'Path'), hidden: !!p?.hidden, nodeIds });
   });
 
   return {
@@ -2642,9 +2875,10 @@ function normaliseLegacyHash(raw) {
 
 function parseSharedHash(hash) {
   if (hash.length > LIMITS.hashChars) throw new Error('Shared link is too large');
+  const isV4 = hash.startsWith('v4:');
   const isV3 = hash.startsWith('v3:');
   const isV2 = hash.startsWith('v2:');
-  if (isV3 || isV2) {
+  if (isV4 || isV3 || isV2) {
     const json = LZString.decompressFromEncodedURIComponent(hash.slice(3));
     if (!json || json.length > LIMITS.hashChars * 4) throw new Error('Shared link could not be decompressed');
     return normaliseV3Hash(JSON.parse(json));
@@ -2682,7 +2916,7 @@ function loadFromHash(){
     data.edges.forEach(ed=>{
       const a=S.nodes.find(n=>n.id===ed.aId),b=S.nodes.find(n=>n.id===ed.bId);
       if(!a||!b) return;
-      const edge={id:ed.id,aId:ed.aId,bId:ed.bId,line:null,hitLine:null,result:null,profile:null};
+      const edge={id:ed.id,aId:ed.aId,bId:ed.bId,hidden:!!ed.hidden,line:null,hitLine:null,result:null,profile:null};
       edge.line=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#4a6278',weight:2,opacity:.7,dashArray:'5 4'}).addTo(S.map);
       edge.hitLine=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#ffffff',weight:24,opacity:0,interactive:true}).addTo(S.map);
       attachEdgeHandlers(edge);
@@ -2691,6 +2925,7 @@ function loadFromHash(){
     // Restore paths
     data.paths.forEach(p=>S.paths.push({...p}));
     renderNodeList(); renderEdgesPanel(); renderPathsPanel();
+    highlightActiveMapView();
     document.getElementById('wpCount').textContent=S.nodes.length;
     document.getElementById('edgeCount').textContent=S.edges.length;
     document.getElementById('pathCount').textContent=S.paths.length;
