@@ -1950,7 +1950,8 @@ function coverageStatusText(node){
   if(!node.coverageComputed) return '';
   if(node.coverageDirty) return 'stale';
   if(node.coverageReachMax == null || node.coverageMaxRange == null) return 'cached';
-  return `max ${(node.coverageReachMax/1000).toFixed(1)}/${(node.coverageMaxRange/1000).toFixed(0)}km`;
+  const reason = node.coverageLimitedByBudget ? 'budget' : 'cap';
+  return `max ${(node.coverageReachMax/1000).toFixed(1)}/${(node.coverageMaxRange/1000).toFixed(0)}km ${reason}`;
 }
 
 function setNodeCoverageOn(id, on){
@@ -2004,8 +2005,12 @@ async function _computeNodeCoverageImpl(node){
   const rf = effectiveRf(node);
   const friisRange = friisRangeMeters(rf.tx, rf.gain, rf.gain, rf.rx, g.freq, g.margin);
   if(!friisRange){ toast(`${node.name}: link budget too low — no coverage`, 3000); return; }
-  // Cap to user-configured search radius so we don't fetch tiles forever
-  const maxRange = Math.min(friisRange, g.maxKm * 1000);
+  // Cap to user-configured search radius so we don't fetch tiles forever, but
+  // also honour the free-space RF link budget. The smaller one is the search
+  // range the terrain sweep can actually test.
+  const searchCap = g.maxKm * 1000;
+  const maxRange = Math.min(friisRange, searchCap);
+  const limitedByBudget = friisRange < searchCap;
 
   // Make sure source elevation is available
   if(node.elev == null){
@@ -2016,7 +2021,10 @@ async function _computeNodeCoverageImpl(node){
 
   const srcH = node.elev + node.antH;
   const rays = g.rays, samples = g.samples;
-  toast(`${node.name}: computing rays (cap ${(maxRange/1000).toFixed(0)} km, ${(maxRange/samples).toFixed(0)} m steps, Friis ${(friisRange/1000).toFixed(0)} km)…`);
+  const rangeReason = limitedByBudget
+    ? `budget ${(friisRange/1000).toFixed(1)} km, cap ${(searchCap/1000).toFixed(0)} km`
+    : `cap ${(searchCap/1000).toFixed(0)} km, Friis ${(friisRange/1000).toFixed(0)} km`;
+  toast(`${node.name}: computing rays (${rangeReason}, ${(maxRange/samples).toFixed(0)} m steps)…`);
   const reach = [];   // [{az, dist, latlng}]
 
   for(let r = 0; r < rays; r++){
@@ -2064,10 +2072,16 @@ async function _computeNodeCoverageImpl(node){
 
   node.coverageRays = reach;
   node.coverageMaxRange = maxRange;
+  node.coverageSearchCap = searchCap;
+  node.coverageFriisRange = friisRange;
+  node.coverageLimitedByBudget = limitedByBudget;
   node.coverageReachMax = reach.reduce((m,r)=>Math.max(m,r.dist),0);
   node.coverageComputed = true;
   node.coverageDirty = false;
-  toast(`${node.name}: terrain-limited max ${(node.coverageReachMax/1000).toFixed(2)} km of ${(maxRange/1000).toFixed(0)} km cap.`, 3500);
+  const limitText = limitedByBudget
+    ? `budget-limited ${(maxRange/1000).toFixed(2)} km from ${(searchCap/1000).toFixed(0)} km cap`
+    : `${(maxRange/1000).toFixed(0)} km cap`;
+  toast(`${node.name}: terrain max ${(node.coverageReachMax/1000).toFixed(2)} km of ${limitText}.`, 3500);
   renderCoveragePolygon(node);
   updateCovBtn(node);
 }
