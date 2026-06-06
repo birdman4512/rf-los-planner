@@ -447,8 +447,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn" onclick="openSettings()">⚙ SETTINGS</button>
       <button class="btn share" onclick="openShare()">⇪ SHARE</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
-      <span class="hdr-tag" title="Build 20260605-14">BUILD 20260605-14</span>
-      <button class="btn primary" onclick="runAnalysis()">▶ ANALYSE</button>
+      <span class="hdr-tag" title="Build 20260606-1">BUILD 20260606-1</span>
     </div>
   </header>
 
@@ -705,27 +704,41 @@ function setNodeTooltip(node, label) {
   node.marker.setTooltipContent(textNode(label));
 }
 
-function buildIcon(node) {
+// Marker SVG depends only on index (number + colour) and selected state.
+function nodeIconSvg(node) {
   const idx = S.nodes.indexOf(node);
   const c = nodeColor(idx);
   const n = idx + 1;
-  const amsl = node.elev !== null ? (node.elev + node.antH).toFixed(0) : '?';
   const selected = S.activeView?.type === 'node' && S.activeView.id === node.id;
   const pinPath = 'M11 0C4.9 0 0 4.9 0 11c0 8.3 11 17 11 17s11-8.7 11-17C22 4.9 17.1 0 11 0z';
   const selectedOutline = selected ? `<path d="${pinPath}" fill="none" stroke="${c}" stroke-width="4" stroke-linejoin="round" opacity="1"/>` : '';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="34" viewBox="-3 -3 28 34">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="34" viewBox="-3 -3 28 34">
     ${selectedOutline}
     <path d="${pinPath}" fill="${c}" opacity="0.92"/>
     <circle cx="11" cy="11" r="6" fill="#0b0f17"/>
     <text x="11" y="14.5" text-anchor="middle" font-family="monospace" font-size="7" fill="${c}" font-weight="bold">${n}</text>
   </svg>`;
+}
+
+function nodeDivIcon(svg) {
   return L.divIcon({ html: svg, className: 'lf-marker', iconSize:[28,34], iconAnchor:[14,31], tooltipAnchor:[0,-31] });
 }
 
+function buildIcon(node) {
+  const svg = nodeIconSvg(node);
+  node._iconHtml = svg;
+  return nodeDivIcon(svg);
+}
+
+// Rebuild only the icons whose appearance actually changed. setIcon() swaps the
+// marker's DOM element, which both causes a visible flicker and aborts an
+// in-progress drag — so skipping unchanged markers (every marker, on every
+// analysis/selection) is what keeps dragging smooth and the screen stable.
 function refreshAllIcons() {
-  S.nodes.forEach((n, i) => {
-    if (n.marker) n.marker.setIcon(buildIcon(n));
-    if (n.coverageLayer) styleCoverageLayer(n.coverageLayer,{});
+  S.nodes.forEach(n => {
+    if (!n.marker) return;
+    const svg = nodeIconSvg(n);
+    if (n._iconHtml !== svg) { n.marker.setIcon(nodeDivIcon(svg)); n._iconHtml = svg; }
   });
 }
 
