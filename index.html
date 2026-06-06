@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>RF Line of Sight Planner</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com; connect-src 'self' https://esa-worldcover.s3.eu-central-1.amazonaws.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com https://services.terrascope.be https://titiler.terrascope.be https://tiles.globalforestwatch.org; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js" integrity="sha512-qtX0GLM3qX8rxJN1gyDfcnMFFrKvixfoEOwbBib9VafR5vbChV5LeE5wSI/x+IlCkTY5ZFddFDCCfaVJJNnuKQ==" crossorigin="anonymous"></script>
@@ -426,7 +426,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       </div>
       <div class="field-row" style="margin-top:6px">
         <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
-          <input type="checkbox" id="inpClutterOn" onchange="onCoverageParamChanged()" title="Raise terrain by a land-cover clutter height (trees/buildings) before the LOS check, using ESA WorldCover 10 m data. Off = bare earth (today's behaviour).">
+          <input type="checkbox" id="inpClutterOn" onchange="onCoverageParamChanged()" title="Apply land-cover/canopy clutter as extra obstruction and diffraction loss. Bare terrain still controls hard LOS blocking.">
           Surface clutter (land cover)
         </label>
       </div>
@@ -438,13 +438,18 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <label>Clear &lt;(m)</label>
         <input type="number" id="inpClutterExclude" value="100" step="10" min="0" style="width:58px" title="Ignore clutter within this distance of the node — your own site is assumed clear of nearby trees/buildings." onchange="onCoverageParamChanged()">
       </div>
+      <div class="field-row" style="margin-bottom:6px">
+        <label>Atten @915</label>
+        <input type="number" id="inpClutterAtten" value="0.10" step="0.01" min="0" max="1" style="width:62px" title="Reference clutter attenuation in dB per metre at 915 MHz. The app scales this by frequency." onchange="onCoverageParamChanged()">
+        <span style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted)">dB/m, frequency-scaled</span>
+      </div>
       <div class="cov-btn-row" style="margin-top:10px">
         <button class="btn" onclick="setAllCoverage(true)">ALL ON</button>
         <button class="btn" onclick="setAllCoverage(false)">ALL OFF</button>
         <button class="btn primary" onclick="computeAllCoverage()">▶ COMPUTE ALL</button>
       </div>
       <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:1px;line-height:1.4">
-        Coverage is shown in each node's colour; more opaque = stronger signal, fading out to the coverage edge, blank where the link won't close (e.g. terrain shadow). Surface clutter (optional) raises terrain by ESA WorldCover land cover. Compute downloads terrain tiles (AWS Open Terrain, ~30 m global).
+        Coverage is shown in each node's colour; more opaque = stronger signal, fading out to the coverage edge, blank where the link won't close (e.g. terrain shadow). Surface clutter (optional) adds Meta/WRI canopy height where available plus ESA WorldCover land-cover loss. Compute downloads terrain tiles (AWS Open Terrain, ~30 m global).
       </div>
     </div>
 
@@ -464,7 +469,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" onclick="openShare()">⇪ SHARE</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
       <button class="btn" onclick="toggleDebug()" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260606-4">BUILD 20260606-4</span>
+      <span class="hdr-tag" title="Build 20260606-13">BUILD 20260606-13</span>
     </div>
   </header>
 
@@ -617,17 +622,38 @@ const COVERAGE_STEP_M = 40;
 const COVERAGE_MAX_SAMPLES = 1600;
 const FRESNEL_OPTIONS = [0, 0.4, 0.6, 1];
 
-// ── Surface clutter via ESA WorldCover (10 m land cover, 2021 v200) ──
-// Bare-earth terrain misses trees/buildings; this raises intermediate terrain
-// by a per-land-cover clutter height before the LOS/Fresnel check. Optional and
-// off by default; degrades gracefully to bare terrain if the data can't load.
-const WORLDCOVER_BASE = 'https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/';
-const GEOTIFF_CDN = 'https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js';
+// ── Surface clutter via Meta/WRI canopy height + ESA WorldCover land cover ──
+// Bare-earth terrain misses trees/buildings; clutter adds obstruction pressure
+// and diffraction loss, while bare terrain remains the hard LOS blocker.
+// Optional and off by default; degrades gracefully to bare terrain if data fails.
+const WORLDCOVER_WMS_SOURCES = [
+  { name:'Terrascope TiTiler', url:'https://titiler.terrascope.be/wms', layer:'esa-worldcover-map-10m-2021-v2_map', time:'2021-01-01' },
+  { name:'Terrascope legacy', url:'https://services.terrascope.be/wms/v2', layer:'WORLDCOVER_2021_MAP' }
+];
+const CANOPY_TILE_Z = 9;
+const CANOPY_MAX_M = 60; // PNG rescale ceiling for Meta/WRI canopy height.
+const CANOPY_COG_BASE = 'https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/';
+const CANOPY_GFW_BBOX = 'https://tiles.globalforestwatch.org/cog/basic/bbox/';
+const CLUTTER_ATTEN_DB_PER_M_915 = 0.10; // reference loss while LOS passes through canopy/building clutter
+const CLUTTER_ATTEN_CAP_DB = 45;         // avoid treating clutter as infinite terrain
 // WorldCover classes: 10 Tree, 20 Shrub, 30 Grass, 40 Crop, 50 Built-up,
 // 60 Bare, 70 Snow, 80 Water, 90 Wetland, 95 Mangrove, 100 Moss.
 // Default clutter height (m) per WorldCover class. Tree cover and Built-up are
 // user-editable (the two that matter most); the rest are sensible fixed values.
 const CLUTTER_HEIGHT_DEFAULT = {10:15,20:3,30:0,40:1,50:8,60:0,70:0,80:0,90:1,95:8,100:0};
+const WORLDCOVER_PALETTE = [
+  {cls:10, rgb:[0,100,0]},       // Tree cover
+  {cls:20, rgb:[255,187,34]},    // Shrubland
+  {cls:30, rgb:[255,255,76]},    // Grassland
+  {cls:40, rgb:[240,150,255]},   // Cropland
+  {cls:50, rgb:[250,0,0]},       // Built-up
+  {cls:60, rgb:[180,180,180]},   // Bare / sparse vegetation
+  {cls:70, rgb:[240,240,240]},   // Snow and ice
+  {cls:80, rgb:[0,100,200]},     // Permanent water bodies
+  {cls:90, rgb:[0,150,160]},     // Herbaceous wetland
+  {cls:95, rgb:[0,207,117]},     // Mangroves
+  {cls:100,rgb:[250,230,160]}    // Moss and lichen
+];
 
 function clampNum(v, min, max, fallback) {
   const n = Number(v);
@@ -1871,125 +1897,279 @@ async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
 }
 
 // ═══════════════════════════════════════════════════════════
-//  SURFACE CLUTTER — ESA WorldCover land cover (lazy COG reads)
-//  Builds an in-memory land-cover grid over a bbox, then maps each cell's
-//  class to a clutter height. All failures are non-fatal: the caller falls
+//  SURFACE CLUTTER — ESA WorldCover via Terrascope WMS
+//  Requests the exact bbox as one PNG, decodes WorldCover palette colours, then
+//  maps each class to a clutter height. Failures are non-fatal: the caller falls
 //  back to bare terrain.
 // ═══════════════════════════════════════════════════════════
-let _geotiffPromise = null;
-const _worldCoverImg = new Map();   // tile name → Promise<{image, ulx, uly, xres, yres, w, h}>
+const _clutterImgCache = new Map(); // url → Promise<{data,w,h}>
 let _clutterUnavailable = false;    // sticky: once load fails, stop retrying this session
 
-function loadGeoTiffLib(){
-  if(window.GeoTIFF) return Promise.resolve(window.GeoTIFF);
-  if(_geotiffPromise) return _geotiffPromise;
-  dlog('geotiff.js: loading library from '+GEOTIFF_CDN+' …');
-  _geotiffPromise = new Promise((resolve, reject) => {
-    const sc = document.createElement('script');
-    sc.src = GEOTIFF_CDN; sc.crossOrigin = 'anonymous';
-    sc.onload = () => { if(window.GeoTIFF){ dlog('geotiff.js: loaded ✓','ok'); resolve(window.GeoTIFF); } else { dlog('geotiff.js: loaded but global missing','err'); reject(new Error('geotiff global missing')); } };
-    sc.onerror = () => { dlog('geotiff.js: FAILED to load (script blocked?)','err'); reject(new Error('geotiff.js failed to load')); };
-    document.head.appendChild(sc);
+function worldCoverClassFromRgb(r,g,b,a){
+  if(a === 0) return 0;
+  let best = 0, bestD = Infinity;
+  WORLDCOVER_PALETTE.forEach(p=>{
+    const dr=r-p.rgb[0], dg=g-p.rgb[1], db=b-p.rgb[2];
+    const d=dr*dr+dg*dg+db*db;
+    if(d<bestD){bestD=d;best=p.cls;}
   });
-  return _geotiffPromise;
+  return bestD <= 900 ? best : 0;
 }
 
-// WorldCover 3°×3° tile name from a lat/lng (named by SW corner).
-function worldCoverTile(lat, lng){
-  const tLat = Math.floor(lat/3)*3, tLng = Math.floor(lng/3)*3;
-  const ns = tLat < 0 ? 'S' : 'N', ew = tLng < 0 ? 'W' : 'E';
-  return `${ns}${String(Math.abs(tLat)).padStart(2,'0')}${ew}${String(Math.abs(tLng)).padStart(3,'0')}`;
-}
-
-async function worldCoverImage(tile){
-  if(_worldCoverImg.has(tile)) return _worldCoverImg.get(tile);
-  const p = (async () => {
-    const GT = await loadGeoTiffLib();
-    const url = `${WORLDCOVER_BASE}ESA_WorldCover_10m_2021_v200_${tile}_Map.tif`;
-    dlog(`WorldCover ${tile}: fetching ${url} …`);
-    try {
-      const tiff = await GT.fromUrl(url);
-      const image = await tiff.getImage();
-      const [ulx, uly] = image.getOrigin();
-      const [xres, yres] = image.getResolution();   // yres is negative (north-up)
-      dlog(`WorldCover ${tile}: loaded ✓ (${image.getWidth()}×${image.getHeight()} px)`,'ok');
-      return { image, ulx, uly, xres, yres, w: image.getWidth(), h: image.getHeight() };
-    } catch(e){
-      dlog(`WorldCover ${tile}: FAILED — ${e.message||e} (likely CORS or tile not found)`,'err');
-      throw e;
-    }
-  })();
-  _worldCoverImg.set(tile, p);
+function loadClutterImage(url, w, h){
+  if(_clutterImgCache.has(url)) return _clutterImgCache.get(url);
+  const p = new Promise((resolve, reject)=>{
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try{
+        const cvs = document.createElement('canvas');
+        cvs.width = w; cvs.height = h;
+        const ctx = cvs.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const data = ctx.getImageData(0, 0, w, h).data;
+        resolve({data,w,h});
+      }catch(e){ reject(new Error(`canvas decode failed (${e.message||e})`)); }
+    };
+    img.onerror = () => reject(new Error('image request failed'));
+    img.src = url;
+  });
+  _clutterImgCache.set(url, p);
   return p;
+}
+
+function makeClutterImpactStats(){
+  return { total:0, hits:0, sum:0, max:0, maxDist:0, maxLatLng:null, maxAz:null, blockedByClutter:0, maxLossDb:0 };
+}
+
+function addClutterImpact(stats, h, dist, latlng, az){
+  if(!stats) return;
+  stats.total++;
+  if(!(h > 0)) return;
+  stats.hits++;
+  stats.sum += h;
+  if(h > stats.max){
+    stats.max = h;
+    stats.maxDist = dist || 0;
+    stats.maxLatLng = latlng || null;
+    stats.maxAz = az ?? null;
+  }
+}
+
+function clutterImpactSummary(stats){
+  if(!stats || !stats.total) return 'no sampled clutter points';
+  const avg = stats.hits ? stats.sum / stats.hits : 0;
+  const maxWhere = stats.maxLatLng
+    ? ` @ ${(stats.maxDist/1000).toFixed(2)}km${stats.maxAz!=null?`, az ${stats.maxAz.toFixed(0)}°`:''} (${stats.maxLatLng[0].toFixed(5)},${stats.maxLatLng[1].toFixed(5)})`
+    : '';
+  return `${stats.hits}/${stats.total} sampled points had clutter; max +${stats.max.toFixed(1)}m${maxWhere}; avg +${avg.toFixed(1)}m where present`;
+}
+
+function clutterAttenDbPerM(freqMHz, refDbPerM = CLUTTER_ATTEN_DB_PER_M_915){
+  // Foliage/building-edge loss rises with frequency; this is a pragmatic
+  // wideband scaling around the 915 MHz reference, not a site-calibrated model.
+  const f = clampNum(freqMHz, 1, 100000, 915);
+  const ref = clampNum(refDbPerM, 0, 1, CLUTTER_ATTEN_DB_PER_M_915);
+  return ref * Math.sqrt(f / 915);
+}
+
+function clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, startIdx, endIdx, freqMHz, refDbPerM){
+  if(!clutterH) return 0;
+  const dbPerM = clutterAttenDbPerM(freqMHz, refDbPerM);
+  let loss = 0;
+  for(let j = startIdx; j < endIdx; j++){
+    const h = clutterH[j] || 0;
+    if(!(h > 0)) continue;
+    const los = losAt(j);
+    const bareEff = bareEffAt(j);
+    if(los <= bareEff) continue; // bare terrain already owns the obstruction
+    if(los >= bareEff + h) continue;
+    const frac = Math.max(0.15, Math.min(1, (bareEff + h - los) / h));
+    const segM = j > 0 ? Math.max(0, dists[j] - dists[j-1]) : 0;
+    loss += segM * dbPerM * frac;
+    if(loss >= CLUTTER_ATTEN_CAP_DB) return CLUTTER_ATTEN_CAP_DB;
+  }
+  return Math.min(CLUTTER_ATTEN_CAP_DB, loss);
+}
+
+function lonLatToTile(lng, lat, z){
+  const latRad = lat * Math.PI / 180;
+  const n = 2 ** z;
+  return {
+    x: Math.floor((lng + 180) / 360 * n),
+    y: Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n)
+  };
+}
+
+function tileToQuadKey(x, y, z){
+  let q = '';
+  for(let i = z; i > 0; i--){
+    let digit = 0;
+    const mask = 1 << (i - 1);
+    if((x & mask) !== 0) digit += 1;
+    if((y & mask) !== 0) digit += 2;
+    q += digit;
+  }
+  return q;
+}
+
+function canopyTileKeysForBbox(minLat, minLng, maxLat, maxLng){
+  const nw = lonLatToTile(minLng, maxLat, CANOPY_TILE_Z);
+  const se = lonLatToTile(maxLng, minLat, CANOPY_TILE_Z);
+  const keys = [];
+  for(let y = Math.max(0, nw.y); y <= se.y; y++){
+    for(let x = Math.max(0, nw.x); x <= se.x; x++){
+      keys.push(tileToQuadKey(x, y, CANOPY_TILE_Z));
+    }
+  }
+  return keys;
+}
+
+function canopyBboxUrl(tile, minLat, minLng, maxLat, maxLng, cols, rows){
+  const cog = `${CANOPY_COG_BASE}${tile}.tif`;
+  const qs = new URLSearchParams({
+    url: cog,
+    rescale: `0,${CANOPY_MAX_M}`,
+    colormap_name: 'gray',
+    return_mask: 'true',
+    resampling: 'bilinear'
+  });
+  return `${CANOPY_GFW_BBOX}${minLng},${minLat},${maxLng},${maxLat}/${cols}x${rows}.png?${qs.toString()}`;
 }
 
 // Build a land-cover→clutter-height sampler over [minLat,minLng]–[maxLat,maxLng]
 // at ~stepM resolution. `heights` maps WorldCover class → metres. Returns a
 // sampler {heightAt(lat,lng)} or null if no data could be loaded (→ bare earth).
-async function buildClutterGrid(minLat, minLng, maxLat, maxLng, stepM, heights){
+async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, heights){
   if(_clutterUnavailable){ dlog('Clutter: skipped (data unavailable earlier this session)','warn'); return null; }
   const midLat = (minLat + maxLat) / 2;
   const dLat = stepM / 111320;
   const dLng = stepM / (111320 * Math.max(0.05, Math.cos(midLat * Math.PI/180)));
-  const cols = Math.min(6000, Math.ceil((maxLng - minLng) / dLng) + 1);
-  const rows = Math.min(6000, Math.ceil((maxLat - minLat) / dLat) + 1);
-  const grid = new Uint8Array(cols * rows);   // class per cell; 0 = unknown
-  let filled = false;
-  try {
-    for(let tLat = Math.floor(minLat/3)*3; tLat <= Math.floor(maxLat/3)*3; tLat += 3){
-      for(let tLng = Math.floor(minLng/3)*3; tLng <= Math.floor(maxLng/3)*3; tLng += 3){
-        let meta;
-        try { meta = await worldCoverImage(worldCoverTile(tLat, tLng)); }
-        catch(e){ continue; }   // tile missing (e.g. all-ocean) → leave unknown
-        // Native pixel window for this tile's intersection with the bbox.
-        const wMin = Math.max(minLng, tLng), wMax = Math.min(maxLng, tLng + 3);
-        const sMin = Math.max(minLat, tLat), sMax = Math.min(maxLat, tLat + 3);
-        let px0 = Math.floor((wMin - meta.ulx) / meta.xres);
-        let px1 = Math.ceil((wMax - meta.ulx) / meta.xres);
-        let py0 = Math.floor((sMax - meta.uly) / meta.yres);   // north → smaller row
-        let py1 = Math.ceil((sMin - meta.uly) / meta.yres);
-        px0 = Math.max(0, Math.min(meta.w, px0)); px1 = Math.max(0, Math.min(meta.w, px1));
-        py0 = Math.max(0, Math.min(meta.h, py0)); py1 = Math.max(0, Math.min(meta.h, py1));
-        if(px1 <= px0 || py1 <= py0) continue;
-        const f = Math.max(1, Math.round(stepM / 10));   // native is ~10 m
-        const outW = Math.max(1, Math.round((px1 - px0) / f));
-        const outH = Math.max(1, Math.round((py1 - py0) / f));
-        const rasters = await meta.image.readRasters({
-          window: [px0, py0, px1, py1], width: outW, height: outH, resampleMethod: 'nearest' });
-        const data = rasters[0];
-        // Scatter each output pixel into the unified grid by its lat/lng centre.
-        for(let oy = 0; oy < outH; oy++){
-          const nativeY = py0 + (oy + 0.5) * (py1 - py0) / outH;
-          const lat = meta.uly + nativeY * meta.yres;
-          const r = Math.floor((maxLat - lat) / dLat);
-          if(r < 0 || r >= rows) continue;
-          for(let ox = 0; ox < outW; ox++){
-            const nativeX = px0 + (ox + 0.5) * (px1 - px0) / outW;
-            const lng = meta.ulx + nativeX * meta.xres;
-            const c = Math.floor((lng - minLng) / dLng);
-            if(c < 0 || c >= cols) continue;
-            grid[r * cols + c] = data[oy * outW + ox];
-            filled = true;
-          }
-        }
-      }
+  const cols = Math.min(2048, Math.max(2, Math.ceil((maxLng - minLng) / dLng) + 1));
+  const rows = Math.min(2048, Math.max(2, Math.ceil((maxLat - minLat) / dLat) + 1));
+  for(const src of WORLDCOVER_WMS_SOURCES){
+    const qs = new URLSearchParams({
+      SERVICE:'WMS',
+      VERSION:'1.3.0',
+      REQUEST:'GetMap',
+      LAYERS:src.layer,
+      STYLES:'',
+      CRS:'EPSG:4326',
+      BBOX:`${minLat},${minLng},${maxLat},${maxLng}`,
+      WIDTH:String(cols),
+      HEIGHT:String(rows),
+      FORMAT:'image/png',
+      TRANSPARENT:'true'
+    });
+    if(src.time) qs.set('TIME', src.time);
+    const url = `${src.url}?${qs.toString()}`;
+    dlog(`WorldCover ${src.name}: fetching ${cols}×${rows} WMS image …`);
+    let img;
+    try{
+      img = await loadClutterImage(url, cols, rows);
+    }catch(e){
+      dlog(`Clutter source status: ${src.name} FAILED — ${e.message||e}`,'err');
+      continue;
     }
-  } catch(e){
-    console.warn('Clutter grid build failed', e);
-    dlog('Clutter: grid build FAILED — '+(e.message||e),'err');
-    _clutterUnavailable = true;
+    const classes = new Uint8Array(cols * rows);
+    let filled = 0;
+    for(let i=0,j=0;i<img.data.length;i+=4,j++){
+      const cls = worldCoverClassFromRgb(img.data[i],img.data[i+1],img.data[i+2],img.data[i+3]);
+      classes[j] = cls;
+      if(cls) filled++;
+    }
+    if(!filled){
+      dlog('Clutter: Terrascope returned no class pixels (left as bare terrain)','warn');
+      return null;
+    }
+    dlog(`Clutter source status: ${src.name} OK (${filled}/${classes.length} classified pixels)`,'ok');
+    return {
+      source: src.name,
+      classAt(lat, lng){
+        const c = Math.max(0, Math.min(cols-1, Math.floor((lng - minLng) / (maxLng - minLng) * cols)));
+        const r = Math.max(0, Math.min(rows-1, Math.floor((maxLat - lat) / (maxLat - minLat) * rows)));
+        return classes[r * cols + c] || 0;
+      },
+      heightAt(lat, lng){
+        const cls = this.classAt(lat, lng);
+        return heights[cls] || 0;
+      }
+    };
+  }
+  dlog('Clutter: all Terrascope WMS sources failed (left as bare terrain)','err');
+  _clutterUnavailable = true;
+  return null;
+}
+
+async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
+  const midLat = (minLat + maxLat) / 2;
+  const dLat = stepM / 111320;
+  const dLng = stepM / (111320 * Math.max(0.05, Math.cos(midLat * Math.PI/180)));
+  const cols = Math.min(2048, Math.max(2, Math.ceil((maxLng - minLng) / dLng) + 1));
+  const rows = Math.min(2048, Math.max(2, Math.ceil((maxLat - minLat) / dLat) + 1));
+  const tiles = canopyTileKeysForBbox(minLat, minLng, maxLat, maxLng);
+  if(!tiles.length) return null;
+  if(tiles.length > 12){
+    dlog(`Canopy source status: skipped (${tiles.length} tiles would be needed for this bbox)`,'warn');
     return null;
   }
-  if(!filled){ dlog('Clutter: no land-cover data covered this area (left as bare terrain)','warn'); return null; }
+  const heights = new Float32Array(cols * rows);
+  let loaded = 0, nonZero = 0, maxH = 0;
+  for(const tile of tiles){
+    const url = canopyBboxUrl(tile, minLat, minLng, maxLat, maxLng, cols, rows);
+    dlog(`Meta/WRI canopy via GFW: fetching ${cols}×${rows} image for tile ${tile} …`);
+    let img;
+    try{
+      img = await loadClutterImage(url, cols, rows);
+    }catch(e){
+      dlog(`Canopy source status: tile ${tile} FAILED — ${e.message||e}`,'err');
+      continue;
+    }
+    loaded++;
+    for(let i=0,j=0;i<img.data.length;i+=4,j++){
+      if(img.data[i+3] === 0) continue;
+      const h = (img.data[i] / 255) * CANOPY_MAX_M;
+      if(!(h > 0.25)) continue;
+      if(h > heights[j]){
+        if(heights[j] === 0) nonZero++;
+        heights[j] = h;
+        if(h > maxH) maxH = h;
+      }
+    }
+  }
+  if(!loaded){
+    dlog('Canopy source status: GFW/Meta-WRI unavailable (using WorldCover fallback)','warn');
+    return null;
+  }
+  dlog(`Canopy source status: GFW/Meta-WRI OK (${loaded}/${tiles.length} tile${tiles.length>1?'s':''}, ${nonZero}/${heights.length} pixels >0m, max ${maxH.toFixed(1)}m)`,'ok');
   return {
-    tiles: _worldCoverImg.size,
+    source: 'GFW/Meta-WRI canopy height',
     heightAt(lat, lng){
-      const c = Math.floor((lng - minLng) / dLng);
-      const r = Math.floor((maxLat - lat) / dLat);
-      if(c < 0 || c >= cols || r < 0 || r >= rows) return 0;
-      return heights[grid[r * cols + c]] || 0;
+      const c = Math.max(0, Math.min(cols-1, Math.floor((lng - minLng) / (maxLng - minLng) * cols)));
+      const r = Math.max(0, Math.min(rows-1, Math.floor((maxLat - lat) / (maxLat - minLat) * rows)));
+      return heights[r * cols + c] || 0;
     }
   };
+}
+
+async function buildClutterGrid(minLat, minLng, maxLat, maxLng, stepM, heights){
+  const canopy = await buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM);
+  const landCover = await buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, heights);
+  if(canopy && landCover){
+    return {
+      source: `${canopy.source} gated to WorldCover trees + ${landCover.source || 'WorldCover land cover'}`,
+      heightAt(lat, lng){
+        const cls = landCover.classAt?.(lat, lng);
+        const landCoverH = landCover.heightAt(lat, lng);
+        const canopyH = (cls === 10 || cls === 95) ? canopy.heightAt(lat, lng) : 0;
+        return Math.max(canopyH, landCoverH);
+      }
+    };
+  }
+  if(canopy && !landCover){
+    dlog('Canopy source status: loaded but not applied because WorldCover tree-class gate was unavailable','warn');
+  }
+  return landCover || null;
 }
 
 // Resolve the active per-class clutter height table from the UI (forest +
@@ -2084,13 +2264,13 @@ function friisRangeMeters(txDbm, gainTx, gainRx, rxSensDbm, fMHz, marginDb){
 // margin absorbs. Requiring the full 60% here would double-count that margin.
 // Wi-Fi presets use Fresnel=60% + 10 dB margin (sustained-link engineering).
 const PRESET_RF = {
-  '915':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50},
-  '868':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50},
-  '433':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50},
-  '146':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:50},
-  '438':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:30},
-  '2400': {tx:20, gain:2, rx:-85,  margin:10, fresnel:'0.6', maxKm:5},
-  '5800': {tx:20, gain:3, rx:-80,  margin:10, fresnel:'0.6', maxKm:5}
+  '915':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10},
+  '868':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10},
+  '433':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10},
+  '146':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10},
+  '438':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:30, clutterAtten:0.10},
+  '2400': {tx:20, gain:2, rx:-85,  margin:10, fresnel:'0.6', maxKm:5,  clutterAtten:0.10},
+  '5800': {tx:20, gain:3, rx:-80,  margin:10, fresnel:'0.6', maxKm:5,  clutterAtten:0.10}
 };
 
 function globalRf(){
@@ -2108,6 +2288,7 @@ function globalRf(){
     maxKm: clampNum(document.getElementById('inpCovMaxKm').value, 1, LIMITS.covMaxKm, 30),
     clutterOn: clutterEnabled(),
     clutterExcludeM: clampNum(document.getElementById('inpClutterExclude')?.value, 0, 5000, 100),
+    clutterAttenRef: clampNum(document.getElementById('inpClutterAtten')?.value, 0, 1, CLUTTER_ATTEN_DB_PER_M_915),
     clutterHeights: clutterHeightTable()
   };
 }
@@ -2148,6 +2329,7 @@ function applyPresetRf(presetVal){
   if(rf.margin   != null) document.getElementById('inpMargin').value     = rf.margin;
   if(rf.fresnel  != null) document.getElementById('inpCovFresnel').value = rf.fresnel;
   if(rf.maxKm    != null) document.getElementById('inpCovMaxKm').value   = rf.maxKm;
+  if(rf.clutterAtten != null) document.getElementById('inpClutterAtten').value = rf.clutterAtten;
   // Preset change touches freq + RF + coverage modelling — invalidate every node.
   S.nodes.forEach(n => invalidateNodeCoverage(n, true));
   renderNodeList();
@@ -2285,6 +2467,7 @@ async function _computeNodeCoverageImpl(node){
   toast(`${node.name}: computing rays (${rangeReason}, ${(maxRange/samples).toFixed(0)} m steps)…`);
   const reach = [];   // [{az, dist, latlng}]
   const heatRays = []; // [{az, samples:[{dist, latlng, marginDb}]}]
+  const clutterImpact = makeClutterImpactStats();
   // Free-space link budget (constant across the sweep): TX + both antenna gains
   // − RX sensitivity − required margin. marginDb = linkBudget − path loss.
   const linkBudget = rf.tx + rf.gain + rf.gain - rf.rx - g.margin;
@@ -2299,13 +2482,13 @@ async function _computeNodeCoverageImpl(node){
   if(g.clutterOn){
     const dLat = maxRange / 111320;
     const dLng = maxRange / (111320 * Math.max(0.05, Math.cos(node.lat * Math.PI/180)));
-    dlog(`  Clutter ON: forest ${g.clutterHeights[10]}m, urban ${g.clutterHeights[50]}m, clear-radius ${g.clutterExcludeM}m — loading…`);
+    dlog(`  Clutter ON: forest ${g.clutterHeights[10]}m, urban ${g.clutterHeights[50]}m, clear-radius ${g.clutterExcludeM}m, atten ${clutterAttenDbPerM(g.freq, g.clutterAttenRef).toFixed(3)}dB/m — loading…`);
     toast(`${node.name}: loading land cover…`);
     clutter = await buildClutterGrid(node.lat - dLat, node.lng - dLng,
       node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M, g.clutterHeights);
-    dlog(clutter ? `  Clutter: APPLIED ✓ (${clutter.tiles} WorldCover tile${clutter.tiles>1?'s':''} cached)`
+    dlog(clutter ? `  Clutter: APPLIED ✓ (${clutter.source || 'WorldCover WMS'})`
                  : `  Clutter: NOT applied — bare terrain used`, clutter?'ok':'warn');
-    toast(clutter ? `${node.name}: land cover loaded (${clutter.tiles} tile${clutter.tiles>1?'s':''}).`
+    toast(clutter ? `${node.name}: land cover loaded.`
                   : `${node.name}: land cover unavailable — using bare terrain.`, 3500);
   } else {
     dlog('  Clutter OFF (bare-earth terrain only)');
@@ -2332,6 +2515,9 @@ async function _computeNodeCoverageImpl(node){
     // Per-point clutter height (m), excluded near the node (own site assumed clear).
     const clutterH = clutter ? points.map(([la, ln], i) =>
       dists[i] >= g.clutterExcludeM ? clutter.heightAt(la, ln) : 0) : null;
+    if(clutterH){
+      clutterH.forEach((h, i) => addClutterImpact(clutterImpact, h, dists[i], points[i], az));
+    }
     const raySamples = [{dist:0, latlng:[node.lat,node.lng], marginDb:Infinity}];
     // Walk outward computing the link margin at every sample. The heatmap paints
     // every covered sample and the outline traces the farthest covered sample per
@@ -2340,28 +2526,31 @@ async function _computeNodeCoverageImpl(node){
     for(let s = 1; s <= samples; s++){
       const dS = dists[s];                       // distance src→candidate RX
       const rxAlt = elevs[s] + g.rxAntH;         // RX antenna tip elevation
-      // Optical line-of-sight gate, matching the link analyser's "blocked" rule
-      // (minLosClear <= 0 ⟺ maxNu >= 0): once terrain rises to or above the
-      // straight LOS line the path is obstructed. A single knife-edge diffraction
-      // estimate caps at ~30 dB even behind a whole mountain range, so without
-      // this gate the generous link budget "leaks" coverage straight through the
-      // terrain. As soon as any intermediate point crosses the LOS line we can
-      // stop scanning: this sample has no usable coverage regardless of the rest.
-      let maxNu = -Infinity, blocked = false;
+      // Bare terrain is the hard LOS gate. Surface clutter influences Fresnel /
+      // diffraction loss, but trees/buildings are not treated as new mountains:
+      // otherwise one forest class around a low site collapses every ray.
+      let maxNu = -Infinity, blocked = false, clutterIntrudes = false;
+      const losAt = j => srcH + (rxAlt - srcH) * (dists[j] / dS);
+      const bareEffAt = j => elevs[j] + bulge(dists[j], dS - dists[j], g.K);
       for(let j = 1; j < s; j++){
         const dJ = dists[j];                     // distance src→intermediate point
-        const t = dJ / dS;                       // fraction along the LOS line
-        const los = srcH + (rxAlt - srcH) * t;   // LOS height above the point
-        const eff = elevs[j] + (clutterH ? clutterH[j] : 0) + bulge(dJ, dS - dJ, g.K);   // terrain + clutter + earth curvature
+        const los = losAt(j);                    // LOS height above the point
         const fz = fresnel1(dJ, dS - dJ, g.freq);
+        const bareEff = bareEffAt(j);
+        const bareNu = fz > 0 ? Math.SQRT2*(bareEff - los)/fz : -Infinity;
+        if(bareNu >= 0){ blocked = true; break; }
+        const eff = bareEff + (clutterH ? clutterH[j] : 0);   // terrain + clutter + earth curvature
         const nu = fz > 0 ? Math.SQRT2*(eff - los)/fz : -Infinity;
-        if(nu >= 0){ blocked = true; break; }
+        if(clutterH && nu >= 0) clutterIntrudes = true;
         if(nu > maxNu) maxNu = nu;
       }
+      if(clutterIntrudes) clutterImpact.blockedByClutter++;
+      const clutterLossDb = clutterH && !blocked ? clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, 1, s, g.freq, g.clutterAttenRef) : 0;
+      if(clutterLossDb > clutterImpact.maxLossDb) clutterImpact.maxLossDb = clutterLossDb;
       // Below the LOS line: free-space loss plus the (≤6 dB) grazing diffraction
       // loss from the dominant near-LOS obstruction.
       const marginDb = blocked ? -Infinity
-        : linkBudget - fsplDb(dS, g.freq) - knifeEdgeLossDb(maxNu);
+        : linkBudget - fsplDb(dS, g.freq) - knifeEdgeLossDb(maxNu) - clutterLossDb;
       raySamples.push({dist:dS, latlng:points[s], marginDb});
       if(marginDb >= 0) farthestIdx = s;
     }
@@ -2381,6 +2570,9 @@ async function _computeNodeCoverageImpl(node){
   node.coverageComputed = true;
   node.coverageDirty = false;
   const reachedRays = reach.filter(r=>r.dist>0).length;
+  if(clutter){
+    dlog(`  Clutter impact: ${clutterImpactSummary(clutterImpact)}; ${clutterImpact.blockedByClutter} candidate samples had clutter above LOS; max attenuation ${clutterImpact.maxLossDb.toFixed(1)}dB (cap ${CLUTTER_ATTEN_CAP_DB}dB)`,'warn');
+  }
   dlog(`  ✓ "${node.name}" done: farthest reach ${(node.coverageReachMax/1000).toFixed(2)}km · ${reachedRays}/${rays} rays have coverage`,'ok');
   const limitText = limitedByBudget
     ? `budget-limited ${(maxRange/1000).toFixed(2)} km from ${(searchCap/1000).toFixed(0)} km cap`
@@ -2462,12 +2654,13 @@ async function runAnalysis(){
   const clutterOn=clutterEnabled();
   const clutterHeights=clutterHeightTable();
   const clutterExcludeM=clampNum(document.getElementById('inpClutterExclude')?.value, 0, 5000, 100);
+  const clutterAttenRef=clampNum(document.getElementById('inpClutterAtten')?.value, 0, 1, CLUTTER_ATTEN_DB_PER_M_915);
   const N=80;
   const MAX_TERRAIN_ERRORS=2;
   let terrainErrors=0;
   const preferredView=S.activeView?{...S.activeView}:null;
   toast('Analysing…');
-  dlog(`▶ ANALYSE ${S.edges.length} link(s): ${freq}MHz K=${K} Fresnel ${(fresnelPct*100).toFixed(0)}%${clutterOn?` · clutter ON (forest ${clutterHeights[10]}m urban ${clutterHeights[50]}m)`:' · clutter OFF'}`);
+  dlog(`▶ ANALYSE ${S.edges.length} link(s): ${freq}MHz K=${K} Fresnel ${(fresnelPct*100).toFixed(0)}%${clutterOn?` · clutter ON (forest ${clutterHeights[10]}m urban ${clutterHeights[50]}m atten ${clutterAttenDbPerM(freq, clutterAttenRef).toFixed(3)}dB/m)`:' · clutter OFF'}`);
   try{
     const nodesById=nodeByIdMap();
     for(let ei=0;ei<S.edges.length;ei++){
@@ -2505,6 +2698,7 @@ async function runAnalysis(){
 
       // Per-point clutter height (m), excluded near both endpoints (own sites clear).
       let clutterH=null;
+      let clutterImpact=null;
       if(clutterOn){
         const pad=0.005;
         const grid=await buildClutterGrid(
@@ -2512,22 +2706,33 @@ async function runAnalysis(){
           Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad,
           Math.max(20, dist/N), clutterHeights);
         if(grid){
+          clutterImpact=makeClutterImpactStats();
           clutterH=dists.map((d,s)=>{
             if(d<clutterExcludeM || (dist-d)<clutterExcludeM) return 0;
             const t=s/N;
-            return grid.heightAt(a.lat+(b.lat-a.lat)*t, a.lng+(b.lng-a.lng)*t);
+            const lat=a.lat+(b.lat-a.lat)*t, lng=a.lng+(b.lng-a.lng)*t;
+            const h=grid.heightAt(lat, lng);
+            addClutterImpact(clutterImpact, h, d, [lat,lng], null);
+            return h;
           });
         }
       }
 
       let minLosClear=Infinity,minFzClear=Infinity,minScaledFzClear=Infinity,maxNu=-Infinity;
+      let minBareLosClear=Infinity,minBareScaledFzClear=Infinity;
+      const losAt = s => aH + (bH - aH) * (s / N);
+      const bareEffAt = s => elevs[s] + bulge(dists[s], dist - dists[s], K);
       for(let s=1;s<N;s++){
-        const d1=dists[s],d2=dist-dists[s],t=s/N;
-        const eff=elevs[s]+(clutterH?clutterH[s]:0)+bulge(d1,d2,K);
-        const los=aH+(bH-aH)*t;
+        const d1=dists[s],d2=dist-dists[s];
+        const bareEff=bareEffAt(s);
+        const eff=bareEff+(clutterH?clutterH[s]:0);
+        const los=losAt(s);
+        const bareClear=los-bareEff;
+        if(bareClear<minBareLosClear) minBareLosClear=bareClear;
         const clear=los-eff;
         if(clear<minLosClear) minLosClear=clear;
         const fz=fresnel1(d1,d2,freq);
+        if(bareClear-fz*fresnelPct<minBareScaledFzClear) minBareScaledFzClear=bareClear-fz*fresnelPct;
         if(clear-fz<minFzClear) minFzClear=clear-fz;
         if(clear-fz*fresnelPct<minScaledFzClear) minScaledFzClear=clear-fz*fresnelPct;
         // Fresnel-Kirchhoff diffraction parameter at this point: the terrain
@@ -2536,15 +2741,23 @@ async function runAnalysis(){
         const nu=Math.SQRT2*(-clear)/fz;
         if(nu>maxNu) maxNu=nu;
       }
-      const status=minLosClear<=0?'blocked':minScaledFzClear<=0?'marginal':'clear';
+      const status=minBareLosClear<=0?'blocked':minScaledFzClear<=0?'marginal':'clear';
+      const clutterLossDb = clutterH ? clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, 1, N, freq, clutterAttenRef) : 0;
+      if(clutterImpact && clutterLossDb > clutterImpact.maxLossDb) clutterImpact.maxLossDb = clutterLossDb;
       // First-order excess loss beyond free space: single knife-edge diffraction
       // over the dominant obstruction (Deygout principal edge). ≈0 dB on a fully
       // Fresnel-clear path, ~6 dB at grazing, rising as terrain intrudes.
-      const diffLossDb=knifeEdgeLossDb(maxNu);
+      const diffLossDb=knifeEdgeLossDb(maxNu) + clutterLossDb;
       e.result={dist,minLosClear,minFzClear,minScaledFzClear,fresnelPct,status,diffLossDb};
       e.profile={elevs,dists,dist,aH,bH,a,b,freq,K,N};
       const lvl = status==='clear'?'ok':status==='blocked'?'err':'warn';
-      dlog(`  ${a.name}↔${b.name}: ${(dist/1000).toFixed(2)}km · ${status.toUpperCase()} · LOS clr ${minLosClear.toFixed(1)}m · Fz clr ${minScaledFzClear.toFixed(1)}m · ν ${maxNu.toFixed(2)} · diff ${diffLossDb.toFixed(1)}dB${clutterH?' · +clutter':''}`, lvl);
+      let clutterNote='';
+      if(clutterH){
+        const bareStatus=minBareLosClear<=0?'blocked':minBareScaledFzClear<=0?'marginal':'clear';
+        clutterNote=` · +clutter (${clutterImpactSummary(clutterImpact)}; atten ${clutterLossDb.toFixed(1)}dB)`;
+        if(bareStatus!==status) clutterNote+=` · bare would be ${bareStatus.toUpperCase()}`;
+      }
+      dlog(`  ${a.name}↔${b.name}: ${(dist/1000).toFixed(2)}km · ${status.toUpperCase()} · LOS clr ${minLosClear.toFixed(1)}m · Fz clr ${minScaledFzClear.toFixed(1)}m · ν ${maxNu.toFixed(2)} · diff ${diffLossDb.toFixed(1)}dB${clutterNote}`, lvl);
 
       // Colour the line on map
       if(e.line) e.line.setStyle(edgeBaseStyle(e));
@@ -3095,6 +3308,7 @@ function openShare(){
     fh:+document.getElementById('inpClutterForest').value,
     uh:+document.getElementById('inpClutterUrban').value,
     xe:+document.getElementById('inpClutterExclude').value,
+    ca:+document.getElementById('inpClutterAtten').value,
     // node: [lat, lng, antH, name, rfOverride?, tx?, gain?, rx?, coverageOn?, color?]
     n:S.nodes.map(n=>{
       const base=[+n.lat.toFixed(6),+n.lng.toFixed(6),n.antH,n.name];
@@ -3247,6 +3461,7 @@ function normaliseV3Hash(raw) {
     clutterForest: clampNum(raw.fh, 0, 200, 15),
     clutterUrban: clampNum(raw.uh, 0, 200, 8),
     clutterExclude: clampNum(raw.xe, 0, 5000, 100),
+    clutterAtten: clampNum(raw.ca, 0, 1, presetRf?.clutterAtten ?? CLUTTER_ATTEN_DB_PER_M_915),
     nodes,
     edges,
     paths,
@@ -3320,6 +3535,7 @@ function normaliseLegacyHash(raw) {
     clutterForest: clampNum(raw.clutterForest, 0, 200, 15),
     clutterUrban: clampNum(raw.clutterUrban, 0, 200, 8),
     clutterExclude: clampNum(raw.clutterExclude, 0, 5000, 100),
+    clutterAtten: clampNum(raw.clutterAtten, 0, 1, CLUTTER_ATTEN_DB_PER_M_915),
     nodes,
     edges,
     paths,
@@ -3359,6 +3575,7 @@ function loadFromHash(){
     setInputValue('inpClutterForest',data.clutterForest);
     setInputValue('inpClutterUrban',data.clutterUrban);
     setInputValue('inpClutterExclude',data.clutterExclude);
+    setInputValue('inpClutterAtten',data.clutterAtten);
     const clutterCb=document.getElementById('inpClutterOn');
     if(clutterCb) clutterCb.checked=!!data.clutterOn;
     S.nextId=data.nextId;
