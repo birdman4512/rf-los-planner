@@ -73,6 +73,10 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 
 .wp-row1{display:flex;align-items:center;gap:5px;margin-bottom:5px}
 .wp-num{width:17px;height:17px;border-radius:50%;border:2px solid;font-family:'Share Tech Mono',monospace;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.wp-color{width:18px;height:18px;flex-shrink:0;padding:0;border:1px solid var(--border);border-radius:3px;background:none;cursor:pointer}
+.wp-color::-webkit-color-swatch-wrapper{padding:1px}
+.wp-color::-webkit-color-swatch{border:none;border-radius:2px}
+.wp-color::-moz-color-swatch{border:none;border-radius:2px}
 .wp-name{flex:1;font-size:12px;font-weight:600;background:transparent;border:none;border-bottom:1px solid transparent;color:#fff;padding:0 2px}
 .wp-name:focus{outline:none;border-bottom-color:var(--accent)}
 .wp-del{background:rgba(11,15,23,.55);border:1px solid var(--border);border-radius:5px;color:var(--muted);cursor:pointer;font-size:12px;min-width:25px;min-height:25px;padding:2px 6px}
@@ -447,7 +451,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn" onclick="openSettings()">⚙ SETTINGS</button>
       <button class="btn share" onclick="openShare()">⇪ SHARE</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
-      <span class="hdr-tag" title="Build 20260606-1">BUILD 20260606-1</span>
+      <span class="hdr-tag" title="Build 20260606-2">BUILD 20260606-2</span>
     </div>
   </header>
 
@@ -558,6 +562,8 @@ const S = {
 
 const COLORS = ['#00c8f0','#f39c12','#2ecc71','#e74c3c','#9b59b6','#1abc9c','#e67e22','#3498db','#f1c40f','#e91e63'];
 const nodeColor = i => COLORS[i % COLORS.length];
+// A node's effective colour: its custom override, else the palette default.
+const nodeColorFor = node => node?.color || nodeColor(S.nodes.indexOf(node));
 
 const LIMITS = {
   hashChars: 50000,
@@ -662,6 +668,7 @@ const defaultNodeName = idx => `Site ${idx + 1}`;
 function addNode(lat, lng) {
   const idx = S.nodes.length;
   const node = { id: S.nextId++, name: defaultNodeName(idx), lat, lng, antH: 6, elev: null, marker: null,
+    color: null,
     rfOverride: false, txDbm: null, gainDbi: null, rxDbm: null,
     coverageOn: false, coverageLayer: null, coverageDirty: true, coverageComputed: false };
   S.nodes.push(node);
@@ -704,10 +711,10 @@ function setNodeTooltip(node, label) {
   node.marker.setTooltipContent(textNode(label));
 }
 
-// Marker SVG depends only on index (number + colour) and selected state.
+// Marker SVG depends on index (number), colour (custom or palette) and selected state.
 function nodeIconSvg(node) {
   const idx = S.nodes.indexOf(node);
-  const c = nodeColor(idx);
+  const c = nodeColorFor(node);
   const n = idx + 1;
   const selected = S.activeView?.type === 'node' && S.activeView.id === node.id;
   const pinPath = 'M11 0C4.9 0 0 4.9 0 11c0 8.3 11 17 11 17s11-8.7 11-17C22 4.9 17.1 0 11 0z';
@@ -1253,7 +1260,7 @@ function renderPathBuilder() {
     const added = PB.seq.includes(n.id);
     const div = document.createElement('div');
     div.className = 'pb-node' + (added ? ' added' : '');
-    div.innerHTML = `<div class="pb-num" style="color:${nodeColor(idx)};border-color:${nodeColor(idx)}">${idx+1}</div>
+    div.innerHTML = `<div class="pb-num" style="color:${nodeColorFor(n)};border-color:${nodeColorFor(n)}">${idx+1}</div>
       <span>${escHtml(n.name)}</span>${added ? '<span class="pb-tag">added</span>' : ''}`;
     if (!added) div.onclick = () => pbAddNode(n.id);
     nodeList.appendChild(div);
@@ -1272,7 +1279,7 @@ function renderPathBuilder() {
     const idx = S.nodes.indexOf(node);
     const item = document.createElement('div');
     item.className = 'pb-seq-item';
-    item.innerHTML = `<div class="pb-num" style="color:${nodeColor(idx)};border-color:${nodeColor(idx)}">${idx+1}</div>
+    item.innerHTML = `<div class="pb-num" style="color:${nodeColorFor(node)};border-color:${nodeColorFor(node)}">${idx+1}</div>
       <span style="flex:1">${escHtml(node.name)}</span>
       <div class="pb-arrows">
         <button title="Move up" ${i===0?'disabled':''} onclick="pbMove(${i},-1)">▲</button>
@@ -1355,7 +1362,7 @@ function renderNodeList() {
   if (S.nodes.length === 0) { list.innerHTML = '<div class="no-data">Right-click map to add nodes.</div>'; return; }
   list.innerHTML = '';
   S.nodes.forEach((node, idx) => {
-    const c = nodeColor(idx);
+    const c = nodeColorFor(node);
     const amsl = node.elev !== null ? (node.elev + node.antH).toFixed(1) + 'm' : '…';
     const card = document.createElement('div');
     card.className = 'wp-card'; card.draggable = true; card.dataset.id = node.id;
@@ -1368,6 +1375,7 @@ function renderNodeList() {
     card.innerHTML = `
       <div class="wp-row1">
         <div class="wp-num" style="color:${c};border-color:${c}">${idx+1}</div>
+        <input class="wp-color" type="color" value="${c}" title="Node colour" onchange="setNodeColor(${node.id},this.value)"/>
         <input class="wp-name" value="${escHtml(node.name)}" onchange="renameNode(${node.id},this.value)"/>
         <button class="wp-del" onclick="removeNode(${node.id})">✕</button>
       </div>
@@ -1515,6 +1523,13 @@ function renderPathsPanel() {
 function renameNode(id, name) {
   const node=S.nodes.find(n=>n.id===id); if(!node) return;
   node.name=cleanName(name, node.name); setNodeTooltip(node, node.name);
+}
+function setNodeColor(id, value) {
+  const node=S.nodes.find(n=>n.id===id); if(!node) return;
+  node.color = /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : null;
+  refreshAllIcons();                       // marker pin colour
+  renderNodeList();                        // card number badge + border
+  if(node.coverageLayer) renderCoveragePolygon(node);  // coverage fill + outline
 }
 function setNodeCoord(id, field, val) {
   const node=S.nodes.find(n=>n.id===id); if(!node) return;
@@ -2331,7 +2346,7 @@ async function _computeNodeCoverageImpl(node){
 function renderCoveragePolygon(node){
   if(node.coverageLayer){ S.map.removeLayer(node.coverageLayer); node.coverageLayer = null; }
   if(!node.coverageHeatRays || node.coverageHeatRays.length < 2) return;
-  const col = nodeColor(S.nodes.indexOf(node));
+  const col = nodeColorFor(node);
   const group = L.layerGroup();
   const rays = node.coverageHeatRays;
   // Samples are fine (~40 m). Rather than draw one polygon per sample (1000+ ×
@@ -3030,11 +3045,11 @@ function openShare(){
     fh:+document.getElementById('inpClutterForest').value,
     uh:+document.getElementById('inpClutterUrban').value,
     xe:+document.getElementById('inpClutterExclude').value,
-    // node: [lat, lng, antH, name, rfOverride?, tx?, gain?, rx?, coverageOn?]
+    // node: [lat, lng, antH, name, rfOverride?, tx?, gain?, rx?, coverageOn?, color?]
     n:S.nodes.map(n=>{
       const base=[+n.lat.toFixed(6),+n.lng.toFixed(6),n.antH,n.name];
-      if(n.rfOverride||n.coverageOn){
-        base.push(n.rfOverride?1:0, n.txDbm??null, n.gainDbi??null, n.rxDbm??null, n.coverageOn?1:0);
+      if(n.rfOverride||n.coverageOn||n.color){
+        base.push(n.rfOverride?1:0, n.txDbm??null, n.gainDbi??null, n.rxDbm??null, n.coverageOn?1:0, n.color||0);
       }
       return base;
     }),
@@ -3137,7 +3152,8 @@ function normaliseV3Hash(raw) {
       txDbm: rfOverride ? clampNum(nd[5], -100, 100, null) : null,
       gainDbi: rfOverride ? clampNum(nd[6], -100, 100, null) : null,
       rxDbm: rfOverride ? clampNum(nd[7], -200, 0, null) : null,
-      coverageOn: !!nd[8]
+      coverageOn: !!nd[8],
+      color: /^#[0-9a-fA-F]{6}$/.test(nd[9]) ? String(nd[9]).toLowerCase() : null
     });
   });
 
