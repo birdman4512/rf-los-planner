@@ -157,6 +157,18 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .analyse-wrap{padding:7px 9px;border-top:1px solid var(--border);flex-shrink:0}
 .analyse-wrap .btn{width:100%;font-size:13px;padding:9px}
 
+/* ── DEBUG LOG PANEL ── */
+.debug-panel{position:fixed;right:12px;bottom:12px;width:440px;max-width:calc(100vw - 24px);height:360px;max-height:62vh;background:rgba(11,15,23,.97);border:1px solid var(--border);border-radius:6px;display:none;flex-direction:column;z-index:4000;box-shadow:0 10px 34px rgba(0,0,0,.55)}
+.debug-panel.open{display:flex}
+.debug-head{display:flex;align-items:center;gap:5px;padding:6px 8px;border-bottom:1px solid var(--border);flex-shrink:0}
+.debug-head .btn{font-size:9px;padding:3px 7px;min-height:0}
+.debug-title{flex:1;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--accent);letter-spacing:1px}
+.debug-body{flex:1;overflow:auto;padding:6px 9px;font-family:'Share Tech Mono',monospace;font-size:10px;line-height:1.5;color:#cfe3ee;white-space:pre-wrap;word-break:break-word}
+.debug-body .dl-time{color:var(--muted)}
+.debug-body .dl-ok{color:var(--green)}
+.debug-body .dl-warn{color:var(--orange)}
+.debug-body .dl-err{color:var(--red)}
+
 /* ── RESULTS ── */
 .results-area{border-top:1px solid var(--border);border-bottom:2px solid rgba(0,200,240,.12);overflow-y:auto}
 .results-area::-webkit-scrollbar{width:3px}
@@ -451,7 +463,8 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn" onclick="openSettings()">⚙ SETTINGS</button>
       <button class="btn share" onclick="openShare()">⇪ SHARE</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
-      <span class="hdr-tag" title="Build 20260606-3">BUILD 20260606-3</span>
+      <button class="btn" onclick="toggleDebug()" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
+      <span class="hdr-tag" title="Build 20260606-4">BUILD 20260606-4</span>
     </div>
   </header>
 
@@ -519,6 +532,17 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <div id="map"></div>
       <div id="toast"></div>
 
+      <!-- Debug log panel -->
+      <div class="debug-panel" id="debugPanel">
+        <div class="debug-head">
+          <span class="debug-title">🐛 CALCULATION LOG</span>
+          <button class="btn" onclick="copyDebug()">COPY</button>
+          <button class="btn" onclick="clearDebug()">CLEAR</button>
+          <button class="btn" onclick="toggleDebug(false)">✕</button>
+        </div>
+        <div class="debug-body" id="debugBody"></div>
+      </div>
+
       <!-- Floating buttons -->
       <div class="fab-group">
         <button class="fab loc" title="Go to my location" onclick="goToMyLocation()">◎</button>
@@ -552,6 +576,7 @@ const S = {
   profileCache: {},
   _coverageComputing: false,
   _analysing: false,
+  debugLog: [],
   hoverMarker: null,
   profileHover: null,
   redrawProfile: null,
@@ -1858,11 +1883,12 @@ let _clutterUnavailable = false;    // sticky: once load fails, stop retrying th
 function loadGeoTiffLib(){
   if(window.GeoTIFF) return Promise.resolve(window.GeoTIFF);
   if(_geotiffPromise) return _geotiffPromise;
+  dlog('geotiff.js: loading library from '+GEOTIFF_CDN+' …');
   _geotiffPromise = new Promise((resolve, reject) => {
     const sc = document.createElement('script');
     sc.src = GEOTIFF_CDN; sc.crossOrigin = 'anonymous';
-    sc.onload = () => window.GeoTIFF ? resolve(window.GeoTIFF) : reject(new Error('geotiff global missing'));
-    sc.onerror = () => reject(new Error('geotiff.js failed to load'));
+    sc.onload = () => { if(window.GeoTIFF){ dlog('geotiff.js: loaded ✓','ok'); resolve(window.GeoTIFF); } else { dlog('geotiff.js: loaded but global missing','err'); reject(new Error('geotiff global missing')); } };
+    sc.onerror = () => { dlog('geotiff.js: FAILED to load (script blocked?)','err'); reject(new Error('geotiff.js failed to load')); };
     document.head.appendChild(sc);
   });
   return _geotiffPromise;
@@ -1880,11 +1906,18 @@ async function worldCoverImage(tile){
   const p = (async () => {
     const GT = await loadGeoTiffLib();
     const url = `${WORLDCOVER_BASE}ESA_WorldCover_10m_2021_v200_${tile}_Map.tif`;
-    const tiff = await GT.fromUrl(url);
-    const image = await tiff.getImage();
-    const [ulx, uly] = image.getOrigin();
-    const [xres, yres] = image.getResolution();   // yres is negative (north-up)
-    return { image, ulx, uly, xres, yres, w: image.getWidth(), h: image.getHeight() };
+    dlog(`WorldCover ${tile}: fetching ${url} …`);
+    try {
+      const tiff = await GT.fromUrl(url);
+      const image = await tiff.getImage();
+      const [ulx, uly] = image.getOrigin();
+      const [xres, yres] = image.getResolution();   // yres is negative (north-up)
+      dlog(`WorldCover ${tile}: loaded ✓ (${image.getWidth()}×${image.getHeight()} px)`,'ok');
+      return { image, ulx, uly, xres, yres, w: image.getWidth(), h: image.getHeight() };
+    } catch(e){
+      dlog(`WorldCover ${tile}: FAILED — ${e.message||e} (likely CORS or tile not found)`,'err');
+      throw e;
+    }
   })();
   _worldCoverImg.set(tile, p);
   return p;
@@ -1894,7 +1927,7 @@ async function worldCoverImage(tile){
 // at ~stepM resolution. `heights` maps WorldCover class → metres. Returns a
 // sampler {heightAt(lat,lng)} or null if no data could be loaded (→ bare earth).
 async function buildClutterGrid(minLat, minLng, maxLat, maxLng, stepM, heights){
-  if(_clutterUnavailable) return null;
+  if(_clutterUnavailable){ dlog('Clutter: skipped (data unavailable earlier this session)','warn'); return null; }
   const midLat = (minLat + maxLat) / 2;
   const dLat = stepM / 111320;
   const dLng = stepM / (111320 * Math.max(0.05, Math.cos(midLat * Math.PI/180)));
@@ -1943,10 +1976,11 @@ async function buildClutterGrid(minLat, minLng, maxLat, maxLng, stepM, heights){
     }
   } catch(e){
     console.warn('Clutter grid build failed', e);
+    dlog('Clutter: grid build FAILED — '+(e.message||e),'err');
     _clutterUnavailable = true;
     return null;
   }
-  if(!filled) return null;
+  if(!filled){ dlog('Clutter: no land-cover data covered this area (left as bare terrain)','warn'); return null; }
   return {
     tiles: _worldCoverImg.size,
     heightAt(lat, lng){
@@ -2255,16 +2289,26 @@ async function _computeNodeCoverageImpl(node){
   // − RX sensitivity − required margin. marginDb = linkBudget − path loss.
   const linkBudget = rf.tx + rf.gain + rf.gain - rf.rx - g.margin;
 
+  dlog(`▶ COVERAGE "${node.name}" @ ${node.lat.toFixed(5)},${node.lng.toFixed(5)}  gnd=${node.elev.toFixed(0)}m antH=${node.antH}m (src tip ${srcH.toFixed(0)}m)`);
+  dlog(`  RF: ${g.freq}MHz K=${g.K} · TX ${rf.tx} +G ${rf.gain}×2 −RX ${rf.rx} −margin ${g.margin} = budget ${linkBudget.toFixed(0)}dB`);
+  dlog(`  Range: Friis ${(friisRange/1000).toFixed(1)}km, cap ${g.maxKm}km → max ${(maxRange/1000).toFixed(1)}km${limitedByBudget?' (budget-limited)':''}`);
+  dlog(`  Sweep: ${rays} rays × ${samples} samples (~${(maxRange/samples).toFixed(0)}m step) · Fresnel ${(g.fresnelPct*100).toFixed(0)}% · RX ant ${g.rxAntH}m`);
+
   // Optional land-cover clutter over the sweep bbox (null = bare terrain).
   let clutter = null;
   if(g.clutterOn){
     const dLat = maxRange / 111320;
     const dLng = maxRange / (111320 * Math.max(0.05, Math.cos(node.lat * Math.PI/180)));
+    dlog(`  Clutter ON: forest ${g.clutterHeights[10]}m, urban ${g.clutterHeights[50]}m, clear-radius ${g.clutterExcludeM}m — loading…`);
     toast(`${node.name}: loading land cover…`);
     clutter = await buildClutterGrid(node.lat - dLat, node.lng - dLng,
       node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M, g.clutterHeights);
+    dlog(clutter ? `  Clutter: APPLIED ✓ (${clutter.tiles} WorldCover tile${clutter.tiles>1?'s':''} cached)`
+                 : `  Clutter: NOT applied — bare terrain used`, clutter?'ok':'warn');
     toast(clutter ? `${node.name}: land cover loaded (${clutter.tiles} tile${clutter.tiles>1?'s':''}).`
                   : `${node.name}: land cover unavailable — using bare terrain.`, 3500);
+  } else {
+    dlog('  Clutter OFF (bare-earth terrain only)');
   }
 
   for(let r = 0; r < rays; r++){
@@ -2336,6 +2380,8 @@ async function _computeNodeCoverageImpl(node){
   node.coverageReachMax = reach.reduce((m,r)=>Math.max(m,r.dist),0);
   node.coverageComputed = true;
   node.coverageDirty = false;
+  const reachedRays = reach.filter(r=>r.dist>0).length;
+  dlog(`  ✓ "${node.name}" done: farthest reach ${(node.coverageReachMax/1000).toFixed(2)}km · ${reachedRays}/${rays} rays have coverage`,'ok');
   const limitText = limitedByBudget
     ? `budget-limited ${(maxRange/1000).toFixed(2)} km from ${(searchCap/1000).toFixed(0)} km cap`
     : `${(maxRange/1000).toFixed(0)} km cap`;
@@ -2421,6 +2467,7 @@ async function runAnalysis(){
   let terrainErrors=0;
   const preferredView=S.activeView?{...S.activeView}:null;
   toast('Analysing…');
+  dlog(`▶ ANALYSE ${S.edges.length} link(s): ${freq}MHz K=${K} Fresnel ${(fresnelPct*100).toFixed(0)}%${clutterOn?` · clutter ON (forest ${clutterHeights[10]}m urban ${clutterHeights[50]}m)`:' · clutter OFF'}`);
   try{
     const nodesById=nodeByIdMap();
     for(let ei=0;ei<S.edges.length;ei++){
@@ -2496,6 +2543,8 @@ async function runAnalysis(){
       const diffLossDb=knifeEdgeLossDb(maxNu);
       e.result={dist,minLosClear,minFzClear,minScaledFzClear,fresnelPct,status,diffLossDb};
       e.profile={elevs,dists,dist,aH,bH,a,b,freq,K,N};
+      const lvl = status==='clear'?'ok':status==='blocked'?'err':'warn';
+      dlog(`  ${a.name}↔${b.name}: ${(dist/1000).toFixed(2)}km · ${status.toUpperCase()} · LOS clr ${minLosClear.toFixed(1)}m · Fz clr ${minScaledFzClear.toFixed(1)}m · ν ${maxNu.toFixed(2)} · diff ${diffLossDb.toFixed(1)}dB${clutterH?' · +clutter':''}`, lvl);
 
       // Colour the line on map
       if(e.line) e.line.setStyle(edgeBaseStyle(e));
@@ -3369,6 +3418,53 @@ function toast(msg,duration){
   if(duration) _toastTimer=setTimeout(()=>el.style.display='none',duration);
 }
 function hideToast(){document.getElementById('toast').style.display='none';}
+
+// ═══════════════════════════════════════════════════════════
+//  DEBUG LOG  —  records the inputs/outputs of each calculation
+// ═══════════════════════════════════════════════════════════
+const DEBUG_LOG_MAX = 1500;
+// level: '' info | 'ok' | 'warn' | 'err'
+function dlog(msg, level){
+  const d = new Date();
+  const t = d.toLocaleTimeString('en-GB',{hour12:false}) + '.' + String(d.getMilliseconds()).padStart(3,'0');
+  const entry = { t, msg: String(msg), level: level || '' };
+  S.debugLog.push(entry);
+  if(S.debugLog.length > DEBUG_LOG_MAX) S.debugLog.shift();
+  const panel = document.getElementById('debugPanel');
+  if(panel && panel.classList.contains('open')){
+    if(S.debugLog.length === 1) renderDebug();   // clear the "no activity" placeholder
+    else appendDebugLine(entry);
+  }
+}
+function appendDebugLine(e){
+  const body = document.getElementById('debugBody'); if(!body) return;
+  const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 30;
+  const div = document.createElement('div');
+  if(e.level) div.className = 'dl-' + e.level;
+  div.innerHTML = `<span class="dl-time">${e.t}</span> ${escHtml(e.msg)}`;
+  body.appendChild(div);
+  if(atBottom) body.scrollTop = body.scrollHeight;
+}
+function renderDebug(){
+  const body = document.getElementById('debugBody'); if(!body) return;
+  body.innerHTML = '';
+  if(!S.debugLog.length){ body.innerHTML = '<div class="dl-time">No activity yet. Run Analyse or Compute coverage.</div>'; return; }
+  S.debugLog.forEach(appendDebugLine);
+  body.scrollTop = body.scrollHeight;
+}
+function toggleDebug(force){
+  const panel = document.getElementById('debugPanel');
+  const open = force === undefined ? !panel.classList.contains('open') : force;
+  panel.classList.toggle('open', open);
+  if(open) renderDebug();
+}
+function clearDebug(){ S.debugLog = []; renderDebug(); }
+function copyDebug(){
+  const text = S.debugLog.map(e => `${e.t} ${e.msg}`).join('\n');
+  if(navigator.clipboard?.writeText){
+    navigator.clipboard.writeText(text).then(()=>toast('Debug log copied.',1500), ()=>toast('Copy failed.',2000));
+  } else { toast('Clipboard unavailable.',2000); }
+}
 
 // ═══════════════════════════════════════════════════════════
 //  INIT
