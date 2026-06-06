@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>RF Line of Sight Planner</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com https://services.terrascope.be https://titiler.terrascope.be https://tiles.globalforestwatch.org; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com https://services.terrascope.be https://titiler.terrascope.be https://tiles.globalforestwatch.org; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js" integrity="sha512-qtX0GLM3qX8rxJN1gyDfcnMFFrKvixfoEOwbBib9VafR5vbChV5LeE5wSI/x+IlCkTY5ZFddFDCCfaVJJNnuKQ==" crossorigin="anonymous"></script>
@@ -469,7 +469,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" onclick="openShare()">⇪ SHARE</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
       <button class="btn" onclick="toggleDebug()" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260606-13">BUILD 20260606-13</span>
+      <span class="hdr-tag" title="Build 20260606-14">BUILD 20260606-14</span>
     </div>
   </header>
 
@@ -2588,31 +2588,34 @@ function renderCoveragePolygon(node){
   const col = nodeColorFor(node);
   const group = L.layerGroup();
   const rays = node.coverageHeatRays;
-  // Samples are fine (~40 m). Rather than draw one polygon per sample (1000+ ×
-  // rays would choke Leaflet) or collapse them into wide bands coloured by a
-  // single edge sample (which blanks real coverage near the node), walk each
-  // ray at full resolution and merge consecutive same-strength samples into one
-  // quad. Boundaries land on the true 40 m transitions; blank (no-coverage)
-  // stretches are skipped, so near-node gaps reflect terrain, not the renderer.
-  // Everything is drawn in the node's colour; strength is shown by fill opacity.
-  const addCell = (a, b, i0, i1, level) => {
-    group.addLayer(L.polygon([a[i0].latlng, b[i0].latlng, b[i1].latlng, a[i1].latlng], {
-      color: col, weight: 0, opacity: 0, fillColor: col, fillOpacity: coverageLevelOpacity(level), interactive: false
-    }));
-  };
-  for(let r=0;r<rays.length;r++){
-    const a = rays[r].samples;
-    const b = rays[(r+1)%rays.length].samples;
-    const n = Math.min(a.length,b.length);
-    let runStart = 1, runLevel = coverageLevel(Math.min(a[1].marginDb, b[1].marginDb));
-    for(let s=2;s<n;s++){
-      const level = coverageLevel(Math.min(a[s].marginDb, b[s].marginDb));
-      if(level !== runLevel){
-        if(runLevel > 0) addCell(a, b, runStart-1, s-1, runLevel);
-        runStart = s; runLevel = level;
-      }
+  const R = rays.length;
+  // Render each ray as its OWN wedge, spanning the half-angle to each neighbour
+  // (so adjacent wedges tile seamlessly), and fill it to that ray's own reach.
+  // Colouring by each ray independently — rather than the min of two neighbours —
+  // means a ray that reaches far is shown all the way out to its edge, instead of
+  // being blanked wherever a neighbouring ray happens to be shorter. Samples are
+  // fine (~40 m); consecutive same-strength samples merge into one polygon, so a
+  // ray collapses to a few bands (plus any disconnected far patches). Strength is
+  // shown by fill opacity; blank (no-coverage) stretches are skipped.
+  const mid = (P, Q, s) => [ (P[s].latlng[0]+Q[s].latlng[0])/2, (P[s].latlng[1]+Q[s].latlng[1])/2 ];
+  for(let r=0;r<R;r++){
+    const cur = rays[r].samples;
+    const prev = rays[(r-1+R)%R].samples;
+    const next = rays[(r+1)%R].samples;
+    const n = Math.min(cur.length, prev.length, next.length);
+    // Wedge bounded by the midline to the previous ray (left) and next ray (right).
+    const addWedge = (i0, i1, level) => {
+      group.addLayer(L.polygon([ mid(prev,cur,i0), mid(cur,next,i0), mid(cur,next,i1), mid(prev,cur,i1) ], {
+        color: col, weight: 0, opacity: 0, fillColor: col, fillOpacity: coverageLevelOpacity(level), interactive: false
+      }));
+    };
+    let runStart = -1, runLevel = 0;
+    const flush = endIdx => { if(runStart > 0 && runLevel > 0) addWedge(runStart-1, endIdx, runLevel); runStart = -1; runLevel = 0; };
+    for(let s=1;s<n;s++){
+      const level = coverageLevel(cur[s].marginDb);
+      if(level !== runLevel){ flush(s-1); if(level > 0){ runStart = s; runLevel = level; } }
     }
-    if(runLevel > 0) addCell(a, b, runStart-1, n-1, runLevel);
+    flush(n-1);
   }
   // Outline the coverage edge — the farthest covered point per ray.
   if(node.coverageRays?.length){
