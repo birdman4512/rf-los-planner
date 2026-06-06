@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>RF Line of Sight Planner</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com; connect-src 'self' https://esa-worldcover.s3.eu-central-1.amazonaws.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js" integrity="sha512-qtX0GLM3qX8rxJN1gyDfcnMFFrKvixfoEOwbBib9VafR5vbChV5LeE5wSI/x+IlCkTY5ZFddFDCCfaVJJNnuKQ==" crossorigin="anonymous"></script>
@@ -408,13 +408,27 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
           <option value="1">100%</option>
         </select>
       </div>
+      <div class="field-row" style="margin-top:6px">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="inpClutterOn" onchange="onCoverageParamChanged()" title="Raise terrain by a land-cover clutter height (trees/buildings) before the LOS check, using ESA WorldCover 10 m data. Off = bare earth (today's behaviour).">
+          Surface clutter (land cover)
+        </label>
+      </div>
+      <div class="field-row" style="margin-bottom:6px">
+        <label>Forest (m)</label>
+        <input type="number" id="inpClutterForest" value="15" step="1" min="0" style="width:52px" title="Clutter height added over tree-cover / mangrove land." onchange="onCoverageParamChanged()">
+        <label>Urban (m)</label>
+        <input type="number" id="inpClutterUrban" value="8" step="1" min="0" style="width:52px" title="Clutter height added over built-up land." onchange="onCoverageParamChanged()">
+        <label>Clear &lt;(m)</label>
+        <input type="number" id="inpClutterExclude" value="100" step="10" min="0" style="width:58px" title="Ignore clutter within this distance of the node — your own site is assumed clear of nearby trees/buildings." onchange="onCoverageParamChanged()">
+      </div>
       <div class="cov-btn-row" style="margin-top:10px">
         <button class="btn" onclick="setAllCoverage(true)">ALL ON</button>
         <button class="btn" onclick="setAllCoverage(false)">ALL OFF</button>
         <button class="btn primary" onclick="computeAllCoverage()">▶ COMPUTE ALL</button>
       </div>
       <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:1px;line-height:1.4">
-        Heatmap fades green (strong) → yellow → red (marginal) with signal fade; areas with no usable coverage (e.g. terrain shadow) are left blank. Compute downloads terrain tiles (AWS Open Terrain, ~30 m global).
+        Coverage is shown in each node's colour; more opaque = stronger signal, fading out to the coverage edge, blank where the link won't close (e.g. terrain shadow). Surface clutter (optional) raises terrain by ESA WorldCover land cover. Compute downloads terrain tiles (AWS Open Terrain, ~30 m global).
       </div>
     </div>
 
@@ -571,6 +585,18 @@ const COVERAGE_SAMPLE_OPTIONS = [30, 50, 80];
 const COVERAGE_STEP_M = 40;
 const COVERAGE_MAX_SAMPLES = 1600;
 const FRESNEL_OPTIONS = [0, 0.4, 0.6, 1];
+
+// ── Surface clutter via ESA WorldCover (10 m land cover, 2021 v200) ──
+// Bare-earth terrain misses trees/buildings; this raises intermediate terrain
+// by a per-land-cover clutter height before the LOS/Fresnel check. Optional and
+// off by default; degrades gracefully to bare terrain if the data can't load.
+const WORLDCOVER_BASE = 'https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/';
+const GEOTIFF_CDN = 'https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js';
+// WorldCover classes: 10 Tree, 20 Shrub, 30 Grass, 40 Crop, 50 Built-up,
+// 60 Bare, 70 Snow, 80 Water, 90 Wetland, 95 Mangrove, 100 Moss.
+// Default clutter height (m) per WorldCover class. Tree cover and Built-up are
+// user-editable (the two that matter most); the rest are sensible fixed values.
+const CLUTTER_HEIGHT_DEFAULT = {10:15,20:3,30:0,40:1,50:8,60:0,70:0,80:0,90:1,95:8,100:0};
 
 function clampNum(v, min, max, fallback) {
   const n = Number(v);
@@ -1791,6 +1817,134 @@ async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
 }
 
 // ═══════════════════════════════════════════════════════════
+//  SURFACE CLUTTER — ESA WorldCover land cover (lazy COG reads)
+//  Builds an in-memory land-cover grid over a bbox, then maps each cell's
+//  class to a clutter height. All failures are non-fatal: the caller falls
+//  back to bare terrain.
+// ═══════════════════════════════════════════════════════════
+let _geotiffPromise = null;
+const _worldCoverImg = new Map();   // tile name → Promise<{image, ulx, uly, xres, yres, w, h}>
+let _clutterUnavailable = false;    // sticky: once load fails, stop retrying this session
+
+function loadGeoTiffLib(){
+  if(window.GeoTIFF) return Promise.resolve(window.GeoTIFF);
+  if(_geotiffPromise) return _geotiffPromise;
+  _geotiffPromise = new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = GEOTIFF_CDN; sc.crossOrigin = 'anonymous';
+    sc.onload = () => window.GeoTIFF ? resolve(window.GeoTIFF) : reject(new Error('geotiff global missing'));
+    sc.onerror = () => reject(new Error('geotiff.js failed to load'));
+    document.head.appendChild(sc);
+  });
+  return _geotiffPromise;
+}
+
+// WorldCover 3°×3° tile name from a lat/lng (named by SW corner).
+function worldCoverTile(lat, lng){
+  const tLat = Math.floor(lat/3)*3, tLng = Math.floor(lng/3)*3;
+  const ns = tLat < 0 ? 'S' : 'N', ew = tLng < 0 ? 'W' : 'E';
+  return `${ns}${String(Math.abs(tLat)).padStart(2,'0')}${ew}${String(Math.abs(tLng)).padStart(3,'0')}`;
+}
+
+async function worldCoverImage(tile){
+  if(_worldCoverImg.has(tile)) return _worldCoverImg.get(tile);
+  const p = (async () => {
+    const GT = await loadGeoTiffLib();
+    const url = `${WORLDCOVER_BASE}ESA_WorldCover_10m_2021_v200_${tile}_Map.tif`;
+    const tiff = await GT.fromUrl(url);
+    const image = await tiff.getImage();
+    const [ulx, uly] = image.getOrigin();
+    const [xres, yres] = image.getResolution();   // yres is negative (north-up)
+    return { image, ulx, uly, xres, yres, w: image.getWidth(), h: image.getHeight() };
+  })();
+  _worldCoverImg.set(tile, p);
+  return p;
+}
+
+// Build a land-cover→clutter-height sampler over [minLat,minLng]–[maxLat,maxLng]
+// at ~stepM resolution. `heights` maps WorldCover class → metres. Returns a
+// sampler {heightAt(lat,lng)} or null if no data could be loaded (→ bare earth).
+async function buildClutterGrid(minLat, minLng, maxLat, maxLng, stepM, heights){
+  if(_clutterUnavailable) return null;
+  const midLat = (minLat + maxLat) / 2;
+  const dLat = stepM / 111320;
+  const dLng = stepM / (111320 * Math.max(0.05, Math.cos(midLat * Math.PI/180)));
+  const cols = Math.min(6000, Math.ceil((maxLng - minLng) / dLng) + 1);
+  const rows = Math.min(6000, Math.ceil((maxLat - minLat) / dLat) + 1);
+  const grid = new Uint8Array(cols * rows);   // class per cell; 0 = unknown
+  let filled = false;
+  try {
+    for(let tLat = Math.floor(minLat/3)*3; tLat <= Math.floor(maxLat/3)*3; tLat += 3){
+      for(let tLng = Math.floor(minLng/3)*3; tLng <= Math.floor(maxLng/3)*3; tLng += 3){
+        let meta;
+        try { meta = await worldCoverImage(worldCoverTile(tLat, tLng)); }
+        catch(e){ continue; }   // tile missing (e.g. all-ocean) → leave unknown
+        // Native pixel window for this tile's intersection with the bbox.
+        const wMin = Math.max(minLng, tLng), wMax = Math.min(maxLng, tLng + 3);
+        const sMin = Math.max(minLat, tLat), sMax = Math.min(maxLat, tLat + 3);
+        let px0 = Math.floor((wMin - meta.ulx) / meta.xres);
+        let px1 = Math.ceil((wMax - meta.ulx) / meta.xres);
+        let py0 = Math.floor((sMax - meta.uly) / meta.yres);   // north → smaller row
+        let py1 = Math.ceil((sMin - meta.uly) / meta.yres);
+        px0 = Math.max(0, Math.min(meta.w, px0)); px1 = Math.max(0, Math.min(meta.w, px1));
+        py0 = Math.max(0, Math.min(meta.h, py0)); py1 = Math.max(0, Math.min(meta.h, py1));
+        if(px1 <= px0 || py1 <= py0) continue;
+        const f = Math.max(1, Math.round(stepM / 10));   // native is ~10 m
+        const outW = Math.max(1, Math.round((px1 - px0) / f));
+        const outH = Math.max(1, Math.round((py1 - py0) / f));
+        const rasters = await meta.image.readRasters({
+          window: [px0, py0, px1, py1], width: outW, height: outH, resampleMethod: 'nearest' });
+        const data = rasters[0];
+        // Scatter each output pixel into the unified grid by its lat/lng centre.
+        for(let oy = 0; oy < outH; oy++){
+          const nativeY = py0 + (oy + 0.5) * (py1 - py0) / outH;
+          const lat = meta.uly + nativeY * meta.yres;
+          const r = Math.floor((maxLat - lat) / dLat);
+          if(r < 0 || r >= rows) continue;
+          for(let ox = 0; ox < outW; ox++){
+            const nativeX = px0 + (ox + 0.5) * (px1 - px0) / outW;
+            const lng = meta.ulx + nativeX * meta.xres;
+            const c = Math.floor((lng - minLng) / dLng);
+            if(c < 0 || c >= cols) continue;
+            grid[r * cols + c] = data[oy * outW + ox];
+            filled = true;
+          }
+        }
+      }
+    }
+  } catch(e){
+    console.warn('Clutter grid build failed', e);
+    _clutterUnavailable = true;
+    return null;
+  }
+  if(!filled) return null;
+  return {
+    tiles: _worldCoverImg.size,
+    heightAt(lat, lng){
+      const c = Math.floor((lng - minLng) / dLng);
+      const r = Math.floor((maxLat - lat) / dLat);
+      if(c < 0 || c >= cols || r < 0 || r >= rows) return 0;
+      return heights[grid[r * cols + c]] || 0;
+    }
+  };
+}
+
+// Resolve the active per-class clutter height table from the UI (forest +
+// built-up are user-set; the rest are fixed defaults).
+function clutterHeightTable(){
+  const t = { ...CLUTTER_HEIGHT_DEFAULT };
+  const forest = parseFloat(document.getElementById('inpClutterForest')?.value);
+  const urban = parseFloat(document.getElementById('inpClutterUrban')?.value);
+  if(Number.isFinite(forest)) t[10] = t[95] = forest;
+  if(Number.isFinite(urban)) t[50] = urban;
+  return t;
+}
+
+function clutterEnabled(){
+  return !!document.getElementById('inpClutterOn')?.checked;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  MATHS
 // ═══════════════════════════════════════════════════════════
 const R_EARTH=6371000;
@@ -1818,23 +1972,23 @@ function fsplDb(distM, fMHz){
   return 20*Math.log10(Math.max(distM,1)/1000)+20*Math.log10(fMHz)+32.44;
 }
 
-// Map link margin (dB) to a heatmap colour. Below 0 dB the link budget does not
-// close, so there is NO coverage to paint — return null and let the renderer
-// leave that cell blank, instead of flooding the terrain shadow with red out to
-// the search cap. From 0 dB upward the colour fades red → orange → yellow →
-// green as the fade margin grows, so signal quality reads straight off the map:
-// strong green near the node, fading through yellow to a red fringe at the edge
-// of usable coverage.
-const COVERAGE_GREEN_DB = 24;   // margin (dB) at/above which coverage is solid green
-const COVERAGE_MARGIN_BIN = 3;  // dB quantisation so adjacent samples share a colour and merge into runs
-function coverageMarginColor(marginDb){
-  if(!(marginDb >= 0)) return null;                 // no coverage — paint nothing
-  // Quantise the margin so neighbouring samples along a ray land on the same
-  // colour and can be merged into a single polygon (keeps the render cheap while
-  // letting colour boundaries sit on the true 40 m sample transitions).
-  const binned = Math.min(COVERAGE_GREEN_DB, Math.floor(marginDb / COVERAGE_MARGIN_BIN) * COVERAGE_MARGIN_BIN);
-  const hue = Math.round(binned / COVERAGE_GREEN_DB * 120);   // 0 = red, 60 = yellow, 120 = green
-  return `hsl(${hue}, 95%, 42%)`;
+// Coverage is drawn in each node's own colour so overlapping nodes stay
+// distinguishable; signal strength is shown by fill opacity instead of hue —
+// more opaque = stronger margin, fading out to the coverage edge. Below 0 dB the
+// link budget doesn't close, so there's no coverage to paint (level 0 = blank).
+const COVERAGE_GREEN_DB = 24;     // margin (dB) at/above which coverage is full strength
+const COVERAGE_LEVELS = 5;        // strength quantisation so adjacent samples merge into runs
+const COVERAGE_FILL_MIN = 0.1;    // fill opacity at the weakest covered level
+const COVERAGE_FILL_MAX = 0.4;    // fill opacity at full strength (kept light/transparent)
+function coverageLevel(marginDb){
+  if(!(marginDb >= 0)) return 0;                    // no coverage
+  const t = Math.min(1, marginDb / COVERAGE_GREEN_DB);
+  return 1 + Math.round(t * (COVERAGE_LEVELS - 1)); // 1..COVERAGE_LEVELS
+}
+function coverageLevelOpacity(level){
+  if(level <= 0) return 0;
+  const t = COVERAGE_LEVELS > 1 ? (level - 1) / (COVERAGE_LEVELS - 1) : 1;
+  return COVERAGE_FILL_MIN + t * (COVERAGE_FILL_MAX - COVERAGE_FILL_MIN);
 }
 
 // Bearing → destination point on a sphere (great-circle).
@@ -1888,7 +2042,10 @@ function globalRf(){
     rays: optionNum(parseInt(document.getElementById('inpCovRays').value), COVERAGE_RAY_OPTIONS, 72),
     samples: optionNum(parseInt(document.getElementById('inpCovSamples').value), COVERAGE_SAMPLE_OPTIONS, 50),
     fresnelPct: optionNum(parseFloat(document.getElementById('inpCovFresnel').value), FRESNEL_OPTIONS, 0.4),
-    maxKm: clampNum(document.getElementById('inpCovMaxKm').value, 1, LIMITS.covMaxKm, 30)
+    maxKm: clampNum(document.getElementById('inpCovMaxKm').value, 1, LIMITS.covMaxKm, 30),
+    clutterOn: clutterEnabled(),
+    clutterExcludeM: clampNum(document.getElementById('inpClutterExclude')?.value, 0, 5000, 100),
+    clutterHeights: clutterHeightTable()
   };
 }
 
@@ -2069,6 +2226,18 @@ async function _computeNodeCoverageImpl(node){
   // − RX sensitivity − required margin. marginDb = linkBudget − path loss.
   const linkBudget = rf.tx + rf.gain + rf.gain - rf.rx - g.margin;
 
+  // Optional land-cover clutter over the sweep bbox (null = bare terrain).
+  let clutter = null;
+  if(g.clutterOn){
+    const dLat = maxRange / 111320;
+    const dLng = maxRange / (111320 * Math.max(0.05, Math.cos(node.lat * Math.PI/180)));
+    toast(`${node.name}: loading land cover…`);
+    clutter = await buildClutterGrid(node.lat - dLat, node.lng - dLng,
+      node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M, g.clutterHeights);
+    toast(clutter ? `${node.name}: land cover loaded (${clutter.tiles} tile${clutter.tiles>1?'s':''}).`
+                  : `${node.name}: land cover unavailable — using bare terrain.`, 3500);
+  }
+
   for(let r = 0; r < rays; r++){
     const az = r * 360 / rays;
     if(r % 6 === 0) toast(`${node.name}: ray ${r+1}/${rays}…`);
@@ -2087,13 +2256,14 @@ async function _computeNodeCoverageImpl(node){
     } catch(e){
       throw new Error(`terrain tile fetch failed at ray ${r}: ${e.message||e}`);
     }
+    // Per-point clutter height (m), excluded near the node (own site assumed clear).
+    const clutterH = clutter ? points.map(([la, ln], i) =>
+      dists[i] >= g.clutterExcludeM ? clutter.heightAt(la, ln) : 0) : null;
     const raySamples = [{dist:0, latlng:[node.lat,node.lng], marginDb:Infinity}];
     // Walk outward computing the link margin at every sample. The heatmap paints
-    // every covered sample (so a usable far hilltop beyond a shadow still shows).
-    // `reachIdx` is the farthest *contiguous* covered sample from the node (drives
-    // the outline, so it hugs the main blob); `farthestIdx` is the farthest
-    // covered sample overall (drives the headline max-range figure).
-    let reachIdx = 0, farthestIdx = 0;
+    // every covered sample and the outline traces the farthest covered sample per
+    // ray (so a node on a hill shows its true far reach, not a tiny near blob).
+    let farthestIdx = 0;
     for(let s = 1; s <= samples; s++){
       const dS = dists[s];                       // distance src→candidate RX
       const rxAlt = elevs[s] + g.rxAntH;         // RX antenna tip elevation
@@ -2109,7 +2279,7 @@ async function _computeNodeCoverageImpl(node){
         const dJ = dists[j];                     // distance src→intermediate point
         const t = dJ / dS;                       // fraction along the LOS line
         const los = srcH + (rxAlt - srcH) * t;   // LOS height above the point
-        const eff = elevs[j] + bulge(dJ, dS - dJ, g.K);   // terrain + earth curvature
+        const eff = elevs[j] + (clutterH ? clutterH[j] : 0) + bulge(dJ, dS - dJ, g.K);   // terrain + clutter + earth curvature
         const fz = fresnel1(dJ, dS - dJ, g.freq);
         const nu = fz > 0 ? Math.SQRT2*(eff - los)/fz : -Infinity;
         if(nu >= 0){ blocked = true; break; }
@@ -2120,14 +2290,11 @@ async function _computeNodeCoverageImpl(node){
       const marginDb = blocked ? -Infinity
         : linkBudget - fsplDb(dS, g.freq) - knifeEdgeLossDb(maxNu);
       raySamples.push({dist:dS, latlng:points[s], marginDb});
-      if(marginDb >= 0){
-        farthestIdx = s;
-        if(reachIdx === s-1) reachIdx = s;   // outline extends only while contiguous
-      }
+      if(marginDb >= 0) farthestIdx = s;
     }
-    const reachDist = dists[reachIdx];
+    const reachDist = dists[farthestIdx];
     const [la, ln] = destPoint(node.lat, node.lng, az, Math.max(reachDist, 1));
-    reach.push({az, dist:reachDist, latlng:[la, ln], farthest:dists[farthestIdx]});
+    reach.push({az, dist:reachDist, latlng:[la, ln]});
     heatRays.push({az, samples:raySamples});
   }
 
@@ -2137,7 +2304,7 @@ async function _computeNodeCoverageImpl(node){
   node.coverageSearchCap = searchCap;
   node.coverageFriisRange = friisRange;
   node.coverageLimitedByBudget = limitedByBudget;
-  node.coverageReachMax = reach.reduce((m,r)=>Math.max(m,r.farthest),0);
+  node.coverageReachMax = reach.reduce((m,r)=>Math.max(m,r.dist),0);
   node.coverageComputed = true;
   node.coverageDirty = false;
   const limitText = limitedByBudget
@@ -2157,32 +2324,30 @@ function renderCoveragePolygon(node){
   // Samples are fine (~40 m). Rather than draw one polygon per sample (1000+ ×
   // rays would choke Leaflet) or collapse them into wide bands coloured by a
   // single edge sample (which blanks real coverage near the node), walk each
-  // ray at full resolution and merge consecutive same-colour samples into one
-  // quad. Colour boundaries land on the true 40 m transitions; blank (no-
-  // coverage) stretches are simply skipped, so near-node gaps reflect terrain,
-  // not the renderer.
-  const addCell = (a, b, i0, i1, fillColor) => {
+  // ray at full resolution and merge consecutive same-strength samples into one
+  // quad. Boundaries land on the true 40 m transitions; blank (no-coverage)
+  // stretches are skipped, so near-node gaps reflect terrain, not the renderer.
+  // Everything is drawn in the node's colour; strength is shown by fill opacity.
+  const addCell = (a, b, i0, i1, level) => {
     group.addLayer(L.polygon([a[i0].latlng, b[i0].latlng, b[i1].latlng, a[i1].latlng], {
-      color: fillColor, weight: 0, opacity: 0, fillColor, fillOpacity: 0.6, interactive: false
+      color: col, weight: 0, opacity: 0, fillColor: col, fillOpacity: coverageLevelOpacity(level), interactive: false
     }));
   };
   for(let r=0;r<rays.length;r++){
     const a = rays[r].samples;
     const b = rays[(r+1)%rays.length].samples;
     const n = Math.min(a.length,b.length);
-    let runStart = 1, runColor = coverageMarginColor(Math.min(a[1].marginDb, b[1].marginDb));
+    let runStart = 1, runLevel = coverageLevel(Math.min(a[1].marginDb, b[1].marginDb));
     for(let s=2;s<n;s++){
-      const color = coverageMarginColor(Math.min(a[s].marginDb, b[s].marginDb));
-      if(color !== runColor){
-        if(runColor) addCell(a, b, runStart-1, s-1, runColor);
-        runStart = s; runColor = color;
+      const level = coverageLevel(Math.min(a[s].marginDb, b[s].marginDb));
+      if(level !== runLevel){
+        if(runLevel > 0) addCell(a, b, runStart-1, s-1, runLevel);
+        runStart = s; runLevel = level;
       }
     }
-    if(runColor) addCell(a, b, runStart-1, n-1, runColor);
+    if(runLevel > 0) addCell(a, b, runStart-1, n-1, runLevel);
   }
-  // Outline the contiguous coverage edge (reach point per ray). coverageRays
-  // stores the farthest *contiguous* covered sample, so the line hugs the filled
-  // blob instead of spiking out to disconnected far patches.
+  // Outline the coverage edge — the farthest covered point per ray.
   if(node.coverageRays?.length){
     const outline = node.coverageRays.map(r=>r.latlng);
     outline.push(node.coverageRays[0].latlng);
@@ -2218,6 +2383,10 @@ async function runAnalysis(){
   // Fresnel clearance threshold (preset-driven): 0.4 for forgiving links (Meshtastic/ham VHF/UHF),
   // 0.6 for engineered links (Wi-Fi). Used to scale the marginal-vs-clear boundary.
   const fresnelPct=Math.max(0,Math.min(1,parseFloat(document.getElementById('inpCovFresnel').value)||0));
+  // Surface clutter (land cover): same model as the coverage sweep, so the two stay consistent.
+  const clutterOn=clutterEnabled();
+  const clutterHeights=clutterHeightTable();
+  const clutterExcludeM=clampNum(document.getElementById('inpClutterExclude')?.value, 0, 5000, 100);
   const N=80;
   const MAX_TERRAIN_ERRORS=2;
   let terrainErrors=0;
@@ -2258,10 +2427,27 @@ async function runAnalysis(){
       // Antenna tip = ground + antenna height
       const aH=aGnd+a.antH, bH=bGnd+b.antH;
 
+      // Per-point clutter height (m), excluded near both endpoints (own sites clear).
+      let clutterH=null;
+      if(clutterOn){
+        const pad=0.005;
+        const grid=await buildClutterGrid(
+          Math.min(a.lat,b.lat)-pad, Math.min(a.lng,b.lng)-pad,
+          Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad,
+          Math.max(20, dist/N), clutterHeights);
+        if(grid){
+          clutterH=dists.map((d,s)=>{
+            if(d<clutterExcludeM || (dist-d)<clutterExcludeM) return 0;
+            const t=s/N;
+            return grid.heightAt(a.lat+(b.lat-a.lat)*t, a.lng+(b.lng-a.lng)*t);
+          });
+        }
+      }
+
       let minLosClear=Infinity,minFzClear=Infinity,minScaledFzClear=Infinity,maxNu=-Infinity;
       for(let s=1;s<N;s++){
         const d1=dists[s],d2=dist-dists[s],t=s/N;
-        const eff=elevs[s]+bulge(d1,d2,K);
+        const eff=elevs[s]+(clutterH?clutterH[s]:0)+bulge(d1,d2,K);
         const los=aH+(bH-aH)*t;
         const clear=los-eff;
         if(clear<minLosClear) minLosClear=clear;
@@ -2827,6 +3013,10 @@ function openShare(){
     cs:+document.getElementById('inpCovSamples').value,
     cf:+document.getElementById('inpCovFresnel').value,
     cm:+document.getElementById('inpCovMaxKm').value,
+    co:clutterEnabled()?1:0,
+    fh:+document.getElementById('inpClutterForest').value,
+    uh:+document.getElementById('inpClutterUrban').value,
+    xe:+document.getElementById('inpClutterExclude').value,
     // node: [lat, lng, antH, name, rfOverride?, tx?, gain?, rx?, coverageOn?]
     n:S.nodes.map(n=>{
       const base=[+n.lat.toFixed(6),+n.lng.toFixed(6),n.antH,n.name];
@@ -2974,6 +3164,10 @@ function normaliseV3Hash(raw) {
     covSamples: optionNum(parseInt(raw.cs), COVERAGE_SAMPLE_OPTIONS, 50),
     covFresnel: optionNum(parseFloat(legacyCoverageDefaults ? presetRf.fresnel : raw.cf), FRESNEL_OPTIONS, 0.4),
     covMaxKm: clampNum(raw.cm ?? presetRf?.maxKm, 1, LIMITS.covMaxKm, 30),
+    clutterOn: !!raw.co,
+    clutterForest: clampNum(raw.fh, 0, 200, 15),
+    clutterUrban: clampNum(raw.uh, 0, 200, 8),
+    clutterExclude: clampNum(raw.xe, 0, 5000, 100),
     nodes,
     edges,
     paths,
@@ -3043,6 +3237,10 @@ function normaliseLegacyHash(raw) {
     covSamples: optionNum(parseInt(raw.covSamples), COVERAGE_SAMPLE_OPTIONS, 50),
     covFresnel: optionNum(parseFloat(raw.covFresnel), FRESNEL_OPTIONS, 0.4),
     covMaxKm: clampNum(raw.covMaxKm, 1, LIMITS.covMaxKm, 30),
+    clutterOn: !!raw.clutterOn,
+    clutterForest: clampNum(raw.clutterForest, 0, 200, 15),
+    clutterUrban: clampNum(raw.clutterUrban, 0, 200, 8),
+    clutterExclude: clampNum(raw.clutterExclude, 0, 5000, 100),
     nodes,
     edges,
     paths,
@@ -3079,6 +3277,11 @@ function loadFromHash(){
     setInputValue('inpCovSamples',data.covSamples);
     setInputValue('inpCovFresnel',data.covFresnel);
     setInputValue('inpCovMaxKm',data.covMaxKm);
+    setInputValue('inpClutterForest',data.clutterForest);
+    setInputValue('inpClutterUrban',data.clutterUrban);
+    setInputValue('inpClutterExclude',data.clutterExclude);
+    const clutterCb=document.getElementById('inpClutterOn');
+    if(clutterCb) clutterCb.checked=!!data.clutterOn;
     S.nextId=data.nextId;
     // Restore nodes
     data.nodes.forEach(nd=>{
