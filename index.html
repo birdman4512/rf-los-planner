@@ -469,7 +469,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" onclick="openShare()">⇪ SHARE</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
       <button class="btn" onclick="toggleDebug()" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260606-14">BUILD 20260606-14</span>
+      <span class="hdr-tag" title="Build 20260606-15">BUILD 20260606-15</span>
     </div>
   </header>
 
@@ -2115,16 +2115,16 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
   }
   const heights = new Float32Array(cols * rows);
   let loaded = 0, nonZero = 0, maxH = 0;
-  for(const tile of tiles){
+  dlog(`Meta/WRI canopy via GFW: fetching ${tiles.length} tile${tiles.length>1?'s':''} (${cols}×${rows}) in parallel …`);
+  // Fetch all tiles concurrently — GFW's cold COG read dominates, so overlapping
+  // them turns a sum of latencies into the slowest single one.
+  const results = await Promise.all(tiles.map(async tile => {
     const url = canopyBboxUrl(tile, minLat, minLng, maxLat, maxLng, cols, rows);
-    dlog(`Meta/WRI canopy via GFW: fetching ${cols}×${rows} image for tile ${tile} …`);
-    let img;
-    try{
-      img = await loadClutterImage(url, cols, rows);
-    }catch(e){
-      dlog(`Canopy source status: tile ${tile} FAILED — ${e.message||e}`,'err');
-      continue;
-    }
+    try { return { tile, img: await loadClutterImage(url, cols, rows) }; }
+    catch(e){ dlog(`Canopy source status: tile ${tile} FAILED — ${e.message||e}`,'err'); return { tile, img: null }; }
+  }));
+  for(const { img } of results){
+    if(!img) continue;
     loaded++;
     for(let i=0,j=0;i<img.data.length;i+=4,j++){
       if(img.data[i+3] === 0) continue;
@@ -2153,8 +2153,11 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
 }
 
 async function buildClutterGrid(minLat, minLng, maxLat, maxLng, stepM, heights){
-  const canopy = await buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM);
-  const landCover = await buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, heights);
+  // Canopy and land-cover are independent fetches — run them concurrently.
+  const [canopy, landCover] = await Promise.all([
+    buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM),
+    buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, heights)
+  ]);
   if(canopy && landCover){
     return {
       source: `${canopy.source} gated to WorldCover trees + ${landCover.source || 'WorldCover land cover'}`,
