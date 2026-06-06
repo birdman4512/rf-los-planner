@@ -451,7 +451,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn" onclick="openSettings()">⚙ SETTINGS</button>
       <button class="btn share" onclick="openShare()">⇪ SHARE</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
-      <span class="hdr-tag" title="Build 20260606-2">BUILD 20260606-2</span>
+      <span class="hdr-tag" title="Build 20260606-3">BUILD 20260606-3</span>
     </div>
   </header>
 
@@ -498,16 +498,17 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       </div>
       <div class="paths-panel" id="pathsPanel" data-sb-body="paths"><div class="no-data">No paths defined.</div></div>
 
-      <div class="analyse-wrap">
-        <button class="btn primary" onclick="runAnalysis()">▶ ANALYSE ALL LINKS</button>
-      </div>
-
       <!-- Results -->
       <div class="sb-section" style="padding:5px 11px">
         <div class="section-label sb-toggle" data-sb="results" style="margin-bottom:0"><span class="sb-chev">▾</span>RESULTS</div>
       </div>
       <div class="results-area" id="resultsArea" data-sb-body="results">
         <div class="no-data">Add nodes, links, then analyse.</div>
+      </div>
+
+      <!-- Anchored at the very bottom of the sidebar -->
+      <div class="analyse-wrap">
+        <button class="btn primary" onclick="runAnalysis()">▶ ANALYSE ALL LINKS</button>
       </div>
 
     </div><!-- /sidebar -->
