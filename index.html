@@ -72,6 +72,13 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .wp-card button,.wp-card label{user-select:none}
 
 .wp-row1{display:flex;align-items:center;gap:5px;margin-bottom:5px}
+.wp-collapse{background:none;border:none;color:var(--muted);cursor:pointer;padding:0;width:14px;flex-shrink:0;font-size:10px;line-height:1}
+.wp-collapse:hover{color:var(--accent)}
+.wp-collapse .chev{display:inline-block;transition:transform .15s}
+.wp-card.collapsed .wp-collapse .chev{transform:rotate(-90deg)}
+.wp-card.collapsed .wp-body{display:none}
+.wp-summary{display:none;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:.5px;padding:1px 0 1px 19px}
+.wp-card.collapsed .wp-summary{display:block}
 .wp-num{width:17px;height:17px;border-radius:50%;border:2px solid;font-family:'Share Tech Mono',monospace;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .wp-color{width:18px;height:18px;flex-shrink:0;padding:0;border:1px solid var(--border);border-radius:3px;background:none;cursor:pointer}
 .wp-color::-webkit-color-swatch-wrapper{padding:1px}
@@ -285,19 +292,27 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
     <h2>📡 Getting Started</h2>
     <ol style="line-height:1.65;font-size:13px;color:var(--text);padding-left:22px;margin-bottom:14px">
       <li><strong>Add nodes</strong> — right-click anywhere on the map → "Add node here". Each node is a transmitter or receiver. Click the ◎ button to centre on your current location first.</li>
-      <li><strong>Set antenna height</strong> — in the sidebar, edit each node's <em>ANT HT</em> (metres above ground). Default is 6 m.</li>
+      <li><strong>Set antenna height</strong> — in the sidebar, edit each node's <em>ANT HT</em> (metres above ground). Tweak the colour swatch to recolour a node; the ▾ chevron collapses a card.</li>
       <li><strong>Link nodes</strong> — right-click a node marker → "Connect to …" to add a radio link. Right-click a link to hide, isolate, or delete it. Each link becomes its own path; use <strong>+ NEW PATH</strong> to chain several into a multi-hop route.</li>
-      <li><strong>Pick a band</strong> — top of the sidebar, choose a radio preset (Meshtastic AU 915 MHz by default) or enter a custom frequency.</li>
-      <li><strong>Analyse</strong> — click <strong>▶ ANALYSE</strong>. Terrain elevation is fetched along each link and the line-of-sight + 1st Fresnel zone are drawn below the map.</li>
-      <li><strong>Coverage layer</strong> — set TX power / antenna gain / RX sensitivity (defaults seeded from the preset), tick the <em>COVERAGE</em> box on a node, then click <em>COMPUTE</em>. A terrain-aware coverage polygon is drawn. Use <em>ALL ON / ALL OFF</em> to toggle every node at once.</li>
+      <li><strong>Pick a band</strong> — open <strong>⚙ SETTINGS</strong> and choose a radio preset (Meshtastic AU 915 MHz by default) or enter a custom frequency; TX/gain/RX/margin live here too.</li>
+      <li><strong>Analyse</strong> — click <strong>▶ ANALYSE</strong> (bottom of the sidebar). Terrain is fetched along each link and the line-of-sight + 1st Fresnel zone are drawn below the map.</li>
+      <li><strong>Coverage</strong> — tick the <em>COVERAGE</em> box on a node and click <em>COMPUTE</em> (or <em>COMPUTE ALL</em> in Settings). A terrain-aware coverage area is drawn in that node's colour.</li>
     </ol>
     <p style="font-size:12px;color:var(--muted);line-height:1.5">
       <strong style="color:var(--green)">✓ CLEAR</strong> — LOS clear and Fresnel meets preset threshold (40 % for Meshtastic/ham, 60 % for Wi-Fi).&nbsp;
       <strong style="color:var(--orange)">⚠ MARGINAL</strong> — LOS clear but the 1st Fresnel zone is obstructed below the preset threshold. Each link result shows the estimated knife-edge diffraction loss (<em>Diff</em>) in dB.&nbsp;
-      <strong style="color:var(--red)">✕ BLOCKED</strong> — terrain in the way.
+      <strong style="color:var(--red)">✕ BLOCKED</strong> — terrain crosses the line of sight.
     </p>
-    <p style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">
-      Tip: terrain is fetched from AWS Open Terrain Tiles (~30 m global) — no API key, cached in-memory once loaded. Right-click a link on the map to delete it. Use <strong>⇪ SHARE</strong> to copy a URL containing your full setup.
+    <h3 style="font-size:13px;color:var(--accent);margin:16px 0 4px;letter-spacing:1px">HOW COVERAGE IS CALCULATED</h3>
+    <p style="font-size:12px;color:var(--muted);line-height:1.5">
+      From each node, rays are swept in every direction (1° steps by default) and terrain is sampled every ~40 m out to the smaller of the free-space link budget or the <em>Search cap</em>. A point is covered when (a) the terrain doesn't cross the optical line of sight and (b) the link budget still closes after free-space loss and knife-edge diffraction. Fill is shown in the node's colour: <strong>more opaque = stronger margin</strong>, fading to the edge; areas with no usable link (terrain shadow) are left blank, and the thin outline marks the farthest reach per direction. <em>Rays</em> and <em>Samples</em> in Settings trade speed for smoothness/accuracy.
+    </p>
+    <h3 style="font-size:13px;color:var(--accent);margin:14px 0 4px;letter-spacing:1px">SURFACE CLUTTER (OPTIONAL)</h3>
+    <p style="font-size:12px;color:var(--muted);line-height:1.5">
+      Bare terrain misses trees and buildings. Tick <em>Surface clutter</em> in Settings to add canopy/land-cover obstruction: measured tree heights (Meta/WRI via Global Forest Watch) over forest, plus ESA WorldCover land cover (Terrascope). Clutter doesn't hard-block like terrain — it adds frequency-scaled diffraction loss (set by <em>Atten @915</em>, dB/m) as the path grazes through it. The <em>Clear&nbsp;&lt;</em> radius keeps clutter from blocking your own mast. First compute is slower while the data loads.
+    </p>
+    <p style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.5">
+      Tips: terrain is AWS Open Terrain Tiles (~30 m, no key, cached in memory). Open <strong>🐛 LOG</strong> to see exactly what each calculation used — link budgets, clutter loading, and per-link results. Use <strong>⇪ SHARE</strong> to copy a URL containing your full setup. Modelling is first-order (single knife-edge diffraction, 4/3-earth) — for engineered links verify with a full Longley-Rice/ITWOM tool.
     </p>
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn primary" onclick="closeHelp()">GOT IT</button>
@@ -469,7 +484,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" onclick="openShare()">⇪ SHARE</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
       <button class="btn" onclick="toggleDebug()" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260606-15">BUILD 20260606-15</span>
+      <span class="hdr-tag" title="Build 20260607-1">BUILD 20260607-1</span>
     </div>
   </header>
 
@@ -491,7 +506,10 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <!-- Nodes -->
       <div class="sb-section" style="display:flex;align-items:center;justify-content:space-between;padding:6px 11px">
         <div class="section-label sb-toggle" data-sb="nodes" style="margin:0"><span class="sb-chev">▾</span>NODES <span id="wpCount" style="color:var(--accent)">0</span></div>
-        <span style="font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);letter-spacing:1px">DRAG TO REORDER</span>
+        <div class="title-actions">
+          <button class="title-action" title="Collapse all nodes" onclick="event.stopPropagation();setAllNodesCollapsed(true)">COLLAPSE</button>
+          <button class="title-action" title="Expand all nodes" onclick="event.stopPropagation();setAllNodesCollapsed(false)">EXPAND</button>
+        </div>
       </div>
       <div class="wp-scroll" id="wpList" data-sb-body="nodes"></div>
 
@@ -1424,13 +1442,17 @@ function renderNodeList() {
     const covBtnLabel = !node.coverageComputed ? 'COMPUTE' : (node.coverageDirty ? 'RECOMPUTE' : '✓ RECOMPUTE');
     const isActive = S.activeView?.type === 'node' && S.activeView.id === node.id;
     card.classList.toggle('active', isActive);
+    card.classList.toggle('collapsed', !!node.collapsed);
     card.innerHTML = `
       <div class="wp-row1">
+        <button class="wp-collapse" title="Collapse / expand" onclick="toggleNodeCollapse(${node.id})"><span class="chev">▾</span></button>
         <div class="wp-num" style="color:${c};border-color:${c}">${idx+1}</div>
         <input class="wp-color" type="color" value="${c}" title="Node colour" onchange="setNodeColor(${node.id},this.value)"/>
         <input class="wp-name" value="${escHtml(node.name)}" onchange="renameNode(${node.id},this.value)"/>
         <button class="wp-del" onclick="removeNode(${node.id})">✕</button>
       </div>
+      <div class="wp-summary">${node.lat.toFixed(4)}, ${node.lng.toFixed(4)} · AMSL ${amsl}${node.coverageOn?' · COV':''}</div>
+      <div class="wp-body">
       <div class="wp-grid">
         <div class="wp-field"><label>LATITUDE</label>
           <input id="lat_${node.id}" type="number" step="0.000001" value="${node.lat.toFixed(6)}" onchange="setNodeCoord(${node.id},'lat',this.value)"/></div>
@@ -1456,6 +1478,7 @@ function renderNodeList() {
         <div><label>TX dBm</label><input type="number" step="0.5" value="${rf.tx}" onchange="setNodeRf(${node.id},'txDbm',+this.value)"/></div>
         <div><label>Gain dBi</label><input type="number" step="0.5" value="${rf.gain}" onchange="setNodeRf(${node.id},'gainDbi',+this.value)"/></div>
         <div><label>RX dBm</label><input type="number" step="1" value="${rf.rx}" onchange="setNodeRf(${node.id},'rxDbm',+this.value)"/></div>
+      </div>
       </div>`;
     const cardControlSelector = 'input,button,label,select,textarea';
     const restoreCardDrag = () => { card.draggable = true; };
@@ -1582,6 +1605,18 @@ function setNodeColor(id, value) {
   refreshAllIcons();                       // marker pin colour
   renderNodeList();                        // card number badge + border
   if(node.coverageLayer) renderCoveragePolygon(node);  // coverage fill + outline
+}
+// Collapse/expand a single node card — toggles the class directly (no re-render,
+// so it can't disturb focus, drag, or markers).
+function toggleNodeCollapse(id) {
+  const node=S.nodes.find(n=>n.id===id); if(!node) return;
+  node.collapsed=!node.collapsed;
+  const card=document.querySelector(`.wp-card[data-id="${id}"]`);
+  if(card) card.classList.toggle('collapsed', node.collapsed);
+}
+function setAllNodesCollapsed(collapsed) {
+  S.nodes.forEach(n=>{ n.collapsed=collapsed; });
+  renderNodeList();
 }
 function setNodeCoord(id, field, val) {
   const node=S.nodes.find(n=>n.id===id); if(!node) return;
