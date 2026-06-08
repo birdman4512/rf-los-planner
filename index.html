@@ -612,7 +612,9 @@ const S = {
 const COLORS = ['#00c8f0','#f39c12','#2ecc71','#e74c3c','#9b59b6','#1abc9c','#e67e22','#3498db','#f1c40f','#e91e63'];
 const nodeColor = i => COLORS[i % COLORS.length];
 // A node's effective colour: its custom override, else the palette default.
-const nodeColorFor = node => node?.color || nodeColor(S.nodes.indexOf(node));
+// Keyed on the stable node id (not array position) so a node keeps its colour
+// when earlier nodes are deleted and the rest shift down.
+const nodeColorFor = node => node?.color || nodeColor((node?.id ?? 1) - 1);
 
 const LIMITS = {
   hashChars: 50000,
