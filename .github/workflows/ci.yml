@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Syntax-check inline JS
+      - name: Syntax-check app JS
         run: npm run check:js
 
       - name: Install Playwright browser
@@ -70,7 +70,7 @@ jobs:
       - name: Assemble static site
         run: |
           mkdir -p _site
-          cp index.html _site/index.html
+          cp index.html app.js _site/
           cp -r fonts _site/fonts
 
       - name: Configure Pages

@@ -61,6 +61,10 @@ The tool loads Leaflet, LZString, map tiles, and terrain tiles from public
 CDNs/services, so an internet connection is needed for the full experience.
 Fonts are self-hosted from `fonts/`.
 
+The app itself is `index.html` (markup + styles) plus `app.js` (all logic).
+There is deliberately no inline JavaScript: the Content-Security-Policy omits
+`'unsafe-inline'` from `script-src`.
+
 ## Publishing
 
 This repo is intended to be published with GitHub Pages.
