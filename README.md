@@ -45,10 +45,21 @@ Mobile, CloudRF).
 
 ## Running Locally
 
-Open `index.html` in a browser.
+Serve the repo root over HTTP and open it in a browser:
 
-The tool loads Leaflet, LZString, fonts, map tiles, and terrain tiles from public
+```
+npm install
+npm run serve
+# → http://localhost:8080/
+```
+
+This matches how GitHub Pages serves the site (same-origin fonts,
+Content-Security-Policy behaviour, CORS image decoding). Opening `index.html`
+directly via `file://` mostly works but is not the tested path.
+
+The tool loads Leaflet, LZString, map tiles, and terrain tiles from public
 CDNs/services, so an internet connection is needed for the full experience.
+Fonts are self-hosted from `fonts/`.
 
 ## Publishing
 

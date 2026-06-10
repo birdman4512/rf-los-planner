@@ -3,4 +3,3 @@ playwright-report/
 test-results/
 blob-report/
 .playwright/
-package-lock.json

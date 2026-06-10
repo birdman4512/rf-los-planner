@@ -11,20 +11,23 @@ on:
 permissions:
   contents: read
 
+# Actions are pinned to full commit SHAs (tags are mutable and can be re-pointed
+# at malicious code); Dependabot keeps the pins fresh via .github/dependabot.yml.
 jobs:
   # ── Safety checks: run on every push and PR to main ──
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Syntax-check inline JS
         run: npm run check:js
@@ -37,7 +40,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-report
           path: playwright-report/
@@ -60,7 +63,7 @@ jobs:
       group: pages
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # Publish only the static site, not the dev tooling (scripts/, tests/,
       # package.json, workflows) — keeps those off the public Pages URL.
@@ -68,15 +71,16 @@ jobs:
         run: |
           mkdir -p _site
           cp index.html _site/index.html
+          cp -r fonts _site/fonts
 
       - name: Configure Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

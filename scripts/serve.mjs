@@ -5,10 +5,10 @@
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { join, extname, normalize } from 'node:path';
+import { extname, resolve, sep } from 'node:path';
 
 const port = Number(process.argv[2]) || 8080;
-const root = process.cwd();
+const root = resolve(process.cwd());
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -18,16 +18,18 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon'
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2'
 };
 
 createServer(async (req, res) => {
   try {
     let pathname = decodeURIComponent((req.url || '/').split('?')[0]);
     if (pathname === '/') pathname = '/index.html';
-    // Strip any leading ../ to keep the server inside root.
-    const safe = normalize(pathname).replace(/^(\.\.[/\\])+/, '');
-    const filePath = join(root, safe);
+    // Containment check: resolve the requested path against root and refuse
+    // anything that escapes it (more robust than stripping ../ prefixes).
+    const filePath = resolve(root, '.' + pathname);
+    if (filePath !== root && !filePath.startsWith(root + sep)) throw new Error('outside root');
     const body = await readFile(filePath);
     res.writeHead(200, { 'content-type': TYPES[extname(filePath)] || 'application/octet-stream' });
     res.end(body);

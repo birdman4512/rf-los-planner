@@ -7,12 +7,18 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>RF Line of Sight Planner</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com https://services.terrascope.be https://titiler.terrascope.be https://tiles.globalforestwatch.org; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self'; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com/elevation-tiles-prod/ https://services.terrascope.be https://titiler.terrascope.be https://tiles.globalforestwatch.org; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
+<meta name="referrer" content="no-referrer">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js" integrity="sha512-qtX0GLM3qX8rxJN1gyDfcnMFFrKvixfoEOwbBib9VafR5vbChV5LeE5wSI/x+IlCkTY5ZFddFDCCfaVJJNnuKQ==" crossorigin="anonymous"></script>
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
 <style>
+/* Self-hosted fonts (latin subsets) — no Google Fonts dependency, font-src 'self'. */
+@font-face{font-family:'Barlow Condensed';font-style:normal;font-weight:300;font-display:swap;src:url(fonts/barlow-condensed-300.woff2) format('woff2')}
+@font-face{font-family:'Barlow Condensed';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/barlow-condensed-400.woff2) format('woff2')}
+@font-face{font-family:'Barlow Condensed';font-style:normal;font-weight:600;font-display:swap;src:url(fonts/barlow-condensed-600.woff2) format('woff2')}
+@font-face{font-family:'Barlow Condensed';font-style:normal;font-weight:700;font-display:swap;src:url(fonts/barlow-condensed-700.woff2) format('woff2')}
+@font-face{font-family:'Share Tech Mono';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/share-tech-mono-400.woff2) format('woff2')}
 :root {
   --bg:#0b0f17; --panel:#111824; --border:#1e2d42;
   --accent:#00c8f0; --green:#2ecc71; --orange:#f39c12; --red:#e74c3c;
@@ -583,6 +589,15 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <script>
+// Clickjacking guard. The CSP frame-ancestors directive is ignored when the
+// policy is delivered via <meta> (per spec), and GitHub Pages cannot send real
+// response headers, so breaking out of a hostile frame here is the only
+// protection that actually applies.
+if (window.top !== window.self) {
+  try { window.top.location.replace(window.location.href); }
+  catch { document.documentElement.style.display = 'none'; }
+}
+
 // ═══════════════════════════════════════════════════════════
 //  STATE
 //  Graph model: nodes (waypoints) + edges (links between any two)
@@ -598,6 +613,7 @@ const S = {
   elevCache: {},
   profileCache: {},
   _coverageComputing: false,
+  _coverageBatch: false,
   _analysing: false,
   debugLog: [],
   hoverMarker: null,
@@ -674,6 +690,19 @@ const WORLDCOVER_PALETTE = [
   {cls:95, rgb:[0,207,117]},     // Mangroves
   {cls:100,rgb:[250,230,160]}    // Moss and lichen
 ];
+
+// Keep the in-memory caches bounded so long sessions / big coverage sweeps
+// don't grow without limit. Maps and plain objects both iterate keys in
+// insertion order, so dropping the first entries evicts the oldest.
+function trimCache(cache, max){
+  if(cache instanceof Map){
+    while(cache.size > max) cache.delete(cache.keys().next().value);
+  }else{
+    const keys = Object.keys(cache);
+    const excess = keys.length - max;
+    for(let i = 0; i < excess; i++) delete cache[keys[i]];
+  }
+}
 
 function clampNum(v, min, max, fallback) {
   const n = Number(v);
@@ -1014,7 +1043,8 @@ function showOnlyEdge(id){
   S.paths.forEach(p=>{p.hidden=true;});
   S.showLinks=true;
   const links=document.getElementById('inpShowLinks'); if(links) links.checked=true;
-  selectEdgeView(id);
+  // force: ONLY must isolate-and-select, never toggle an already-selected link off.
+  selectEdgeView(id,{force:true});
   renderEdgesPanel();
   renderPathsPanel();
   renderChartTabs();
@@ -1068,7 +1098,7 @@ function showOnlyPath(id){
   S.showPaths=true;
   const links=document.getElementById('inpShowLinks'); if(links) links.checked=true;
   const paths=document.getElementById('inpShowPaths'); if(paths) paths.checked=true;
-  selectPathView(id);
+  selectPathView(id,{force:true});
   renderEdgesPanel();
   renderPathsPanel();
   renderChartTabs();
@@ -1152,10 +1182,10 @@ function selectNodeView(id, opts={}){
   });
 }
 
-function selectEdgeView(id){
+function selectEdgeView(id, opts={}){
   const edge=S.edges.find(e=>e.id===id);
   if(!edge) return;
-  if(S.activeView?.type==='edge'&&S.activeView.id===id){clearActiveView();return;}
+  if(!opts.force&&S.activeView?.type==='edge'&&S.activeView.id===id){clearActiveView();return;}
   S.activeView={type:'edge',id};
   if(edge.profile) showEdgeProfile(id);
   else{
@@ -1170,10 +1200,10 @@ function selectEdgeView(id){
   renderResults();
 }
 
-function selectPathView(id){
+function selectPathView(id, opts={}){
   const path=S.paths.find(p=>p.id===id);
   if(!path) return;
-  if(S.activeView?.type==='path'&&S.activeView.id===id){clearActiveView();return;}
+  if(!opts.force&&S.activeView?.type==='path'&&S.activeView.id===id){clearActiveView();return;}
   S.activeView={type:'path',id};
   if(pathHasAnalysedProfiles(path)) showPathProfile(id);
   else{
@@ -1821,6 +1851,7 @@ const TERRAIN_TILE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrariu
 const TERRAIN_Z = 12;            // ~38 m / pixel at the equator
 const TILE_SIZE = 256;
 const _tileCache = new Map();    // key "z/x/y" → Promise<Float32Array(256*256)>
+const TILE_CACHE_MAX = 256;      // ~262 KB per decoded tile → caps at ~67 MB
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function lng2tileX(lng, z){ return (lng + 180) / 360 * Math.pow(2, z); }
@@ -1831,7 +1862,13 @@ function lat2tileY(lat, z){
 
 function loadTile(z, x, y){
   const key = `${z}/${x}/${y}`;
-  if(_tileCache.has(key)) return _tileCache.get(key);
+  if(_tileCache.has(key)){
+    // LRU refresh: re-insert so tiles in active use aren't the first evicted.
+    const hit = _tileCache.get(key);
+    _tileCache.delete(key);
+    _tileCache.set(key, hit);
+    return hit;
+  }
   const p = new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -1853,6 +1890,7 @@ function loadTile(z, x, y){
     img.src = TERRAIN_TILE_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y);
   });
   _tileCache.set(key, p);
+  trimCache(_tileCache, TILE_CACHE_MAX);
   return p;
 }
 
@@ -1886,7 +1924,9 @@ async function fetchElevSingle(lat,lng){
   const key=`${(+lat).toFixed(5)},${(+lng).toFixed(5)}`;
   if(S.elevCache[key]!==undefined) return S.elevCache[key];
   const v=await tileElevAt(+lat,+lng);
-  S.elevCache[key]=v??0; return S.elevCache[key];
+  S.elevCache[key]=v??0;
+  trimCache(S.elevCache, 5000);
+  return S.elevCache[key];
 }
 
 async function fetchElev(node){
@@ -1930,6 +1970,7 @@ async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
     batch.forEach(v=>elevs.push(Number(v)));
   }
   S.profileCache[profileKey]=[...elevs];
+  trimCache(S.profileCache, 300);
   return elevs;
 }
 
@@ -1972,6 +2013,8 @@ function loadClutterImage(url, w, h){
     img.src = url;
   });
   _clutterImgCache.set(url, p);
+  // Decoded clutter images can be up to 2048×2048 RGBA (~16 MB) — keep few.
+  trimCache(_clutterImgCache, 8);
   return p;
 }
 
@@ -2452,8 +2495,8 @@ function updateCovCount(){
   refreshSettingsSummary();
 }
 
-async function computeNodeCoverage(id){
-  if(S._coverageComputing){ toast('Coverage compute already running.', 2000); return; }
+async function computeNodeCoverage(id, _fromBatch = false){
+  if(S._coverageComputing || (S._coverageBatch && !_fromBatch)){ toast('Coverage compute already running.', 2000); return; }
   S._coverageComputing = true;
   let node = null, btn = null;
   try{
@@ -2671,14 +2714,22 @@ function renderCoveragePolygon(node){
 }
 
 async function computeAllCoverage(){
-  if(S._coverageComputing){ toast('Coverage compute already running.', 2000); return; }
-  if(!S.nodes.length){ toast('No nodes to compute.', 2000); return; }
-  for(let i = 0; i < S.nodes.length; i++){
-    toast(`Coverage ${i+1}/${S.nodes.length}: ${S.nodes[i].name}`);
-    await computeNodeCoverage(S.nodes[i]);
-    await sleep(20);
+  if(S._coverageComputing || S._coverageBatch){ toast('Coverage compute already running.', 2000); return; }
+  // Only sweep nodes whose COVERAGE box is ticked — computing the rest would
+  // download terrain/clutter for layers that are never shown.
+  const targets = S.nodes.filter(n => n.coverageOn);
+  if(!targets.length){ toast('No nodes have coverage enabled — tick COVERAGE on a node first.', 3000); return; }
+  S._coverageBatch = true;
+  try{
+    for(let i = 0; i < targets.length; i++){
+      toast(`Coverage ${i+1}/${targets.length}: ${targets[i].name}`);
+      await computeNodeCoverage(targets[i], true);
+      await sleep(20);
+    }
+    toast('Coverage compute complete.', 2500);
+  }finally{
+    S._coverageBatch = false;
   }
-  toast('Coverage compute complete.', 2500);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3650,7 +3701,6 @@ function loadFromHash(){
     document.getElementById('pathCount').textContent=S.paths.length;
     if(S.nodes.length>0){
       document.getElementById('mapHint').style.display='none';
-      const lats=S.nodes.map(n=>n.lat),lngs=S.nodes.map(n=>n.lng);
       const bounds=L.latLngBounds(S.nodes.map(n=>[n.lat,n.lng]));
       S.map.fitBounds(bounds,{padding:[40,40]});
     }
