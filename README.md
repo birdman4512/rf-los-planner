@@ -1,4 +1,4 @@
-# RF Line of Sight Planner
+# ClearPath — RF Line of Sight Planner
 
 Interactive browser-based planner for RF line-of-sight links, terrain profiles,
 Fresnel clearance, multi-hop paths, and terrain-aware coverage estimates.

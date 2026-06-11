@@ -22,7 +22,7 @@ test.describe('RF LOS Planner — smoke', () => {
 
     await page.goto('/index.html', { waitUntil: 'load' });
 
-    await expect(page.locator('header h1')).toContainText('Line of Sight');
+    await expect(page.locator('header h1')).toContainText('ClearPath');
     await expect(page.locator('#map')).toBeVisible();
     await expect(page.getByRole('button', { name: '+ NEW PATH' })).toBeVisible();
 
