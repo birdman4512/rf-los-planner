@@ -1737,6 +1737,13 @@ function haversine(la1,lo1,la2,lo2){
   const a=Math.sin(dLa/2)**2+Math.cos(toRad(la1))*Math.cos(toRad(la2))*Math.sin(dLo/2)**2;
   return 2*R_EARTH*Math.asin(Math.sqrt(a));
 }
+// Initial great-circle bearing (deg, 0–360) from point 1 to point 2.
+function bearingTo(la1,lo1,la2,lo2){
+  const φ1=toRad(la1),φ2=toRad(la2),Δλ=toRad(lo2-lo1);
+  const y=Math.sin(Δλ)*Math.cos(φ2);
+  const x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+  return (Math.atan2(y,x)*180/Math.PI+360)%360;
+}
 function bulge(d1,d2,K){return d1*d2/(2*K*R_EARTH);}
 function fresnel1(d1,d2,fMHz){const lam=3e8/(fMHz*1e6);return Math.sqrt(lam*d1*d2/(d1+d2));}
 
@@ -2174,69 +2181,70 @@ function renderCoveragePolygon(node){
 }
 
 // ── Coverage overlap highlight ──────────────────────────────
-// Highlights where two or more nodes' coverage footprints overlap, intersected
-// pairwise via polygon-clipping then unioned. Toggled by a button; redrawn when
-// coverage changes while on. Coords are GeoJSON [lng,lat] for the clipper,
-// converted back to Leaflet [lat,lng] for rendering.
-//
-// Each node's coverage is built as PETALS, not the simple outline: a run of
-// consecutive covered rays becomes one polygon (centre → ray tips → centre),
-// and blocked rays (reach ≈ 0) break the run. This matches the real, notchy
-// coverage — connecting every ray tip with straight lines (the old approach)
-// cross-cut across blocked directions and grossly over-stated the area.
-function nodeCoveragePolygon(node){
-  const rays = node.coverageRays;
-  if(!rays || rays.length < 3) return null;
-  const center = [node.lng, node.lat];
-  const polys = [];
-  let cur = null;
-  const flush = () => {
-    if(cur && cur.length >= 2) polys.push([[center, ...cur, center]]);
-    cur = null;
-  };
-  for(let i = 0; i < rays.length; i++){
-    if(rays[i].dist > 1) (cur || (cur = [])).push([rays[i].latlng[1], rays[i].latlng[0]]);
-    else flush();
-  }
-  flush();
-  return polys.length ? polys : null;   // GeoJSON MultiPolygon (array of polygons)
+// Highlights where two or more nodes' coverage footprints overlap. Tests the
+// REAL per-sample coverage (coverageHeatRays, which already bakes in terrain +
+// clutter), not the coverage outline — so shadows and radial gaps are honoured
+// instead of filling them in. A grid is sampled over the combined bounds and
+// cells covered by ≥2 nodes are painted onto a canvas image overlay.
+
+// Is (lat,lng) inside this node's computed coverage? Maps the point to the
+// nearest sweep ray + sample and checks that sample's margin.
+function pointInCoverage(node, lat, lng){
+  const rays = node.coverageHeatRays;
+  const maxR = node.coverageMaxRange;
+  if(!rays || !rays.length || !maxR) return false;
+  const d = haversine(node.lat, node.lng, lat, lng);
+  if(d > maxR) return false;
+  const R = rays.length;
+  const ri = ((Math.round(bearingTo(node.lat, node.lng, lat, lng) * R / 360) % R) + R) % R;
+  const samples = rays[ri].samples;
+  if(!samples || !samples.length) return false;
+  // Samples are uniform along the ray: sample k sits at maxR*(k+1)/N.
+  let k = Math.round(d / maxR * samples.length) - 1;
+  if(k < 0) k = 0; else if(k >= samples.length) k = samples.length - 1;
+  return samples[k].marginDb >= 0;
 }
 
 function renderCoverageOverlap(){
   if(S.overlapLayer){ S.map.removeLayer(S.overlapLayer); S.overlapLayer = null; }
   if(!S.showOverlap) return;
-  if(typeof polygonClipping === 'undefined') return;
-  const polys = S.nodes
-    .filter(n => n.coverageOn)
-    .map(nodeCoveragePolygon)
-    .filter(Boolean);
-  if(polys.length < 2) return;
-  const inters = [];
-  for(let i = 0; i < polys.length; i++){
-    for(let j = i + 1; j < polys.length; j++){
-      try{
-        const r = polygonClipping.intersection(polys[i], polys[j]);
-        if(r && r.length) inters.push(r);
-      }catch{ /* skip degenerate pair */ }
+  const nodes = S.nodes.filter(n => n.coverageOn && n.coverageHeatRays?.length && n.coverageMaxRange);
+  if(nodes.length < 2) return;
+  // Combined bounds across every node's reach.
+  let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+  for(const n of nodes){
+    const dLat = n.coverageMaxRange / 111320;
+    const dLng = n.coverageMaxRange / (111320 * Math.max(0.05, Math.cos(n.lat * Math.PI/180)));
+    minLat = Math.min(minLat, n.lat - dLat); maxLat = Math.max(maxLat, n.lat + dLat);
+    minLng = Math.min(minLng, n.lng - dLng); maxLng = Math.max(maxLng, n.lng + dLng);
+  }
+  // Grid resolution: ~120 m cells, capped so a huge bbox stays cheap.
+  const midLat = (minLat + maxLat) / 2;
+  const wM = (maxLng - minLng) * 111320 * Math.cos(midLat * Math.PI/180);
+  const hM = (maxLat - minLat) * 111320;
+  const W = Math.max(2, Math.min(600, Math.round(wM / 120)));
+  const H = Math.max(2, Math.min(600, Math.round(hM / 120)));
+  const cvs = document.createElement('canvas');
+  cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const data = img.data;
+  for(let yy = 0; yy < H; yy++){
+    const lat = maxLat - (yy + 0.5) / H * (maxLat - minLat);
+    for(let xx = 0; xx < W; xx++){
+      const lng = minLng + (xx + 0.5) / W * (maxLng - minLng);
+      let cnt = 0;
+      for(const n of nodes){ if(pointInCoverage(n, lat, lng) && ++cnt >= 2) break; }
+      if(cnt >= 2){
+        const idx = (yy * W + xx) * 4;
+        data[idx] = 255; data[idx+1] = 47; data[idx+2] = 208; data[idx+3] = 150; // magenta
+      }
     }
   }
-  if(!inters.length) return;
-  let merged;
-  try{ merged = polygonClipping.union(...inters); }
-  catch{ merged = inters.flat(); }
-  const group = L.layerGroup();
-  for(const poly of merged){
-    const latlngs = poly.map(ring => ring.map(pt => [pt[1], pt[0]])); // → [lat,lng]
-    // Solid, saturated fill so the overlap AREA reads as a region, not an
-    // outline (a lens boundary sits on the coverage perimeters, so a heavy
-    // stroke looks like "the perimeter is highlighted").
-    group.addLayer(L.polygon(latlngs, {
-      color: '#ffffff', weight: 1, opacity: 0.5,
-      fillColor: '#ff2fd0', fillOpacity: 0.45, interactive: false
-    }));
-  }
-  S.overlapLayer = group.addTo(S.map);
-  group.eachLayer(l => l.bringToFront?.());
+  ctx.putImageData(img, 0, 0);
+  S.overlapLayer = L.imageOverlay(cvs.toDataURL(), [[minLat, minLng], [maxLat, maxLng]],
+    { opacity: 1, interactive: false, className: 'overlap-overlay' }).addTo(S.map);
+  S.overlapLayer.bringToFront?.();
 }
 
 // Redraw the overlap only when the toggle is active (cheap no-op otherwise),
