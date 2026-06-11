@@ -205,6 +205,7 @@ function makeMarker(node) {
     node.elev = null; invalidateEdgesForNode(node.id); fetchElev(node);
     invalidateNodeCoverage(node, true);
     syncShareUrl();
+    refreshOverlap();
     // Re-analyse all links whenever a node is dragged
     if (S.edges.length > 0) runAnalysis();
   });
@@ -1921,6 +1922,7 @@ function setNodeCoverageOn(id, on){
     else S.map.removeLayer(node.coverageLayer);
   }
   updateCovCount();
+  refreshOverlap();
 }
 
 function setAllCoverage(on){
@@ -1933,6 +1935,7 @@ function setAllCoverage(on){
     const cb = document.getElementById(`cov_${n.id}`); if(cb) cb.checked = on;
   });
   updateCovCount();
+  refreshOverlap();
 }
 
 function updateCovCount(){
@@ -1956,6 +1959,7 @@ async function computeNodeCoverage(id, _fromBatch = false){
     S._coverageComputing = false;
     if(btn) btn.disabled = false;
     if(node) updateCovBtn(node);
+    if(!_fromBatch) refreshOverlap();
   }
 }
 
@@ -2157,6 +2161,74 @@ function renderCoveragePolygon(node){
   node.coverageLayer.eachLayer?.(layer=>layer.bringToBack?.());
 }
 
+// ── Coverage overlap highlight ──────────────────────────────
+// Highlights where two or more nodes' coverage footprints overlap. Uses each
+// node's coverage envelope (the outline polygon, coverageRays) intersected
+// pairwise via polygon-clipping, then unioned. Toggled by a button; redrawn
+// whenever coverage changes while the toggle is on. Coordinates are converted
+// to GeoJSON [lng,lat] for the clipper and back to Leaflet [lat,lng].
+function nodeCoverageRing(node){
+  const rays = node.coverageRays;
+  if(!rays || rays.length < 3) return null;
+  const ring = rays.map(r => [r.latlng[1], r.latlng[0]]); // [lng,lat]
+  ring.push(ring[0]);                                       // close
+  return [ring];                                            // GeoJSON Polygon
+}
+
+function renderCoverageOverlap(){
+  if(S.overlapLayer){ S.map.removeLayer(S.overlapLayer); S.overlapLayer = null; }
+  if(!S.showOverlap) return;
+  if(typeof polygonClipping === 'undefined') return;
+  const polys = S.nodes
+    .filter(n => n.coverageOn)
+    .map(nodeCoverageRing)
+    .filter(Boolean);
+  if(polys.length < 2) return;
+  const inters = [];
+  for(let i = 0; i < polys.length; i++){
+    for(let j = i + 1; j < polys.length; j++){
+      try{
+        const r = polygonClipping.intersection(polys[i], polys[j]);
+        if(r && r.length) inters.push(r);
+      }catch{ /* skip degenerate pair */ }
+    }
+  }
+  if(!inters.length) return;
+  let merged;
+  try{ merged = polygonClipping.union(...inters); }
+  catch{ merged = inters.flat(); }
+  const group = L.layerGroup();
+  for(const poly of merged){
+    const latlngs = poly.map(ring => ring.map(pt => [pt[1], pt[0]])); // → [lat,lng]
+    group.addLayer(L.polygon(latlngs, {
+      color: '#ffd166', weight: 2, opacity: 0.95, dashArray: '5 4',
+      fillColor: '#ffd166', fillOpacity: 0.18, interactive: false
+    }));
+  }
+  S.overlapLayer = group.addTo(S.map);
+  group.eachLayer(l => l.bringToFront?.());
+}
+
+// Redraw the overlap only when the toggle is active (cheap no-op otherwise),
+// so coverage-changing actions can call it unconditionally.
+function refreshOverlap(){ if(S.showOverlap) renderCoverageOverlap(); }
+
+function updateOverlapBtn(){
+  const b = document.getElementById('btnCovOverlap');
+  if(b) b.classList.toggle('primary', !!S.showOverlap);
+}
+
+function toggleOverlap(){
+  S.showOverlap = !S.showOverlap;
+  updateOverlapBtn();
+  if(S.showOverlap){
+    const covered = S.nodes.filter(n => n.coverageOn && n.coverageRays && n.coverageRays.length >= 3);
+    if(covered.length < 2)
+      toast('Compute coverage on at least 2 nodes to see overlap.', 3000);
+  }
+  renderCoverageOverlap();
+}
+
 async function computeAllCoverage(){
   if(S._coverageComputing || S._coverageBatch){ toast('Coverage compute already running.', 2000); return; }
   // Only sweep nodes whose COVERAGE box is ticked — computing the rest would
@@ -2173,6 +2245,7 @@ async function computeAllCoverage(){
     toast('Coverage compute complete.', 2500);
   }finally{
     S._coverageBatch = false;
+    refreshOverlap();
   }
 }
 
@@ -3273,6 +3346,7 @@ function initStaticHandlers(){
   on('btnCovAllOn','click',()=>setAllCoverage(true));
   on('btnCovAllOff','click',()=>setAllCoverage(false));
   on('btnCovComputeAll','click',computeAllCoverage);
+  on('btnCovOverlap','click',toggleOverlap);
   // Sidebar
   on('settingsSummary','click',openSettings);
   on('btnNodesCollapse','click',ev=>{ ev.stopPropagation(); setAllNodesCollapsed(true); });

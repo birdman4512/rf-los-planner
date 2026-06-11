@@ -470,6 +470,9 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <button class="btn" id="btnCovAllOff">ALL OFF</button>
         <button class="btn primary" id="btnCovComputeAll">▶ COMPUTE ALL</button>
       </div>
+      <div class="cov-btn-row" style="margin-top:6px">
+        <button class="btn" id="btnCovOverlap" title="Highlight where two or more nodes' coverage footprints overlap.">⧉ OVERLAP</button>
+      </div>
       <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:1px;line-height:1.4">
         Coverage is shown in each node's colour; more opaque = stronger signal, fading out to the coverage edge, blank where the link won't close (e.g. terrain shadow). Surface clutter (optional) adds Meta/WRI canopy height where available plus ESA WorldCover land-cover loss. Compute downloads terrain tiles (AWS Open Terrain, ~30 m global).
       </div>
@@ -589,6 +592,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
   </div>
 </div>
 
+<script src="vendor/polygon-clipping.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
