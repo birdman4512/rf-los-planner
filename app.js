@@ -3334,6 +3334,14 @@ function initStaticHandlers(){
   on('btnPathCancel','click',closePathModal);
   on('pbSaveBtn','click',savePathModal);
   on('btnSettingsClose','click',closeSettings);
+  // Settings modal tabs — show one panel at a time.
+  document.querySelectorAll('.settings-tab').forEach(tab=>{
+    tab.addEventListener('click',()=>{
+      const target=tab.dataset.stab;
+      document.querySelectorAll('.settings-tab').forEach(t=>t.classList.toggle('active', t===tab));
+      document.querySelectorAll('.settings-panel').forEach(p=>{ p.hidden = p.dataset.spanel !== target; });
+    });
+  });
   // Settings — RF + coverage parameters
   on('inpPreset','change',applyPreset);
   on('inpFreq','input',syncPresetFromFreq);

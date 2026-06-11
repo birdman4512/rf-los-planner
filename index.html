@@ -275,6 +275,10 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 /* ── SETTINGS MODAL + SUMMARY ── */
 .settings-group{border:1px solid var(--border);padding:10px 12px;margin-bottom:12px;background:rgba(11,15,23,.5)}
 .settings-label{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+.settings-tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--border)}
+.settings-tab{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;padding:7px 16px;border:1px solid var(--border);border-bottom:none;background:transparent;color:var(--muted);cursor:pointer}
+.settings-tab.active{color:var(--accent);border-color:var(--accent);background:var(--panel);margin-bottom:-1px;padding-bottom:8px}
+.settings-panel[hidden]{display:none}
 .settings-summary{display:flex;align-items:center;gap:6px;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px;cursor:pointer;padding:4px 0;user-select:none}
 .settings-summary:hover{color:var(--accent)}
 .ss-band{color:var(--accent)}
@@ -366,6 +370,12 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
   <div class="modal" style="min-width:500px;max-width:560px">
     <h2>⚙ RF + Coverage Settings</h2>
 
+    <div class="settings-tabs">
+      <button class="settings-tab active" data-stab="rf" type="button">RF</button>
+      <button class="settings-tab" data-stab="coverage" type="button">Coverage</button>
+    </div>
+
+    <div class="settings-panel" data-spanel="rf">
     <div class="settings-group">
       <div class="settings-label">RF Parameters</div>
       <div class="field-row" style="margin-bottom:6px">
@@ -412,7 +422,9 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <label class="display-toggle"><input type="checkbox" id="inpShowPaths" checked> SHOW PATHS</label>
       </div>
     </div>
+    </div><!-- /rf panel -->
 
+    <div class="settings-panel" data-spanel="coverage" hidden>
     <div class="settings-group">
       <div class="settings-label">Coverage <span id="covCount" style="color:var(--accent)">0</span> active</div>
       <div class="field-row" style="margin-bottom:6px">
@@ -477,6 +489,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         Coverage is shown in each node's colour; more opaque = stronger signal, fading out to the coverage edge, blank where the link won't close (e.g. terrain shadow). Surface clutter (optional) adds Meta/WRI canopy height where available plus ESA WorldCover land-cover loss. Compute downloads terrain tiles (AWS Open Terrain, ~30 m global).
       </div>
     </div>
+    </div><!-- /coverage panel -->
 
     <div class="modal-actions" style="margin-top:14px">
       <button class="btn primary" id="btnSettingsClose">CLOSE</button>
@@ -494,7 +507,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260610-2">BUILD 20260610-2</span>
+      <span class="hdr-tag" title="Build 20260611-1">BUILD 20260611-1</span>
     </div>
   </header>
 
