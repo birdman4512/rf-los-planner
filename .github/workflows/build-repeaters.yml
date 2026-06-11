@@ -2,8 +2,10 @@ name: Build repeaters
 
 # Regenerate data/repeaters-au.json from the ACMA RRL. Trigger manually from
 # the Actions tab ("Run workflow" button) or let the monthly schedule run it.
-# A push to main from this job re-triggers CI & Deploy, so a refreshed dataset
-# is published automatically.
+# A push made with the default GITHUB_TOKEN does NOT trigger other workflows
+# (anti-recursion safeguard), so after committing we explicitly dispatch CI &
+# Deploy — workflow_dispatch is exempt from that restriction — to publish the
+# refreshed dataset.
 on:
   workflow_dispatch:
   schedule:
@@ -11,6 +13,7 @@ on:
 
 permissions:
   contents: write          # commit the regenerated dataset
+  actions: write           # dispatch the deploy workflow
 
 jobs:
   build:
@@ -33,13 +36,22 @@ jobs:
         run: node scripts/build-repeaters.mjs spectra
 
       - name: Commit if changed
+        id: commit
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/repeaters-au.json
           if git diff --staged --quiet; then
             echo "Dataset unchanged — nothing to commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "Update repeater dataset from ACMA RRL"
             git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Deploy refreshed dataset
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref main

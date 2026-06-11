@@ -63,7 +63,7 @@ function buildHash(list) {
 
 function openInClearPath(list) {
   if (!list.length) { alert('Select at least one repeater first.'); return; }
-  window.location.href = buildHash(list);
+  window.open(buildHash(list), '_blank', 'noopener');
 }
 
 // ── Rendering ──
@@ -126,7 +126,7 @@ function render() {
       <td>${r.state || '—'}</td>
       <td class="num">${dist}</td>
       <td>${brg}</td>
-      <td><a class="open" href="${buildHash([r])}">Open ▸</a></td>
+      <td><a class="open" href="${buildHash([r])}" target="_blank" rel="noopener">Open ▸</a></td>
     </tr>`;
   }).join('');
   $('list').innerHTML = `<div class="sub">${rows.length} repeater(s)${loc ? ' near you' : ' — set a location to sort by distance'}</div>

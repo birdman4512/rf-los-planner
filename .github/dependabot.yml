@@ -1,11 +1,19 @@
 # Keeps the SHA-pinned GitHub Actions and the npm dev dependencies up to date.
+# Updates are grouped so each ecosystem produces a single combined PR per run
+# rather than one PR per dependency.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    groups:
+      npm:
+        patterns: ["*"]
