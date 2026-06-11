@@ -75,10 +75,12 @@ const WORLDCOVER_WMS_SOURCES = [
   { name:'Terrascope TiTiler', url:'https://titiler.terrascope.be/wms', layer:'esa-worldcover-map-10m-2021-v2_map', time:'2021-01-01' },
   { name:'Terrascope legacy', url:'https://services.terrascope.be/wms/v2', layer:'WORLDCOVER_2021_MAP' }
 ];
-// Per-pixel Meta/WRI canopy height read in-browser from the Cloud-Optimised
-// GeoTIFFs via geotiff.js, through our own Cloudflare Worker (CORS + Range) —
-// the GFW titiler that used to do this is down. Set the Worker URL below.
-const CANOPY_ENABLED = true;
+// Per-pixel Meta/WRI canopy height. The COGs have NO overviews and are 1 m
+// (65536² px), so a browser windowed read of a km-scale area needs hundreds of
+// MB in one array and fails ("Array buffer allocation failed"). Disabled until
+// a server-side tiler (titiler) provides downsampled windows. WorldCover land
+// cover supplies clutter heights meanwhile (tune Forest(m) for your area).
+const CANOPY_ENABLED = false;
 const CANOPY_PROXY_BASE = 'https://clearpath-clutter.nbird.com.au';
 const CANOPY_TILE_Z = 9;
 const CLUTTER_ATTEN_DB_PER_M_915 = 0.10; // reference loss while LOS passes through canopy/building clutter
