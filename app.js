@@ -75,6 +75,10 @@ const WORLDCOVER_WMS_SOURCES = [
   { name:'Terrascope TiTiler', url:'https://titiler.terrascope.be/wms', layer:'esa-worldcover-map-10m-2021-v2_map', time:'2021-01-01' },
   { name:'Terrascope legacy', url:'https://services.terrascope.be/wms/v2', layer:'WORLDCOVER_2021_MAP' }
 ];
+// GFW's tile proxy (the only browser-usable way to window the 696 MB Meta COGs)
+// is currently down — every request times out — so canopy is disabled and
+// clutter comes from ESA WorldCover alone. Flip to true if GFW recovers.
+const CANOPY_ENABLED = false;
 const CANOPY_TILE_Z = 9;
 const CANOPY_MAX_M = 60; // PNG rescale ceiling for Meta/WRI canopy height.
 const CANOPY_COG_BASE = 'https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/';
@@ -1637,6 +1641,7 @@ async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, height
 }
 
 async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
+  if(!CANOPY_ENABLED){ dlog('Canopy source: disabled — using WorldCover land cover for clutter','warn'); return null; }
   if(_canopyUnavailable){ dlog('Canopy source status: skipped (unavailable earlier this session)','warn'); return null; }
   const midLat = (minLat + maxLat) / 2;
   const dLat = stepM / 111320;
@@ -2242,9 +2247,16 @@ function renderCoverageOverlap(){
     }
   }
   ctx.putImageData(img, 0, 0);
+  // Dedicated pane above the coverage fills (overlayPane=400) but below markers
+  // (600), so the overlap reads on top of — not behind — the blue/orange fills.
+  if(!S.map.getPane('overlapPane')){
+    S.map.createPane('overlapPane');
+    const p = S.map.getPane('overlapPane');
+    p.style.zIndex = 450;
+    p.style.pointerEvents = 'none';
+  }
   S.overlapLayer = L.imageOverlay(cvs.toDataURL(), [[minLat, minLng], [maxLat, maxLng]],
-    { opacity: 1, interactive: false, className: 'overlap-overlay' }).addTo(S.map);
-  S.overlapLayer.bringToFront?.();
+    { opacity: 1, interactive: false, pane: 'overlapPane' }).addTo(S.map);
 }
 
 // Redraw the overlap only when the toggle is active (cheap no-op otherwise),
