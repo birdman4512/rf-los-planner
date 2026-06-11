@@ -1,0 +1,13 @@
+{
+ "generated": null,
+ "sample": true,
+ "source": "ACMA Register of Radiocommunications Licences (CC BY 4.0)",
+ "attribution": "Contains data sourced from the ACMA, licensed under CC BY 4.0.",
+ "note": "Placeholder sample data. Run the \"Build repeaters\" GitHub Action to replace this with the full nationwide ACMA dataset.",
+ "count": 3,
+ "repeaters": [
+  { "call": "VK2-SAMPLE", "name": "Sample repeater (Sydney)",    "lat": -33.800000, "lng": 151.000000, "state": "NSW", "outMhz": 146.7000, "inMhz": 146.1000, "offsetMhz": -0.6000, "antH": 30, "eirp": null },
+  { "call": "VK3-SAMPLE", "name": "Sample repeater (Melbourne)", "lat": -37.800000, "lng": 145.000000, "state": "VIC", "outMhz": 147.0000, "inMhz": 147.6000, "offsetMhz": 0.6000,  "antH": 40, "eirp": null },
+  { "call": "VK4-SAMPLE", "name": "Sample repeater (Brisbane)",  "lat": -27.470000, "lng": 153.020000, "state": "QLD", "outMhz": 438.0000, "inMhz": 433.0000, "offsetMhz": -5.0000, "antH": 25, "eirp": null }
+ ]
+}

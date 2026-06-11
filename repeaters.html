@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClearPath — Repeater Finder</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js" integrity="sha512-qtX0GLM3qX8rxJN1gyDfcnMFFrKvixfoEOwbBib9VafR5vbChV5LeE5wSI/x+IlCkTY5ZFddFDCCfaVJJNnuKQ==" crossorigin="anonymous"></script>
+<style>
+@font-face{font-family:'Barlow Condensed';font-weight:400;font-display:swap;src:url(fonts/barlow-condensed-400.woff2) format('woff2')}
+@font-face{font-family:'Barlow Condensed';font-weight:600;font-display:swap;src:url(fonts/barlow-condensed-600.woff2) format('woff2')}
+@font-face{font-family:'Barlow Condensed';font-weight:700;font-display:swap;src:url(fonts/barlow-condensed-700.woff2) format('woff2')}
+@font-face{font-family:'Share Tech Mono';font-weight:400;font-display:swap;src:url(fonts/share-tech-mono-400.woff2) format('woff2')}
+:root{--bg:#0b0f17;--panel:#111824;--border:#1e2d42;--accent:#00c8f0;--green:#2ecc71;--text:#c8daea;--muted:#4a6278}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Barlow Condensed',sans-serif;background:var(--bg);color:var(--text);padding:18px;line-height:1.4}
+h1{font-size:22px;letter-spacing:2px;text-transform:uppercase;color:#fff;margin-bottom:2px}
+h1 em{color:var(--accent);font-style:normal}
+.sub{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px;margin-bottom:14px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+label{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+input[type=number]{font-family:'Share Tech Mono',monospace;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 8px;width:96px}
+.btn{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:1px;padding:7px 12px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;text-transform:uppercase}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.primary{border-color:var(--accent);color:var(--accent)}
+.banner{border:1px solid var(--accent);background:rgba(0,200,240,.07);color:var(--text);font-size:13px;padding:9px 12px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:6px 9px;border-bottom:1px solid var(--border);white-space:nowrap}
+th{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--muted);text-transform:uppercase;cursor:pointer;user-select:none}
+th.sorted{color:var(--accent)}
+td.num,th.num{text-align:right;font-family:'Share Tech Mono',monospace}
+tr:hover td{background:rgba(255,255,255,.03)}
+a.open{color:var(--accent);text-decoration:none;font-family:'Share Tech Mono',monospace;font-size:11px}
+a.open:hover{text-decoration:underline}
+.foot{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:1px;margin-top:16px;line-height:1.6}
+.foot a{color:var(--muted)}
+.empty{color:var(--muted);padding:20px 0}
+</style>
+</head>
+<body>
+  <h1>Clear<em>Path</em> · Repeater Finder</h1>
+  <div class="sub">Find amateur repeaters near you and open them in ClearPath to check line-of-sight & coverage.</div>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <div class="controls">
+    <label for="lat">Lat</label>
+    <input type="number" id="lat" step="0.0001" placeholder="-33.8">
+    <label for="lng">Lng</label>
+    <input type="number" id="lng" step="0.0001" placeholder="151.0">
+    <button class="btn" id="btnLocate">◎ Use my location</button>
+    <label for="radius">Within (km)</label>
+    <input type="number" id="radius" step="10" min="0" value="100" style="width:70px">
+    <button class="btn primary" id="btnOpenSelected">▶ Open selected in ClearPath</button>
+  </div>
+
+  <div id="list"></div>
+
+  <div class="foot" id="attribution"></div>
+
+  <script src="share-codec.js"></script>
+  <script src="repeaters.js"></script>
+</body>
+</html>

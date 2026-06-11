@@ -2899,40 +2899,27 @@ function clearCanvas(){
 // ═══════════════════════════════════════════════════════════
 //  SHARE via URL hash
 // ═══════════════════════════════════════════════════════════
-// Serialise the full map to the compact v4 hash payload.
-// Compact schema: short keys + array-indexed refs, then LZ-string compress.
+// Serialise the full map to the compact v4 hash payload. The format lives in
+// share-codec.js (CPShareCodec) so the Repeater Finder produces identical links.
+const inpVal=id=>document.getElementById(id).value;
 function buildShareHash(){
   const idx=new Map(S.nodes.map((n,i)=>[n.id,i]));
-  const data={
-    v:4,
-    f:+document.getElementById('inpFreq').value,
-    k:document.getElementById('inpK').value,
-    tx:+document.getElementById('inpTx').value,
-    gn:+document.getElementById('inpGain').value,
-    rx:+document.getElementById('inpRx').value,
-    mg:+document.getElementById('inpMargin').value,
-    ra:+document.getElementById('inpRxAntH').value,
-    cr:+document.getElementById('inpCovRays').value,
-    cs:+document.getElementById('inpCovSamples').value,
-    cf:+document.getElementById('inpCovFresnel').value,
-    cm:+document.getElementById('inpCovMaxKm').value,
-    co:clutterEnabled()?1:0,
-    fh:+document.getElementById('inpClutterForest').value,
-    uh:+document.getElementById('inpClutterUrban').value,
-    xe:+document.getElementById('inpClutterExclude').value,
-    ca:+document.getElementById('inpClutterAtten').value,
-    // node: [lat, lng, antH, name, rfOverride?, tx?, gain?, rx?, coverageOn?, color?]
-    n:S.nodes.map(n=>{
-      const base=[+n.lat.toFixed(6),+n.lng.toFixed(6),n.antH,n.name];
-      if(n.rfOverride||n.coverageOn||n.color){
-        base.push(n.rfOverride?1:0, n.txDbm??null, n.gainDbi??null, n.rxDbm??null, n.coverageOn?1:0, n.color||0);
-      }
-      return base;
-    }),
-    e:S.edges.map(e=>[idx.get(e.aId),idx.get(e.bId),e.hidden?1:0]),
-    p:S.paths.map(p=>[p.name,p.hidden?1:0,...p.nodeIds.map(id=>idx.get(id))])
-  };
-  return 'v4:'+LZString.compressToEncodedURIComponent(JSON.stringify(data));
+  return CPShareCodec.encode({
+    rf:{
+      f:inpVal('inpFreq'), k:inpVal('inpK'), tx:inpVal('inpTx'), gn:inpVal('inpGain'),
+      rx:inpVal('inpRx'), mg:inpVal('inpMargin'), ra:inpVal('inpRxAntH'),
+      cr:inpVal('inpCovRays'), cs:inpVal('inpCovSamples'), cf:inpVal('inpCovFresnel'),
+      cm:inpVal('inpCovMaxKm'), co:clutterEnabled()?1:0,
+      fh:inpVal('inpClutterForest'), uh:inpVal('inpClutterUrban'),
+      xe:inpVal('inpClutterExclude'), ca:inpVal('inpClutterAtten')
+    },
+    nodes:S.nodes.map(n=>({
+      lat:n.lat, lng:n.lng, antH:n.antH, name:n.name, rfOverride:n.rfOverride,
+      txDbm:n.txDbm, gainDbi:n.gainDbi, rxDbm:n.rxDbm, coverageOn:n.coverageOn, color:n.color
+    })),
+    edges:S.edges.map(e=>({a:idx.get(e.aId), b:idx.get(e.bId), hidden:e.hidden})),
+    paths:S.paths.map(p=>({name:p.name, hidden:p.hidden, nodeIdx:p.nodeIds.map(id=>idx.get(id))}))
+  });
 }
 
 function openShare(){

@@ -65,6 +65,25 @@ The app itself is `index.html` (markup + styles) plus `app.js` (all logic).
 There is deliberately no inline JavaScript: the Content-Security-Policy omits
 `'unsafe-inline'` from `script-src`.
 
+## Repeater Finder
+
+`repeaters.html` is a standalone companion page (not linked from the map) that
+lists Australian amateur repeaters near a location and opens a selection in
+ClearPath as a deep-link — your location plus each repeater as linked nodes,
+with the RF frequency preset to the repeater's output band — so you can check
+line-of-sight and coverage for "what can I hear from here".
+
+The repeater dataset (`data/repeaters-au.json`) is derived from the ACMA
+Register of Radiocommunications Licences (CC BY 4.0). To refresh it, run the
+**Build repeaters** GitHub Action (Actions tab → *Build repeaters* → *Run
+workflow*); it downloads the ACMA extract, rebuilds the JSON via
+`scripts/build-repeaters.mjs`, and commits the result (which redeploys the
+site). It also runs monthly. The shipped JSON is sample data until the action
+runs for the first time.
+
+The v4 share-link format is single-sourced in `share-codec.js`, shared by the
+app and the finder.
+
 ## Publishing
 
 This repo is intended to be published with GitHub Pages.

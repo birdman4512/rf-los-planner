@@ -5,7 +5,7 @@
   "description": "Dev/CI tooling for the RF Line of Sight Planner. The app itself is static (index.html + app.js, no build step); these scripts only run in CI.",
   "type": "module",
   "scripts": {
-    "check:js": "node --check app.js",
+    "check:js": "node --check app.js && node --check share-codec.js && node --check repeaters.js && node --check scripts/build-repeaters.mjs",
     "serve": "node scripts/serve.mjs 8080",
     "test:smoke": "playwright test",
     "test": "npm run check:js && npm run test:smoke"

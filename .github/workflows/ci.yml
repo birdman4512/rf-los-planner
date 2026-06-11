@@ -69,8 +69,10 @@ jobs:
       # package.json, workflows) — keeps those off the public Pages URL.
       - name: Assemble static site
         run: |
-          mkdir -p _site
-          cp index.html app.js _site/
+          mkdir -p _site/vendor _site/data
+          cp index.html app.js share-codec.js repeaters.html repeaters.js favicon.svg _site/
+          cp vendor/polygon-clipping.min.js _site/vendor/
+          cp data/repeaters-au.json _site/data/
           cp -r fonts _site/fonts
 
       - name: Configure Pages

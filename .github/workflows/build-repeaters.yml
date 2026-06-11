@@ -1,0 +1,45 @@
+name: Build repeaters
+
+# Regenerate data/repeaters-au.json from the ACMA RRL. Trigger manually from
+# the Actions tab ("Run workflow" button) or let the monthly schedule run it.
+# A push to main from this job re-triggers CI & Deploy, so a refreshed dataset
+# is published automatically.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 17 1 * *'   # 1st of each month, 17:00 UTC
+
+permissions:
+  contents: write          # commit the regenerated dataset
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Download ACMA spectra RRL extract
+        run: curl -fSL --retry 3 -o spectra_rrl.zip https://web.acma.gov.au/rrl-updates/spectra_rrl.zip
+
+      - name: Unzip
+        run: unzip -o spectra_rrl.zip -d spectra
+
+      - name: Build repeater dataset
+        run: node scripts/build-repeaters.mjs spectra
+
+      - name: Commit if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/repeaters-au.json
+          if git diff --staged --quiet; then
+            echo "Dataset unchanged — nothing to commit."
+          else
+            git commit -m "Update repeater dataset from ACMA RRL"
+            git push
+          fi
