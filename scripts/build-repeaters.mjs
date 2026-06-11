@@ -8,19 +8,24 @@
 //    1. unzip spectra_rrl.zip -d spectra
 //    2. node scripts/build-repeaters.mjs spectra
 //
-//  No npm dependencies — pure Node (>=18). Run it via the "Build repeaters"
-//  GitHub Action (manual button) so the dataset refreshes without local Node.
+//  No npm dependencies — pure Node (>=18). The tables are large (device_details
+//  has millions of rows), so we STREAM each file line-by-line and keep only the
+//  amateur-repeater subset in memory rather than loading whole tables.
+//
+//  CSV assumption: no fields contain embedded newlines (true for ACMA spectra),
+//  so one record per line. Commas/quotes within a line are handled.
 //
 //  ── Heuristics worth verifying after the first run (counts are logged) ──
 //  • Amateur repeaters = LICENCE_TYPE_NAME ~ /amateur/i and
 //    LICENCE_CATEGORY_NAME ~ /repeater/i, status current.
 //  • A licence's transmitter device (DEVICE_TYPE ~ /^t/i) is the OUTPUT you
-//    listen to; the receiver device (/^r/i) is the INPUT; offset = in − out.
+//    listen to; the receiver (/^r/i) is the INPUT; offset = in − out.
 //  • FREQUENCY is stored in Hz → divided by 1e6 for MHz.
-//  If ACMA's field values differ from the above, adjust the filters below;
-//  the per-stage counts printed to the log make drift easy to spot.
+//  If ACMA's values differ, adjust the filters below; the per-stage counts
+//  printed to the log make drift easy to spot.
 // ─────────────────────────────────────────────────────────────────────────
-import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { createReadStream, writeFileSync, readdirSync } from 'node:fs';
+import { createInterface } from 'node:readline';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,98 +33,130 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC_DIR = process.argv[2] || 'spectra';
 const OUT = join(__dirname, '..', 'data', 'repeaters-au.json');
 
-// Minimal RFC-4180 CSV parser → array of row objects keyed by header.
-function parseCsv(text) {
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; }
+// Split one CSV line into fields (handles quoted fields, commas, "" escapes).
+function splitCsvLine(line) {
+  const out = [];
+  let field = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"') { if (line[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
       else field += c;
-    } else if (c === '"') inQuotes = true;
-    else if (c === ',') { row.push(field); field = ''; }
-    else if (c === '\r') { /* ignore */ }
-    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { out.push(field); field = ''; }
     else field += c;
   }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  if (!rows.length) return [];
-  const header = rows[0].map(h => h.trim());
-  return rows.slice(1).filter(r => r.length > 1).map(r => {
-    const o = {};
-    header.forEach((h, i) => { o[h] = (r[i] ?? '').trim(); });
-    return o;
-  });
+  out.push(field);
+  return out;
 }
 
-// Find a CSV by case-insensitive base name (ACMA ships e.g. device_details.csv).
-function loadTable(name) {
+// Locate a table CSV by case-insensitive base name (ACMA: device_details.csv …).
+function findFile(name) {
   const files = readdirSync(SRC_DIR);
   const match = files.find(f => f.toLowerCase() === `${name}.csv`)
              || files.find(f => f.toLowerCase().startsWith(name) && f.toLowerCase().endsWith('.csv'));
-  if (!match) { console.warn(`  ! table ${name}.csv not found in ${SRC_DIR}`); return []; }
-  const rows = parseCsv(readFileSync(join(SRC_DIR, match), 'utf8'));
-  console.log(`  loaded ${match}: ${rows.length} rows`);
-  return rows;
+  return match ? join(SRC_DIR, match) : null;
 }
 
+// Stream a CSV, calling onRow(fields, idx) per data row. idx maps COLUMN→index.
+// Returns the row count. Keeps no rows in memory itself.
+async function streamCsv(name, onRow) {
+  const path = findFile(name);
+  if (!path) { console.warn(`  ! table ${name}.csv not found in ${SRC_DIR}`); return 0; }
+  const rl = createInterface({ input: createReadStream(path, 'utf8'), crlfDelay: Infinity });
+  let idx = null, count = 0;
+  for await (const line of rl) {
+    if (!line) continue;
+    const fields = splitCsvLine(line);
+    if (!idx) { idx = {}; fields.forEach((h, i) => { idx[h.trim()] = i; }); continue; }
+    count++;
+    onRow(fields, idx);
+  }
+  console.log(`  streamed ${name}.csv: ${count} rows`);
+  return count;
+}
+
+const col = (f, idx, name) => (idx[name] != null ? (f[idx[name]] || '') : '');
 const hzToMhz = v => { const n = +v; return isFinite(n) && n > 0 ? +(n / 1e6).toFixed(4) : null; };
 const isCurrent = s => /current|issued|in\s*force|granted/i.test(s || '');
 
 console.log(`Reading ACMA spectra tables from ./${SRC_DIR}`);
-const sites    = loadTable('site');
-const devices  = loadTable('device_details');
-const licences = loadTable('licence');
-const clients  = loadTable('client');
 
-const siteById = new Map(sites.map(s => [s.SITE_ID, s]));
-const clientByNo = new Map(clients.map(c => [c.CLIENT_NO, c]));
-
-// Amateur repeater licences.
-const amateurRepeaters = new Map(); // LICENCE_NO → licence row
-for (const l of licences) {
-  if (/amateur/i.test(l.LICENCE_TYPE_NAME) &&
-      /repeater/i.test(l.LICENCE_CATEGORY_NAME) &&
-      isCurrent(l.STATUS_TEXT || l.STATUS)) {
-    amateurRepeaters.set(l.LICENCE_NO, l);
+// 1. Amateur repeater licences → set of LICENCE_NO + their CLIENT_NO.
+const clientOfLicence = new Map();
+await streamCsv('licence', (f, idx) => {
+  const type = col(f, idx, 'LICENCE_TYPE_NAME');
+  const cat = col(f, idx, 'LICENCE_CATEGORY_NAME');
+  const status = col(f, idx, 'STATUS_TEXT') || col(f, idx, 'STATUS');
+  if (/amateur/i.test(type) && /repeater/i.test(cat) && isCurrent(status)) {
+    clientOfLicence.set(col(f, idx, 'LICENCE_NO'), col(f, idx, 'CLIENT_NO'));
   }
-}
-console.log(`Amateur repeater licences (current): ${amateurRepeaters.size}`);
+});
+console.log(`Amateur repeater licences (current): ${clientOfLicence.size}`);
 
-// Group device records by licence.
-const devicesByLicence = new Map();
-for (const d of devices) {
-  if (!amateurRepeaters.has(d.LICENCE_NO)) continue;
-  if (!devicesByLicence.has(d.LICENCE_NO)) devicesByLicence.set(d.LICENCE_NO, []);
-  devicesByLicence.get(d.LICENCE_NO).push(d);
-}
+// 2. Device records for those licences only (the heavy table — filtered hard).
+const devOfLicence = new Map();   // LICENCE_NO → [device rec]
+const neededSites = new Set();
+await streamCsv('device_details', (f, idx) => {
+  const lic = col(f, idx, 'LICENCE_NO');
+  if (!clientOfLicence.has(lic)) return;
+  const site = col(f, idx, 'SITE_ID');
+  if (site) neededSites.add(site);
+  const rec = {
+    type: col(f, idx, 'DEVICE_TYPE'),
+    freq: col(f, idx, 'FREQUENCY') || col(f, idx, 'CARRIER_FREQ'),
+    site,
+    call: col(f, idx, 'CALL_SIGN').trim(),
+    station: col(f, idx, 'STATION_NAME').trim(),
+    height: col(f, idx, 'HEIGHT'),
+    eirp: col(f, idx, 'EIRP'),
+    eirpUnit: col(f, idx, 'EIRP_UNIT')
+  };
+  if (!devOfLicence.has(lic)) devOfLicence.set(lic, []);
+  devOfLicence.get(lic).push(rec);
+});
 
+const neededClients = new Set(clientOfLicence.values());
+
+// 3. Sites and clients — keep only the ones referenced above.
+const siteById = new Map();
+await streamCsv('site', (f, idx) => {
+  const id = col(f, idx, 'SITE_ID');
+  if (!neededSites.has(id)) return;
+  siteById.set(id, {
+    lat: +col(f, idx, 'LATITUDE'), lng: +col(f, idx, 'LONGITUDE'),
+    name: col(f, idx, 'NAME').trim(), state: col(f, idx, 'STATE').trim()
+  });
+});
+const licenceeByClient = new Map();
+await streamCsv('client', (f, idx) => {
+  const id = col(f, idx, 'CLIENT_NO');
+  if (!neededClients.has(id)) return;
+  licenceeByClient.set(id, col(f, idx, 'LICENCEE').trim());
+});
+
+// 4. Build repeater records: transmitter = output (listen), receiver = input.
 const repeaters = [];
 let skippedNoTx = 0, skippedNoSite = 0;
-for (const [licNo, devs] of devicesByLicence) {
-  const tx = devs.find(d => /^t/i.test(d.DEVICE_TYPE)) || devs[0];
-  const rx = devs.find(d => /^r/i.test(d.DEVICE_TYPE));
+for (const [lic, devs] of devOfLicence) {
+  const tx = devs.find(d => /^t/i.test(d.type)) || devs[0];
+  const rx = devs.find(d => /^r/i.test(d.type));
   if (!tx) { skippedNoTx++; continue; }
-  const site = siteById.get(tx.SITE_ID);
-  const lat = site && +site.LATITUDE, lng = site && +site.LONGITUDE;
-  if (!site || !isFinite(lat) || !isFinite(lng)) { skippedNoSite++; continue; }
-
-  const outMhz = hzToMhz(tx.FREQUENCY || tx.CARRIER_FREQ);
-  const inMhz  = rx ? hzToMhz(rx.FREQUENCY || rx.CARRIER_FREQ) : null;
-  const client = clientByNo.get(amateurRepeaters.get(licNo).CLIENT_NO);
-
+  const site = siteById.get(tx.site);
+  if (!site || !isFinite(site.lat) || !isFinite(site.lng)) { skippedNoSite++; continue; }
+  const outMhz = hzToMhz(tx.freq);
+  const inMhz = rx ? hzToMhz(rx.freq) : null;
   repeaters.push({
-    call: (tx.CALL_SIGN || '').trim() || null,
-    name: (site.NAME || tx.STATION_NAME || '').trim() || (client?.LICENCEE || '').trim() || null,
-    lat: +lat.toFixed(6),
-    lng: +lng.toFixed(6),
-    state: (site.STATE || '').trim() || null,
+    call: tx.call || null,
+    name: site.name || tx.station || licenceeByClient.get(clientOfLicence.get(lic)) || null,
+    lat: +site.lat.toFixed(6),
+    lng: +site.lng.toFixed(6),
+    state: site.state || null,
     outMhz,
     inMhz,
     offsetMhz: (outMhz != null && inMhz != null) ? +(inMhz - outMhz).toFixed(4) : null,
-    antH: tx.HEIGHT ? +(+tx.HEIGHT).toFixed(1) : null,
-    eirp: tx.EIRP ? `${tx.EIRP} ${tx.EIRP_UNIT || ''}`.trim() : null
+    antH: tx.height ? +(+tx.height).toFixed(1) : null,
+    eirp: tx.eirp ? `${tx.eirp} ${tx.eirpUnit || ''}`.trim() : null
   });
 }
 
