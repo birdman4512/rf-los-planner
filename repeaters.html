@@ -21,7 +21,7 @@ h1 em{color:var(--accent);font-style:normal}
 .sub{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px;margin-bottom:14px}
 .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 label{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
-input[type=number]{font-family:'Share Tech Mono',monospace;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 8px;width:96px}
+input[type=number],input[type=text],select{font-family:'Share Tech Mono',monospace;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 8px;width:96px}
 .btn{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:1px;padding:7px 12px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;text-transform:uppercase}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn.primary{border-color:var(--accent);color:var(--accent)}
@@ -46,6 +46,14 @@ a.open:hover{text-decoration:underline}
   <div id="banner" class="banner" hidden></div>
 
   <div class="controls">
+    <label for="search">Search</label>
+    <input type="text" id="search" placeholder="call or name" style="width:150px">
+    <label for="band">Band</label>
+    <select id="band" style="width:84px">
+      <option value="">All</option>
+      <option value="vhf">VHF</option>
+      <option value="uhf">UHF</option>
+    </select>
     <label for="lat">Lat</label>
     <input type="number" id="lat" step="0.0001" placeholder="-33.8">
     <label for="lng">Lng</label>

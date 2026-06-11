@@ -25,6 +25,7 @@ function bearingDeg(aLat, aLng, bLat, bLng) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 const compass = d => ['N','NE','E','SE','S','SW','W','NW'][Math.round(d / 45) % 8];
+const bandOf = mhz => (mhz >= 30 && mhz < 300) ? 'vhf' : (mhz >= 300 && mhz < 3000) ? 'uhf' : null;
 
 // ── RF defaults per band, mirroring ClearPath's ham VHF/UHF presets ──
 function bandDefaults(mhz) {
@@ -76,6 +77,10 @@ function visibleRepeaters() {
     return { ...r, dist, brg };
   });
   if (loc && isFinite(radius) && radius > 0) rows = rows.filter(r => r.dist <= radius);
+  const q = ($('search').value || '').trim().toLowerCase();
+  if (q) rows = rows.filter(r => `${r.call || ''} ${r.name || ''}`.toLowerCase().includes(q));
+  const band = $('band').value;
+  if (band) rows = rows.filter(r => bandOf(r.outMhz) === band);
   const dir = state.sortDir;
   rows.sort((a, b) => {
     let av, bv;
@@ -181,7 +186,8 @@ async function init() {
       render();
     }, err => alert('Location failed: ' + err.message));
   });
-  ['lat', 'lng', 'radius'].forEach(id => $(id).addEventListener('input', render));
+  ['lat', 'lng', 'radius', 'search'].forEach(id => $(id).addEventListener('input', render));
+  $('band').addEventListener('change', render);
   $('btnOpenSelected').addEventListener('click', () => openInClearPath(selectedRepeaters()));
 }
 
