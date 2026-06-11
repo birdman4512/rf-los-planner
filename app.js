@@ -204,6 +204,7 @@ function makeMarker(node) {
   marker.on('dragend', () => {
     node.elev = null; invalidateEdgesForNode(node.id); fetchElev(node);
     invalidateNodeCoverage(node, true);
+    syncShareUrl();
     // Re-analyse all links whenever a node is dragged
     if (S.edges.length > 0) runAnalysis();
   });
@@ -873,6 +874,7 @@ function pathHasAnalysedProfiles(path,edgesByPair=edgeByNodePairMap()){
 //  RENDER SIDEBAR
 // ═══════════════════════════════════════════════════════════
 function renderNodeList() {
+  syncShareUrl();
   const list = document.getElementById('wpList');
   if (S.nodes.length === 0) { list.innerHTML = '<div class="no-data">Right-click map to add nodes.</div>'; return; }
   list.innerHTML = '';
@@ -986,6 +988,7 @@ function renderNodeList() {
 }
 
 function renderEdgesPanel() {
+  syncShareUrl();
   const panel = document.getElementById('edgesPanel');
   if (!S.showLinks) { panel.innerHTML='<div class="no-data">Links hidden.</div>'; return; }
   if (!S.edges.length) { panel.innerHTML='<div class="no-data">No links yet.</div>'; return; }
@@ -1027,6 +1030,7 @@ function renderEdgesPanel() {
 }
 
 function renderPathsPanel() {
+  syncShareUrl();
   const panel = document.getElementById('pathsPanel');
   if (!S.showPaths) { panel.innerHTML='<div class="no-data">Paths hidden.</div>'; return; }
   if (!S.paths.length) { panel.innerHTML='<div class="no-data">No paths defined.</div>'; return; }
@@ -2822,8 +2826,9 @@ function clearCanvas(){
 // ═══════════════════════════════════════════════════════════
 //  SHARE via URL hash
 // ═══════════════════════════════════════════════════════════
-function openShare(){
-  // Compact schema: short keys + array-indexed refs, then LZ-string compress.
+// Serialise the full map to the compact v4 hash payload.
+// Compact schema: short keys + array-indexed refs, then LZ-string compress.
+function buildShareHash(){
   const idx=new Map(S.nodes.map((n,i)=>[n.id,i]));
   const data={
     v:4,
@@ -2854,10 +2859,30 @@ function openShare(){
     e:S.edges.map(e=>[idx.get(e.aId),idx.get(e.bId),e.hidden?1:0]),
     p:S.paths.map(p=>[p.name,p.hidden?1:0,...p.nodeIds.map(id=>idx.get(id))])
   };
-  const hash='v4:'+LZString.compressToEncodedURIComponent(JSON.stringify(data));
-  const url=window.location.href.split('#')[0]+'#'+hash;
+  return 'v4:'+LZString.compressToEncodedURIComponent(JSON.stringify(data));
+}
+
+function openShare(){
+  const url=window.location.href.split('#')[0]+'#'+buildShareHash();
   document.getElementById('shareUrl').textContent=url;
   document.getElementById('shareModal').classList.add('open');
+}
+
+// Keep the address bar in sync with the current map so the URL is always a
+// copy-pasteable share link. Debounced, and suppressed until the initial
+// load-from-hash has run so we never clobber an incoming shared link.
+let _urlSyncTimer=null;
+function syncShareUrl(){
+  if(!S._ready) return;
+  clearTimeout(_urlSyncTimer);
+  _urlSyncTimer=setTimeout(()=>{
+    try{
+      const base=window.location.pathname+window.location.search;
+      // Empty map → strip the hash entirely rather than encode nothing.
+      const url=S.nodes.length ? base+'#'+buildShareHash() : base;
+      history.replaceState(null,'',url);
+    }catch(err){ console.warn('URL sync failed',err); }
+  },400);
 }
 function closeShare(){document.getElementById('shareModal').classList.remove('open');}
 function openSettings(){
@@ -3294,7 +3319,7 @@ window.addEventListener('load',()=>{
   initCollapsibles();
   renderNodeList();
   setTimeout(()=>S.map.invalidateSize(),200);
-  setTimeout(()=>{S.map.invalidateSize();loadFromHash();syncPresetFromFreq();refreshSettingsSummary();maybeShowHelp();},600);
+  setTimeout(()=>{S.map.invalidateSize();loadFromHash();syncPresetFromFreq();refreshSettingsSummary();maybeShowHelp();S._ready=true;},600);
 });
 window.addEventListener('resize',()=>{
   if(S.map) S.map.invalidateSize();
