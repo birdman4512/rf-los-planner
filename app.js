@@ -2200,9 +2200,12 @@ function renderCoverageOverlap(){
   const group = L.layerGroup();
   for(const poly of merged){
     const latlngs = poly.map(ring => ring.map(pt => [pt[1], pt[0]])); // → [lat,lng]
+    // Solid, saturated fill so the overlap AREA reads as a region, not an
+    // outline (a lens boundary sits on the coverage perimeters, so a heavy
+    // stroke looks like "the perimeter is highlighted").
     group.addLayer(L.polygon(latlngs, {
-      color: '#ffd166', weight: 2, opacity: 0.95, dashArray: '5 4',
-      fillColor: '#ffd166', fillOpacity: 0.18, interactive: false
+      color: '#ffffff', weight: 1, opacity: 0.5,
+      fillColor: '#ff2fd0', fillOpacity: 0.45, interactive: false
     }));
   }
   S.overlapLayer = group.addTo(S.map);
