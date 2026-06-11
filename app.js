@@ -1427,6 +1427,8 @@ async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
 // ═══════════════════════════════════════════════════════════
 const _clutterImgCache = new Map(); // url → Promise<{data,w,h}>
 let _clutterUnavailable = false;    // sticky: once load fails, stop retrying this session
+let _canopyUnavailable = false;     // sticky: GFW/Meta canopy is flaky — skip after first failure
+const CLUTTER_IMG_TIMEOUT_MS = 20000; // fail a hung tile fast instead of waiting ~90s for the browser
 
 function worldCoverClassFromRgb(r,g,b,a){
   if(a === 0) return 0;
@@ -1444,7 +1446,15 @@ function loadClutterImage(url, w, h){
   const p = new Promise((resolve, reject)=>{
     const img = new Image();
     img.crossOrigin = 'anonymous';
+    let done = false;
+    const timer = setTimeout(() => {
+      if(done) return;
+      done = true;
+      img.src = '';   // abort the in-flight request
+      reject(new Error('image request timed out'));
+    }, CLUTTER_IMG_TIMEOUT_MS);
     img.onload = () => {
+      if(done) return; done = true; clearTimeout(timer);
       try{
         const cvs = document.createElement('canvas');
         cvs.width = w; cvs.height = h;
@@ -1454,7 +1464,7 @@ function loadClutterImage(url, w, h){
         resolve({data,w,h});
       }catch(e){ reject(new Error(`canvas decode failed (${e.message||e})`)); }
     };
-    img.onerror = () => reject(new Error('image request failed'));
+    img.onerror = () => { if(done) return; done = true; clearTimeout(timer); reject(new Error('image request failed')); };
     img.src = url;
   });
   _clutterImgCache.set(url, p);
@@ -1627,6 +1637,7 @@ async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, height
 }
 
 async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
+  if(_canopyUnavailable){ dlog('Canopy source status: skipped (unavailable earlier this session)','warn'); return null; }
   const midLat = (minLat + maxLat) / 2;
   const dLat = stepM / 111320;
   const dLng = stepM / (111320 * Math.max(0.05, Math.cos(midLat * Math.PI/180)));
@@ -1663,6 +1674,7 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
     }
   }
   if(!loaded){
+    _canopyUnavailable = true; // don't re-wait on the next site this session
     dlog('Canopy source status: GFW/Meta-WRI unavailable (using WorldCover fallback)','warn');
     return null;
   }
