@@ -2234,15 +2234,27 @@ function renderCoverageOverlap(){
   const ctx = cvs.getContext('2d');
   const img = ctx.createImageData(W, H);
   const data = img.data;
+  // Pass 1: mark cells reached by ≥2 nodes.
+  const over = new Uint8Array(W * H);
   for(let yy = 0; yy < H; yy++){
     const lat = maxLat - (yy + 0.5) / H * (maxLat - minLat);
     for(let xx = 0; xx < W; xx++){
       const lng = minLng + (xx + 0.5) / W * (maxLng - minLng);
       let cnt = 0;
       for(const n of nodes){ if(pointInCoverage(n, lat, lng) && ++cnt >= 2) break; }
-      if(cnt >= 2){
-        const idx = (yy * W + xx) * 4;
-        data[idx] = 255; data[idx+1] = 47; data[idx+2] = 208; data[idx+3] = 150; // magenta
+      if(cnt >= 2) over[yy * W + xx] = 1;
+    }
+  }
+  // Pass 2: outline — paint only overlap cells that border a non-overlap cell.
+  for(let yy = 0; yy < H; yy++){
+    for(let xx = 0; xx < W; xx++){
+      const i = yy * W + xx;
+      if(!over[i]) continue;
+      const edge = xx === 0 || yy === 0 || xx === W - 1 || yy === H - 1
+        || !over[i-1] || !over[i+1] || !over[i-W] || !over[i+W];
+      if(edge){
+        const idx = i * 4;
+        data[idx] = 255; data[idx+1] = 47; data[idx+2] = 208; data[idx+3] = 255; // magenta outline
       }
     }
   }
