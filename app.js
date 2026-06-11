@@ -2273,15 +2273,16 @@ function renderCoverageOverlap(){
   const W = Math.max(2, Math.min(600, Math.round(wM / 120)));
   const H = Math.max(2, Math.min(600, Math.round(hM / 120)));
   const latSpan = maxLat - minLat, lngSpan = maxLng - minLng;
-  // Mark cells reached by ≥2 nodes (real per-sample coverage).
+  // "all" → a cell must be reached by every coverage-enabled node; "2+" → ≥2.
+  const need = S.overlapMode === 'all' ? nodes.length : 2;
   const over = new Uint8Array(W * H);
   for(let yy = 0; yy < H; yy++){
     const lat = maxLat - (yy + 0.5) / H * latSpan;
     for(let xx = 0; xx < W; xx++){
       const lng = minLng + (xx + 0.5) / W * lngSpan;
       let cnt = 0;
-      for(const n of nodes){ if(pointInCoverage(n, lat, lng) && ++cnt >= 2) break; }
-      if(cnt >= 2) over[yy * W + xx] = 1;
+      for(const n of nodes) if(pointInCoverage(n, lat, lng)) cnt++;
+      if(cnt >= need) over[yy * W + xx] = 1;
     }
   }
   const at = (g, x, y) => (x >= 0 && x < W && y >= 0 && y < H) ? g[y * W + x] : 0;
@@ -3453,6 +3454,7 @@ function initStaticHandlers(){
   on('btnCovAllOff','click',()=>setAllCoverage(false));
   on('btnCovComputeAll','click',computeAllCoverage);
   on('btnCovOverlap','click',toggleOverlap);
+  on('overlapMode','change',e=>{ S.overlapMode = e.target.value; refreshOverlap(); });
   // Sidebar
   on('settingsSummary','click',openSettings);
   on('btnNodesCollapse','click',ev=>{ ev.stopPropagation(); setAllNodesCollapsed(true); });
