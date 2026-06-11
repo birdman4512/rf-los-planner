@@ -75,14 +75,12 @@ const WORLDCOVER_WMS_SOURCES = [
   { name:'Terrascope TiTiler', url:'https://titiler.terrascope.be/wms', layer:'esa-worldcover-map-10m-2021-v2_map', time:'2021-01-01' },
   { name:'Terrascope legacy', url:'https://services.terrascope.be/wms/v2', layer:'WORLDCOVER_2021_MAP' }
 ];
-// GFW's tile proxy (the only browser-usable way to window the 696 MB Meta COGs)
-// is currently down — every request times out — so canopy is disabled and
-// clutter comes from ESA WorldCover alone. Flip to true if GFW recovers.
-const CANOPY_ENABLED = false;
+// Per-pixel Meta/WRI canopy height read in-browser from the Cloud-Optimised
+// GeoTIFFs via geotiff.js, through our own Cloudflare Worker (CORS + Range) —
+// the GFW titiler that used to do this is down. Set the Worker URL below.
+const CANOPY_ENABLED = true;
+const CANOPY_PROXY_BASE = 'https://clearpath-clutter.nbird.com.au';
 const CANOPY_TILE_Z = 9;
-const CANOPY_MAX_M = 60; // PNG rescale ceiling for Meta/WRI canopy height.
-const CANOPY_COG_BASE = 'https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/';
-const CANOPY_GFW_BBOX = 'https://tiles.globalforestwatch.org/cog/basic/bbox/';
 const CLUTTER_ATTEN_DB_PER_M_915 = 0.10; // reference loss while LOS passes through canopy/building clutter
 const CLUTTER_ATTEN_CAP_DB = 45;         // avoid treating clutter as infinite terrain
 // WorldCover classes: 10 Tree, 20 Shrub, 30 Grass, 40 Crop, 50 Built-up,
@@ -1564,16 +1562,32 @@ function canopyTileKeysForBbox(minLat, minLng, maxLat, maxLng){
   return keys;
 }
 
-function canopyBboxUrl(tile, minLat, minLng, maxLat, maxLng, cols, rows){
-  const cog = `${CANOPY_COG_BASE}${tile}.tif`;
-  const qs = new URLSearchParams({
-    url: cog,
-    rescale: `0,${CANOPY_MAX_M}`,
-    colormap_name: 'gray',
-    return_mask: 'true',
-    resampling: 'bilinear'
+// Lazy-load the chunky geotiff.js (~540 KB) only when canopy is first needed.
+let _geotiffPromise = null;
+function loadGeotiff(){
+  if(window.GeoTIFF) return Promise.resolve(window.GeoTIFF);
+  if(_geotiffPromise) return _geotiffPromise;
+  _geotiffPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'vendor/geotiff.min.js';
+    s.onload = () => window.GeoTIFF ? resolve(window.GeoTIFF) : reject(new Error('geotiff global missing'));
+    s.onerror = () => reject(new Error('failed to load geotiff.js'));
+    document.head.appendChild(s);
   });
-  return `${CANOPY_GFW_BBOX}${minLng},${minLat},${maxLng},${maxLat}/${cols}x${rows}.png?${qs.toString()}`;
+  return _geotiffPromise;
+}
+
+// Web Mercator (EPSG:3857) ↔ lon/lat. The canopy COGs are tagged 3857 but the
+// data is actually 4326; we read each tile in whatever space its bounding box
+// reports, converting query coords to match.
+const WEBMERC_R = 6378137;
+function lngLatToMerc(lng, lat){
+  return [ lng * Math.PI/180 * WEBMERC_R,
+           Math.log(Math.tan(Math.PI/4 + lat*Math.PI/360)) * WEBMERC_R ];
+}
+function mercToLngLat(x, y){
+  return [ x / WEBMERC_R * 180/Math.PI,
+           (2*Math.atan(Math.exp(y / WEBMERC_R)) - Math.PI/2) * 180/Math.PI ];
 }
 
 // Build a land-cover→clutter-height sampler over [minLat,minLng]–[maxLat,maxLng]
@@ -1654,38 +1668,67 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
     dlog(`Canopy source status: skipped (${tiles.length} tiles would be needed for this bbox)`,'warn');
     return null;
   }
+  let GeoTIFF;
+  try{ GeoTIFF = await loadGeotiff(); }
+  catch(e){ _canopyUnavailable = true; dlog(`Canopy source status: geotiff.js failed to load — ${e.message||e}`,'err'); return null; }
+
   const heights = new Float32Array(cols * rows);
+  const lngSpan = maxLng - minLng, latSpan = maxLat - minLat;
   let loaded = 0, nonZero = 0, maxH = 0;
-  dlog(`Meta/WRI canopy via GFW: fetching ${tiles.length} tile${tiles.length>1?'s':''} (${cols}×${rows}) in parallel …`);
-  // Fetch all tiles concurrently — GFW's cold COG read dominates, so overlapping
-  // them turns a sum of latencies into the slowest single one.
+  dlog(`Meta/WRI canopy via COG: reading ${tiles.length} tile${tiles.length>1?'s':''} (${cols}×${rows}) …`);
+  // Read each tile's window concurrently; geotiff.js range-reads only the needed
+  // COG overview bytes through the Cloudflare proxy.
   const results = await Promise.all(tiles.map(async tile => {
-    const url = canopyBboxUrl(tile, minLat, minLng, maxLat, maxLng, cols, rows);
-    try { return { tile, img: await loadClutterImage(url, cols, rows) }; }
-    catch(e){ dlog(`Canopy source status: tile ${tile} FAILED — ${e.message||e}`,'err'); return { tile, img: null }; }
+    const url = `${CANOPY_PROXY_BASE}/chm/${tile}.tif`;
+    try{
+      const tiff = await GeoTIFF.fromUrl(url);
+      const image = await tiff.getImage();
+      const bb = image.getBoundingBox();                 // [minX,minY,maxX,maxY] in tile's space
+      const is3857 = Math.max(Math.abs(bb[0]), Math.abs(bb[2])) > 360;
+      const [qMinX, qMinY] = is3857 ? lngLatToMerc(minLng, minLat) : [minLng, minLat];
+      const [qMaxX, qMaxY] = is3857 ? lngLatToMerc(maxLng, maxLat) : [maxLng, maxLat];
+      const x0 = Math.max(bb[0], qMinX), x1 = Math.min(bb[2], qMaxX);
+      const y0 = Math.max(bb[1], qMinY), y1 = Math.min(bb[3], qMaxY);
+      if(x0 >= x1 || y0 >= y1) return { tile, ok: true, empty: true };
+      const sw = Math.max(1, Math.min(cols, Math.round((x1 - x0) / (qMaxX - qMinX) * cols)));
+      const sh = Math.max(1, Math.min(rows, Math.round((y1 - y0) / (qMaxY - qMinY) * rows)));
+      const nodata = typeof image.getGDALNoData === 'function' ? image.getGDALNoData() : null;
+      const rasters = await tiff.readRasters({ bbox: [x0, y0, x1, y1], width: sw, height: sh, resampleMethod: 'nearest' });
+      return { tile, ok: true, band: rasters[0], sw, sh, x0, x1, y0, y1, is3857, nodata };
+    }catch(e){
+      dlog(`Canopy source status: tile ${tile} FAILED — ${e.message||e}`,'err');
+      return { tile, ok: false };
+    }
   }));
-  for(const { img } of results){
-    if(!img) continue;
+  for(const r of results){
+    if(!r.ok) continue;
     loaded++;
-    for(let i=0,j=0;i<img.data.length;i+=4,j++){
-      if(img.data[i+3] === 0) continue;
-      const h = (img.data[i] / 255) * CANOPY_MAX_M;
-      if(!(h > 0.25)) continue;
-      if(h > heights[j]){
-        if(heights[j] === 0) nonZero++;
-        heights[j] = h;
-        if(h > maxH) maxH = h;
+    if(r.empty) continue;
+    const { band, sw, sh, x0, x1, y0, y1, is3857, nodata } = r;
+    for(let sy = 0; sy < sh; sy++){
+      const yImg = y1 - (sy + 0.5) / sh * (y1 - y0);     // row 0 = north (max y)
+      for(let sx = 0; sx < sw; sx++){
+        let v = band[sy * sw + sx];
+        if(v == null || !isFinite(v) || (nodata != null && v === nodata)) continue;
+        if(!(v > 0.25) || v > 120) continue;
+        const xImg = x0 + (sx + 0.5) / sw * (x1 - x0);
+        const [lng, lat] = is3857 ? mercToLngLat(xImg, yImg) : [xImg, yImg];
+        const gc = Math.floor((lng - minLng) / lngSpan * cols);
+        const gr = Math.floor((maxLat - lat) / latSpan * rows);
+        if(gc < 0 || gc >= cols || gr < 0 || gr >= rows) continue;
+        const gi = gr * cols + gc;
+        if(v > heights[gi]){ if(heights[gi] === 0) nonZero++; heights[gi] = v; if(v > maxH) maxH = v; }
       }
     }
   }
   if(!loaded){
-    _canopyUnavailable = true; // don't re-wait on the next site this session
-    dlog('Canopy source status: GFW/Meta-WRI unavailable (using WorldCover fallback)','warn');
+    _canopyUnavailable = true; // don't re-try on the next site this session
+    dlog('Canopy source status: COG reads failed (using WorldCover fallback)','warn');
     return null;
   }
-  dlog(`Canopy source status: GFW/Meta-WRI OK (${loaded}/${tiles.length} tile${tiles.length>1?'s':''}, ${nonZero}/${heights.length} pixels >0m, max ${maxH.toFixed(1)}m)`,'ok');
+  dlog(`Canopy source status: Meta/WRI COG OK (${loaded}/${tiles.length} tile${tiles.length>1?'s':''}, ${nonZero}/${heights.length} pixels >0m, max ${maxH.toFixed(1)}m)`,'ok');
   return {
-    source: 'GFW/Meta-WRI canopy height',
+    source: 'Meta/WRI canopy height (COG)',
     heightAt(lat, lng){
       const c = Math.max(0, Math.min(cols-1, Math.floor((lng - minLng) / (maxLng - minLng) * cols)));
       const r = Math.max(0, Math.min(rows-1, Math.floor((maxLat - lat) / (maxLat - minLat) * rows)));
