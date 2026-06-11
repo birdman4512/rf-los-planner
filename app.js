@@ -2162,17 +2162,32 @@ function renderCoveragePolygon(node){
 }
 
 // ── Coverage overlap highlight ──────────────────────────────
-// Highlights where two or more nodes' coverage footprints overlap. Uses each
-// node's coverage envelope (the outline polygon, coverageRays) intersected
-// pairwise via polygon-clipping, then unioned. Toggled by a button; redrawn
-// whenever coverage changes while the toggle is on. Coordinates are converted
-// to GeoJSON [lng,lat] for the clipper and back to Leaflet [lat,lng].
-function nodeCoverageRing(node){
+// Highlights where two or more nodes' coverage footprints overlap, intersected
+// pairwise via polygon-clipping then unioned. Toggled by a button; redrawn when
+// coverage changes while on. Coords are GeoJSON [lng,lat] for the clipper,
+// converted back to Leaflet [lat,lng] for rendering.
+//
+// Each node's coverage is built as PETALS, not the simple outline: a run of
+// consecutive covered rays becomes one polygon (centre → ray tips → centre),
+// and blocked rays (reach ≈ 0) break the run. This matches the real, notchy
+// coverage — connecting every ray tip with straight lines (the old approach)
+// cross-cut across blocked directions and grossly over-stated the area.
+function nodeCoveragePolygon(node){
   const rays = node.coverageRays;
   if(!rays || rays.length < 3) return null;
-  const ring = rays.map(r => [r.latlng[1], r.latlng[0]]); // [lng,lat]
-  ring.push(ring[0]);                                       // close
-  return [ring];                                            // GeoJSON Polygon
+  const center = [node.lng, node.lat];
+  const polys = [];
+  let cur = null;
+  const flush = () => {
+    if(cur && cur.length >= 2) polys.push([[center, ...cur, center]]);
+    cur = null;
+  };
+  for(let i = 0; i < rays.length; i++){
+    if(rays[i].dist > 1) (cur || (cur = [])).push([rays[i].latlng[1], rays[i].latlng[0]]);
+    else flush();
+  }
+  flush();
+  return polys.length ? polys : null;   // GeoJSON MultiPolygon (array of polygons)
 }
 
 function renderCoverageOverlap(){
@@ -2181,7 +2196,7 @@ function renderCoverageOverlap(){
   if(typeof polygonClipping === 'undefined') return;
   const polys = S.nodes
     .filter(n => n.coverageOn)
-    .map(nodeCoverageRing)
+    .map(nodeCoveragePolygon)
     .filter(Boolean);
   if(polys.length < 2) return;
   const inters = [];
