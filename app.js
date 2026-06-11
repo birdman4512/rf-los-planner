@@ -2229,46 +2229,52 @@ function renderCoverageOverlap(){
   const hM = (maxLat - minLat) * 111320;
   const W = Math.max(2, Math.min(600, Math.round(wM / 120)));
   const H = Math.max(2, Math.min(600, Math.round(hM / 120)));
-  const cvs = document.createElement('canvas');
-  cvs.width = W; cvs.height = H;
-  const ctx = cvs.getContext('2d');
-  const img = ctx.createImageData(W, H);
-  const data = img.data;
-  // Pass 1: mark cells reached by ≥2 nodes.
+  const latSpan = maxLat - minLat, lngSpan = maxLng - minLng;
+  // Mark cells reached by ≥2 nodes (real per-sample coverage).
   const over = new Uint8Array(W * H);
   for(let yy = 0; yy < H; yy++){
-    const lat = maxLat - (yy + 0.5) / H * (maxLat - minLat);
+    const lat = maxLat - (yy + 0.5) / H * latSpan;
     for(let xx = 0; xx < W; xx++){
-      const lng = minLng + (xx + 0.5) / W * (maxLng - minLng);
+      const lng = minLng + (xx + 0.5) / W * lngSpan;
       let cnt = 0;
       for(const n of nodes){ if(pointInCoverage(n, lat, lng) && ++cnt >= 2) break; }
       if(cnt >= 2) over[yy * W + xx] = 1;
     }
   }
-  // Pass 2: outline — paint only overlap cells that border a non-overlap cell.
-  for(let yy = 0; yy < H; yy++){
-    for(let xx = 0; xx < W; xx++){
-      const i = yy * W + xx;
-      if(!over[i]) continue;
-      const edge = xx === 0 || yy === 0 || xx === W - 1 || yy === H - 1
-        || !over[i-1] || !over[i+1] || !over[i-W] || !over[i+W];
-      if(edge){
-        const idx = i * 4;
-        data[idx] = 255; data[idx+1] = 47; data[idx+2] = 208; data[idx+3] = 255; // magenta outline
-      }
+  const at = (g, x, y) => (x >= 0 && x < W && y >= 0 && y < H) ? g[y * W + x] : 0;
+  // Light morphological close (dilate then erode) merges speckle and fills
+  // single-cell shadow holes so the outline is coherent rather than noisy.
+  const dil = new Uint8Array(W * H);
+  for(let y = 0; y < H; y++) for(let x = 0; x < W; x++)
+    dil[y*W+x] = (at(over,x,y)||at(over,x-1,y)||at(over,x+1,y)||at(over,x,y-1)||at(over,x,y+1)) ? 1 : 0;
+  const grid = new Uint8Array(W * H);
+  for(let y = 0; y < H; y++) for(let x = 0; x < W; x++)
+    grid[y*W+x] = (at(dil,x,y)&&at(dil,x-1,y)&&at(dil,x+1,y)&&at(dil,x,y-1)&&at(dil,x,y+1)) ? 1 : 0;
+  // Trace boundary: each cell edge facing a non-overlap cell becomes a thin
+  // line segment (a true outline, never a fill — even for 1-cell-wide patches).
+  const latAt = r => maxLat - r / H * latSpan, lngAt = c => minLng + c / W * lngSpan;
+  const segs = [];
+  for(let y = 0; y < H; y++){
+    for(let x = 0; x < W; x++){
+      if(!grid[y*W+x]) continue;
+      const T = latAt(y), B = latAt(y+1), Ln = lngAt(x), Rn = lngAt(x+1);
+      if(!at(grid,x-1,y)) segs.push([[T,Ln],[B,Ln]]);
+      if(!at(grid,x+1,y)) segs.push([[T,Rn],[B,Rn]]);
+      if(!at(grid,x,y-1)) segs.push([[T,Ln],[T,Rn]]);
+      if(!at(grid,x,y+1)) segs.push([[B,Ln],[B,Rn]]);
     }
   }
-  ctx.putImageData(img, 0, 0);
-  // Dedicated pane above the coverage fills (overlayPane=400) but below markers
-  // (600), so the overlap reads on top of — not behind — the blue/orange fills.
+  if(!segs.length) return;
+  // Dedicated pane above the coverage fills (overlayPane=400) but below markers (600).
   if(!S.map.getPane('overlapPane')){
     S.map.createPane('overlapPane');
     const p = S.map.getPane('overlapPane');
     p.style.zIndex = 450;
     p.style.pointerEvents = 'none';
   }
-  S.overlapLayer = L.imageOverlay(cvs.toDataURL(), [[minLat, minLng], [maxLat, maxLng]],
-    { opacity: 1, interactive: false, pane: 'overlapPane' }).addTo(S.map);
+  S.overlapLayer = L.polyline(segs, {
+    color: '#ff2fd0', weight: 2, opacity: 0.95, interactive: false, pane: 'overlapPane'
+  }).addTo(S.map);
 }
 
 // Redraw the overlap only when the toggle is active (cheap no-op otherwise),
