@@ -52,10 +52,13 @@ a.open:hover{text-decoration:underline}
     <label for="search">Search</label>
     <input type="text" id="search" placeholder="call or name" style="width:150px">
     <label for="band">Band</label>
-    <select id="band" style="width:84px">
-      <option value="">All</option>
-      <option value="vhf">VHF</option>
-      <option value="uhf">UHF</option>
+    <select id="band" style="width:104px">
+      <option value="">All bands</option>
+      <option value="10m">10 m</option>
+      <option value="6m">6 m</option>
+      <option value="2m">2 m</option>
+      <option value="70cm">70 cm</option>
+      <option value="23cm">23 cm</option>
     </select>
     <label for="lat">Lat</label>
     <input type="number" id="lat" step="0.0001" placeholder="-33.8">
@@ -72,7 +75,7 @@ a.open:hover{text-decoration:underline}
   <div class="foot" id="attribution"></div>
 
   <!-- Bump ?v= when changing the finder JS to bust the 4-hour asset cache. -->
-  <script src="share-codec.js?v=20260611-2"></script>
-  <script src="repeaters.js?v=20260611-2"></script>
+  <script src="share-codec.js?v=20260612-2"></script>
+  <script src="repeaters.js?v=20260612-2"></script>
 </body>
 </html>

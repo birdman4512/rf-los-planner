@@ -25,7 +25,16 @@ function bearingDeg(aLat, aLng, bLat, bLng) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 const compass = d => ['N','NE','E','SE','S','SW','W','NW'][Math.round(d / 45) % 8];
-const bandOf = mhz => (mhz >= 30 && mhz < 300) ? 'vhf' : (mhz >= 300 && mhz < 3000) ? 'uhf' : null;
+// Classify by amateur band rather than the ambiguous VHF/UHF split (6 m is
+// technically VHF but hams don't think of it that way).
+function bandOf(m){
+  if(m >= 28   && m < 29.71) return '10m';
+  if(m >= 50   && m < 54)    return '6m';
+  if(m >= 144  && m < 148)   return '2m';
+  if(m >= 430  && m < 450)   return '70cm';
+  if(m >= 1240 && m < 1300)  return '23cm';
+  return null;
+}
 
 // ── RF defaults per band, mirroring ClearPath's ham VHF/UHF presets ──
 function bandDefaults(mhz) {
