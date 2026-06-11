@@ -37,10 +37,11 @@ export default {
     const range = request.headers.get('Range');
     if (range) fwd.set('Range', range);
 
+    // NOTE: do NOT set cf.cacheEverything — it makes Cloudflare strip the Range
+    // header and return the full ~730 MB object (200) instead of a 206 slice.
     const upstream = await fetch(S3_BASE + pathname, {
       method: request.method,
       headers: fwd,
-      cf: { cacheTtl: 86400, cacheEverything: true },   // let Cloudflare cache the byte ranges
     });
 
     const headers = new Headers(upstream.headers);
