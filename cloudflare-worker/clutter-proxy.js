@@ -46,6 +46,10 @@ export default {
 
     const headers = new Headers(upstream.headers);
     for (const [k, v] of Object.entries(corsHeaders())) headers.set(k, v);
+    // Don't let the browser cache a full 200 — it breaks geotiff.js range reads
+    // (it serves the cached full body back for Range requests). Requires the
+    // zone's Browser Cache TTL = "Respect Existing Headers" for this to stick.
+    headers.set('Cache-Control', 'no-store');
     return new Response(upstream.body, {
       status: upstream.status,
       statusText: upstream.statusText,
