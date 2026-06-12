@@ -75,13 +75,14 @@ const WORLDCOVER_WMS_SOURCES = [
   { name:'Terrascope TiTiler', url:'https://titiler.terrascope.be/wms', layer:'esa-worldcover-map-10m-2021-v2_map', time:'2021-01-01' },
   { name:'Terrascope legacy', url:'https://services.terrascope.be/wms/v2', layer:'WORLDCOVER_2021_MAP' }
 ];
-// Per-pixel Meta/WRI canopy height. The COGs have NO overviews and are 1 m
-// (65536² px), so a browser windowed read of a km-scale area needs hundreds of
-// MB in one array and fails ("Array buffer allocation failed"). Disabled until
-// a server-side tiler (titiler) provides downsampled windows. WorldCover land
-// cover supplies clutter heights meanwhile (tune Forest(m) for your area).
-const CANOPY_ENABLED = false;
+// Per-pixel Meta/WRI canopy height, read in-browser (geotiff.js) from the COGs
+// via the Cloudflare Worker. The COGs have NO overviews and are 1 m (65536²),
+// so reading the whole coverage area would need hundreds of MB in one array.
+// Instead canopy is OPT-IN (a toggle) and capped to a small ring around each
+// site, read in memory-safe chunks. Outside the ring, WorldCover Forest(m)
+// applies. See docs/canopy-titiler.md for the server-side alternative.
 const CANOPY_PROXY_BASE = 'https://clearpath-clutter.nbird.com.au';
+const CANOPY_RADIUS_M = 5000;  // only fetch measured canopy within this radius of a site
 const CANOPY_TILE_Z = 9;
 const CLUTTER_ATTEN_DB_PER_M_915 = 0.10; // reference loss while LOS passes through canopy/building clutter
 const CLUTTER_ATTEN_CAP_DB = 45;         // avoid treating clutter as infinite terrain
@@ -1657,70 +1658,78 @@ async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, height
 }
 
 async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
-  if(!CANOPY_ENABLED){ dlog('Canopy source: disabled — using WorldCover land cover for clutter','warn'); return null; }
+  if(!canopyEnabled()) return null;            // opt-in; quiet when off
   if(_canopyUnavailable){ dlog('Canopy source status: skipped (unavailable earlier this session)','warn'); return null; }
   const midLat = (minLat + maxLat) / 2;
   const dLat = stepM / 111320;
   const dLng = stepM / (111320 * Math.max(0.05, Math.cos(midLat * Math.PI/180)));
   const cols = Math.min(2048, Math.max(2, Math.ceil((maxLng - minLng) / dLng) + 1));
   const rows = Math.min(2048, Math.max(2, Math.ceil((maxLat - minLat) / dLat) + 1));
-  const tiles = canopyTileKeysForBbox(minLat, minLng, maxLat, maxLng);
+  const lngSpan = maxLng - minLng, latSpan = maxLat - minLat;
+
+  // The COGs are 1 m with no overviews, so cap the full-res read to a ring
+  // around the site; the rest of the coverage area keeps WorldCover Forest(m).
+  const cLat = midLat, cLng = (minLng + maxLng) / 2;
+  const rLat = CANOPY_RADIUS_M / 111320;
+  const rLng = CANOPY_RADIUS_M / (111320 * Math.max(0.05, Math.cos(cLat * Math.PI/180)));
+  const ringMinLat = Math.max(minLat, cLat - rLat), ringMaxLat = Math.min(maxLat, cLat + rLat);
+  const ringMinLng = Math.max(minLng, cLng - rLng), ringMaxLng = Math.min(maxLng, cLng + rLng);
+  const tiles = canopyTileKeysForBbox(ringMinLat, ringMinLng, ringMaxLat, ringMaxLng);
   if(!tiles.length) return null;
-  if(tiles.length > 12){
-    dlog(`Canopy source status: skipped (${tiles.length} tiles would be needed for this bbox)`,'warn');
-    return null;
-  }
+
   let GeoTIFF;
   try{ GeoTIFF = await loadGeotiff(); }
   catch(e){ _canopyUnavailable = true; dlog(`Canopy source status: geotiff.js failed to load — ${e.message||e}`,'err'); return null; }
 
   const heights = new Float32Array(cols * rows);
-  const lngSpan = maxLng - minLng, latSpan = maxLat - minLat;
-  let loaded = 0, nonZero = 0, maxH = 0;
-  dlog(`Meta/WRI canopy via COG: reading ${tiles.length} tile${tiles.length>1?'s':''} (${cols}×${rows}) …`);
-  // Read each tile's window concurrently; geotiff.js range-reads only the needed
-  // COG overview bytes through the Cloudflare proxy.
-  const results = await Promise.all(tiles.map(async tile => {
+  let loaded = 0, nonZero = 0, maxH = 0, chunks = 0;
+  const CHUNK = 2048;   // max px per axis read at once (≤16 MB Float32) — keeps memory safe
+  dlog(`Meta/WRI canopy via COG: reading ${(CANOPY_RADIUS_M/1000).toFixed(0)}km ring from ${tiles.length} tile${tiles.length>1?'s':''} … (slow)`);
+  for(const tile of tiles){
     const url = `${CANOPY_PROXY_BASE}/chm/${tile}.tif`;
     try{
       const tiff = await GeoTIFF.fromUrl(url);
       const image = await tiff.getImage();
-      const bb = image.getBoundingBox();                 // [minX,minY,maxX,maxY] in tile's space
+      const bb = image.getBoundingBox();                 // tile space: 3857 metres or 4326 deg
+      const imgW = image.getWidth(), imgH = image.getHeight();
+      const resX = (bb[2] - bb[0]) / imgW, resY = (bb[3] - bb[1]) / imgH;   // resY > 0
       const is3857 = Math.max(Math.abs(bb[0]), Math.abs(bb[2])) > 360;
-      const [qMinX, qMinY] = is3857 ? lngLatToMerc(minLng, minLat) : [minLng, minLat];
-      const [qMaxX, qMaxY] = is3857 ? lngLatToMerc(maxLng, maxLat) : [maxLng, maxLat];
-      const x0 = Math.max(bb[0], qMinX), x1 = Math.min(bb[2], qMaxX);
-      const y0 = Math.max(bb[1], qMinY), y1 = Math.min(bb[3], qMaxY);
-      if(x0 >= x1 || y0 >= y1) return { tile, ok: true, empty: true };
-      const sw = Math.max(1, Math.min(cols, Math.round((x1 - x0) / (qMaxX - qMinX) * cols)));
-      const sh = Math.max(1, Math.min(rows, Math.round((y1 - y0) / (qMaxY - qMinY) * rows)));
       const nodata = typeof image.getGDALNoData === 'function' ? image.getGDALNoData() : null;
-      const rasters = await tiff.readRasters({ bbox: [x0, y0, x1, y1], width: sw, height: sh, resampleMethod: 'nearest' });
-      return { tile, ok: true, band: rasters[0], sw, sh, x0, x1, y0, y1, is3857, nodata };
+      const [rx0, ry0] = is3857 ? lngLatToMerc(ringMinLng, ringMinLat) : [ringMinLng, ringMinLat];
+      const [rx1, ry1] = is3857 ? lngLatToMerc(ringMaxLng, ringMaxLat) : [ringMaxLng, ringMaxLat];
+      const ix0 = Math.max(bb[0], rx0), ix1 = Math.min(bb[2], rx1);
+      const iy0 = Math.max(bb[1], ry0), iy1 = Math.min(bb[3], ry1);
+      if(ix0 >= ix1 || iy0 >= iy1){ loaded++; continue; }   // tile outside ring
+      const px0 = Math.max(0, Math.floor((ix0 - bb[0]) / resX));
+      const px1 = Math.min(imgW, Math.ceil((ix1 - bb[0]) / resX));
+      const pyTop = Math.max(0, Math.floor((bb[3] - iy1) / resY));   // row 0 = north
+      const pyBot = Math.min(imgH, Math.ceil((bb[3] - iy0) / resY));
+      for(let wy = pyTop; wy < pyBot; wy += CHUNK){
+        const ch = Math.min(CHUNK, pyBot - wy);
+        for(let wx = px0; wx < px1; wx += CHUNK){
+          const cw = Math.min(CHUNK, px1 - wx);
+          const band = (await image.readRasters({ window: [wx, wy, wx + cw, wy + ch] }))[0];
+          chunks++;
+          for(let ry = 0; ry < ch; ry++){
+            const yImg = bb[3] - (wy + ry + 0.5) * resY;
+            for(let rx = 0; rx < cw; rx++){
+              const v = band[ry * cw + rx];
+              if(v == null || !isFinite(v) || (nodata != null && v === nodata)) continue;
+              if(!(v > 0.25) || v > 120) continue;
+              const xImg = bb[0] + (wx + rx + 0.5) * resX;
+              const [lng, lat] = is3857 ? mercToLngLat(xImg, yImg) : [xImg, yImg];
+              const gc = Math.floor((lng - minLng) / lngSpan * cols);
+              const gr = Math.floor((maxLat - lat) / latSpan * rows);
+              if(gc < 0 || gc >= cols || gr < 0 || gr >= rows) continue;
+              const gi = gr * cols + gc;
+              if(v > heights[gi]){ if(heights[gi] === 0) nonZero++; heights[gi] = v; if(v > maxH) maxH = v; }
+            }
+          }
+        }
+      }
+      loaded++;
     }catch(e){
       dlog(`Canopy source status: tile ${tile} FAILED — ${e.message||e}`,'err');
-      return { tile, ok: false };
-    }
-  }));
-  for(const r of results){
-    if(!r.ok) continue;
-    loaded++;
-    if(r.empty) continue;
-    const { band, sw, sh, x0, x1, y0, y1, is3857, nodata } = r;
-    for(let sy = 0; sy < sh; sy++){
-      const yImg = y1 - (sy + 0.5) / sh * (y1 - y0);     // row 0 = north (max y)
-      for(let sx = 0; sx < sw; sx++){
-        let v = band[sy * sw + sx];
-        if(v == null || !isFinite(v) || (nodata != null && v === nodata)) continue;
-        if(!(v > 0.25) || v > 120) continue;
-        const xImg = x0 + (sx + 0.5) / sw * (x1 - x0);
-        const [lng, lat] = is3857 ? mercToLngLat(xImg, yImg) : [xImg, yImg];
-        const gc = Math.floor((lng - minLng) / lngSpan * cols);
-        const gr = Math.floor((maxLat - lat) / latSpan * rows);
-        if(gc < 0 || gc >= cols || gr < 0 || gr >= rows) continue;
-        const gi = gr * cols + gc;
-        if(v > heights[gi]){ if(heights[gi] === 0) nonZero++; heights[gi] = v; if(v > maxH) maxH = v; }
-      }
     }
   }
   if(!loaded){
@@ -1728,9 +1737,9 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
     dlog('Canopy source status: COG reads failed (using WorldCover fallback)','warn');
     return null;
   }
-  dlog(`Canopy source status: Meta/WRI COG OK (${loaded}/${tiles.length} tile${tiles.length>1?'s':''}, ${nonZero}/${heights.length} pixels >0m, max ${maxH.toFixed(1)}m)`,'ok');
+  dlog(`Canopy source status: Meta/WRI COG OK (${tiles.length} tile(s), ${chunks} chunk(s), ${nonZero}/${heights.length} px >0m, max ${maxH.toFixed(1)}m)`,'ok');
   return {
-    source: 'Meta/WRI canopy height (COG)',
+    source: `Meta/WRI canopy height (COG, ≤${(CANOPY_RADIUS_M/1000).toFixed(0)}km)`,
     heightAt(lat, lng){
       const c = Math.max(0, Math.min(cols-1, Math.floor((lng - minLng) / (maxLng - minLng) * cols)));
       const r = Math.max(0, Math.min(rows-1, Math.floor((maxLat - lat) / (maxLat - minLat) * rows)));
@@ -1775,6 +1784,9 @@ function clutterHeightTable(){
 
 function clutterEnabled(){
   return !!document.getElementById('inpClutterOn')?.checked;
+}
+function canopyEnabled(){
+  return !!document.getElementById('inpCanopyOn')?.checked;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3448,7 +3460,7 @@ function initStaticHandlers(){
   on('inpFreq','input',syncPresetFromFreq);
   ['inpTx','inpGain','inpRx','inpMargin'].forEach(id=>on(id,'change',onGlobalRfChanged));
   ['inpFreq','inpK','inpRxAntH','inpCovMaxKm','inpCovRays','inpCovSamples','inpCovFresnel',
-   'inpClutterOn','inpClutterForest','inpClutterUrban','inpClutterExclude','inpClutterAtten']
+   'inpClutterOn','inpCanopyOn','inpClutterForest','inpClutterUrban','inpClutterExclude','inpClutterAtten']
     .forEach(id=>on(id,'change',onCoverageParamChanged));
   on('inpShowLinks','change',function(){ setDisplayVisibility('links', this.checked); });
   on('inpShowPaths','change',function(){ setDisplayVisibility('paths', this.checked); });

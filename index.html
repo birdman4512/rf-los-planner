@@ -464,6 +464,12 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
           Surface clutter (land cover)
         </label>
       </div>
+      <div class="field-row">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="inpCanopyOn" title="Add measured Meta/WRI canopy heights within 5 km of each site instead of the flat Forest(m) value. Requires Surface clutter on. Slow — downloads full-resolution canopy tiles per compute.">
+          Measured canopy ≤5 km (slow)
+        </label>
+      </div>
       <div class="field-row" style="margin-bottom:6px">
         <label>Forest (m)</label>
         <input type="number" id="inpClutterForest" value="15" step="1" min="0" style="width:52px" title="Clutter height added over tree-cover / mangrove land.">
@@ -511,7 +517,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260612-5">BUILD 20260612-5</span>
+      <span class="hdr-tag" title="Build 20260612-6">BUILD 20260612-6</span>
     </div>
   </header>
 
@@ -610,7 +616,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="share-codec.js?v=20260612-5"></script>
-<script src="app.js?v=20260612-5"></script>
+<script src="share-codec.js?v=20260612-6"></script>
+<script src="app.js?v=20260612-6"></script>
 </body>
 </html>

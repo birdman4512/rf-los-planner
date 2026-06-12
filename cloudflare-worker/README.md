@@ -38,6 +38,8 @@ curl -sD - -o /dev/null -H "Range: bytes=0-3" \
 
 ## Wire into ClearPath
 
-Once deployed, send the Worker URL to set `CANOPY_PROXY_BASE` in `app.js`, add
-the origin to the `connect-src` CSP in `index.html`, and flip
-`CANOPY_ENABLED = true`.
+Already wired: `CANOPY_PROXY_BASE` in `app.js` points here, and the origin is
+in the `connect-src` CSP in `index.html`. Canopy is the opt-in **"Measured
+canopy ≤5 km"** toggle in Settings → Coverage (capped to a ring because the
+COGs have no overviews — see [docs/canopy-titiler.md](../docs/canopy-titiler.md)
+for the whole-area server-side alternative).
