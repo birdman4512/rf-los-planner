@@ -146,11 +146,14 @@ A Free-Tier account you **don't** upgrade to "Pay As You Go" cannot be charged.
 curl "https://titiler.nbird.com.au/cog/info?url=https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/311211222.tif"
 ```
 
-JSON back = working end to end. The downsampled bbox PNG ClearPath will request:
+JSON back = working end to end. The downsampled bbox PNG ClearPath will request
+local `/cogs/` COGs only. Raw S3 tiles are valid for `/cog/info`, but they have
+no useful overviews for this workflow and can hang bbox PNG rendering; missing
+local COGs fall back to the existing browser geotiff path.
 
 ```
 https://titiler.nbird.com.au/cog/bbox/152.4,-27.5,153.4,-26.6/256x256.png
-  ?url=<S3 or /cogs/local cog url>&rescale=0,60&colormap_name=gray&return_mask=true&resampling=bilinear
+  ?url=/cogs/<local cog url>&rescale=0,60&colormap_name=gray&return_mask=true&resampling=bilinear
 ```
 
 > CORS: titiler allows all origins by default. To restrict to ClearPath, add a

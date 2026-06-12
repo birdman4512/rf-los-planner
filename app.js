@@ -91,11 +91,13 @@ const CANOPY_TILE_Z = 9;
 // canopy source; the geotiff.js path above remains the fallback when it's down.
 const TITILER_BASE = 'https://titiler.nbird.com.au';
 const CANOPY_HMAX = 60;         // rescale ceiling: PNG gray 0–255 ↔ 0–CANOPY_HMAX m
-// titiler opens the source COG by URL: the pre-built local tile first (fast — it
-// has overviews), then the raw S3 tile if that one isn't on the VM yet.
-function canopyCogUrls(qk){
-  return [ `/cogs/${qk}.cog.tif`,
-           `https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/${qk}.tif` ];
+// titiler opens pre-built local COGs only. The raw S3 GeoTIFFs have no useful
+// overviews and can hang the VM on bbox PNG requests, so missing local COGs fall
+// back to the existing geotiff Worker path instead.
+function canopyCogSources(qk){
+  const sources = [];
+  if(!_canopyLocalCogMisses.has(qk)) sources.push({ kind:'local', url:`/cogs/${qk}.cog.tif` });
+  return sources;
 }
 function canopyTitilerUrl(w, s, e, n, cols, rows, cogUrl){
   return `${TITILER_BASE}/cog/bbox/${w},${s},${e},${n}/${cols}x${rows}.png`
@@ -1452,6 +1454,7 @@ const _clutterImgCache = new Map(); // url → Promise<{data,w,h}>
 let _clutterUnavailable = false;    // sticky: once load fails, stop retrying this session
 let _canopyUnavailable = false;     // sticky: GFW/Meta canopy is flaky — skip after first failure
 let _titilerUnavailable = false;    // sticky: titiler VM is part-time — fall back after first failure
+const _canopyLocalCogMisses = new Set(); // qk values missing from titiler's /cogs mount this session
 const CLUTTER_IMG_TIMEOUT_MS = 20000; // fail a hung tile fast instead of waiting ~90s for the browser
 
 function worldCoverClassFromRgb(r,g,b,a){
@@ -1741,16 +1744,22 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
       const rows = Math.min(1024, Math.max(2, Math.ceil((n - s) / dLat) + 1));
       const qk = tileToQuadKey(tx, ty, CANOPY_TILE_Z);
       let img = null;
-      for(const cogUrl of canopyCogUrls(qk)){               // local /cogs/ first, then S3
-        const url = canopyTitilerUrl(w, s, e, n, cols, rows, cogUrl);
-        try{ img = await loadClutterImage(url, cols, rows); break; }
-        catch(err){ /* tile not local / read failed — try the next url */ }
+      for(const src of canopyCogSources(qk)){               // local /cogs/ only
+        const url = canopyTitilerUrl(w, s, e, n, cols, rows, src.url);
+        try{
+          img = await loadClutterImage(url, cols, rows);
+          break;
+        }catch(err){
+          if(src.kind === 'local'){
+            _canopyLocalCogMisses.add(qk);
+            dlog(`Canopy: local COG ${qk} not available — using geotiff fallback; build /cogs/${qk}.cog.tif for fast titiler coverage`,'warn');
+          }
+        }
       }
       if(img){
-        images.push({ qk, w, s, e, n, cols, rows, data: img.data });
+        images.push({ qk, w, s, e, n, cols: img.w, rows: img.h, data: img.data });
       }else{
         failed++;
-        dlog(`Canopy: titiler tile ${qk} failed from local /cogs and S3 — using geotiff fallback`,'warn');
       }
     }
   }
