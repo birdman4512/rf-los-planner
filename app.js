@@ -83,6 +83,7 @@ const WORLDCOVER_WMS_SOURCES = [
 // applies. See docs/canopy-titiler.md for the server-side alternative.
 const CANOPY_PROXY_BASE = 'https://clearpath-clutter.nbird.com.au';
 const CANOPY_CEILING_M = 70;    // worst-case canopy height used to screen grazing points
+const CANOPY_MAX_POINTS = 1500; // coverage: above this many grazing points, skip (too dense to read per-point)
 const CANOPY_TILE_Z = 9;
 const CLUTTER_ATTEN_DB_PER_M_915 = 0.10; // reference loss while LOS passes through canopy/building clutter
 const CLUTTER_ATTEN_CAP_DB = 45;         // avoid treating clutter as infinite terrain
@@ -1663,7 +1664,9 @@ async function readCanopyAtPoints(points){
   }
   for(const [qk, pts] of byTile){
     try{
-      const tiff = await GeoTIFF.fromUrl(`${CANOPY_PROXY_BASE}/chm/${qk}.tif`);
+      // ?cb escapes any stale full-file 200 cached before the Worker's no-store
+      // fix (the Worker ignores the query; S3 is fetched by clean pathname).
+      const tiff = await GeoTIFF.fromUrl(`${CANOPY_PROXY_BASE}/chm/${qk}.tif?cb=1`);
       const image = await tiff.getImage();
       const bb = image.getBoundingBox();
       const imgW = image.getWidth(), imgH = image.getHeight();
@@ -2052,7 +2055,9 @@ async function _computeNodeCoverageImpl(node){
       if(canopyEnabled()){
         toast(`${node.name}: screening canopy (grazing points)…`);
         const flagged = await screenGrazingTreePoints(node, srcH, rays, samples, maxRange, g, wc);
-        if(flagged.length){
+        if(flagged.length > CANOPY_MAX_POINTS){
+          dlog(`  Canopy: ${flagged.length} grazing tree points exceed the ${CANOPY_MAX_POINTS} read cap (dense forest) — keeping flat Forest(m). A server-side tiler handles this (docs/canopy-titiler.md).`,'warn');
+        } else if(flagged.length){
           canopyMap = await readCanopyAtPoints(flagged);
           dlog(`  Canopy: ${canopyMap.size}/${flagged.length} grazing tree point(s) refined with measured height`, canopyMap.size ? 'ok' : 'warn');
         } else {
