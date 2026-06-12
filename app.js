@@ -85,6 +85,23 @@ const CANOPY_PROXY_BASE = 'https://clearpath-clutter.nbird.com.au';
 const CANOPY_CEILING_M = 70;    // worst-case canopy height used to screen grazing points
 const CANOPY_MAX_POINTS = 1500; // coverage: above this many grazing points, skip (too dense to read per-point)
 const CANOPY_TILE_Z = 9;
+// Self-hosted titiler (docs/canopy-titiler.md): reads the COGs server-side and
+// returns a small downsampled PNG, so dense-forest coverage canopy is one fast
+// fetch (uncapped) instead of thousands of in-browser per-pixel reads. Primary
+// canopy source; the geotiff.js path above remains the fallback when it's down.
+const TITILER_BASE = 'https://titiler.nbird.com.au';
+const CANOPY_HMAX = 60;         // rescale ceiling: PNG gray 0–255 ↔ 0–CANOPY_HMAX m
+// titiler opens the source COG by URL: the pre-built local tile first (fast — it
+// has overviews), then the raw S3 tile if that one isn't on the VM yet.
+function canopyCogUrls(qk){
+  return [ `/cogs/${qk}.cog.tif`,
+           `https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/${qk}.tif` ];
+}
+function canopyTitilerUrl(w, s, e, n, cols, rows, cogUrl){
+  return `${TITILER_BASE}/cog/bbox/${w},${s},${e},${n}/${cols}x${rows}.png`
+    + `?url=${cogUrl}&rescale=0,${CANOPY_HMAX}`
+    + `&colormap_name=gray&return_mask=true&resampling=bilinear`;
+}
 const CLUTTER_ATTEN_DB_PER_M_915 = 0.10; // reference loss while LOS passes through canopy/building clutter
 const CLUTTER_ATTEN_CAP_DB = 45;         // avoid treating clutter as infinite terrain
 // WorldCover classes: 10 Tree, 20 Shrub, 30 Grass, 40 Crop, 50 Built-up,
@@ -1434,6 +1451,7 @@ async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
 const _clutterImgCache = new Map(); // url → Promise<{data,w,h}>
 let _clutterUnavailable = false;    // sticky: once load fails, stop retrying this session
 let _canopyUnavailable = false;     // sticky: GFW/Meta canopy is flaky — skip after first failure
+let _titilerUnavailable = false;    // sticky: titiler VM is part-time — fall back after first failure
 const CLUTTER_IMG_TIMEOUT_MS = 20000; // fail a hung tile fast instead of waiting ~90s for the browser
 
 function worldCoverClassFromRgb(r,g,b,a){
@@ -1552,6 +1570,15 @@ function tileToQuadKey(x, y, z){
     q += digit;
   }
   return q;
+}
+
+// Geographic bounds of an x/y/z tile, [west, south, east, north] in degrees.
+function tileLonLatBounds(x, y, z){
+  const n = 2 ** z;
+  const lng1 = x / n * 360 - 180, lng2 = (x + 1) / n * 360 - 180;
+  const lat1 = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI;
+  const lat2 = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))) * 180 / Math.PI;
+  return [lng1, Math.min(lat1, lat2), lng2, Math.max(lat1, lat2)];
 }
 
 // Lazy-load the chunky geotiff.js (~540 KB) only when canopy is first needed.
@@ -1685,6 +1712,71 @@ async function readCanopyAtPoints(points){
     }
   }
   return out;
+}
+
+// Build a measured-canopy sampler over [minLat,minLng]–[maxLat,maxLng] from the
+// self-hosted titiler: one downsampled gray PNG per source COG tile the bbox
+// touches (rescale 0–CANOPY_HMAX, return_mask=true). Decodes height = R/255*HMAX,
+// alpha 0 = no data. Uncapped, so dense-forest coverage is a handful of fetches.
+// Returns {heightAt(lat,lng)→metres or NaN, tiles} or null if titiler is
+// unreachable (caller then falls back to the in-browser geotiff read).
+async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
+  if(_titilerUnavailable) return null;
+  const midLat = (minLat + maxLat) / 2;
+  const dLat = stepM / 111320;
+  const dLng = stepM / (111320 * Math.max(0.05, Math.cos(midLat * Math.PI/180)));
+  const tl = lonLatToTile(minLng, maxLat, CANOPY_TILE_Z);   // top-left source tile
+  const br = lonLatToTile(maxLng, minLat, CANOPY_TILE_Z);   // bottom-right source tile
+  const images = [];
+  let attempted = 0;
+  let failed = 0;
+  for(let tx = tl.x; tx <= br.x; tx++){
+    for(let ty = tl.y; ty <= br.y; ty++){
+      const tb = tileLonLatBounds(tx, ty, CANOPY_TILE_Z);
+      const w = Math.max(minLng, tb[0]), s = Math.max(minLat, tb[1]);
+      const e = Math.min(maxLng, tb[2]), n = Math.min(maxLat, tb[3]);
+      if(e <= w || n <= s) continue;                        // no real overlap
+      attempted++;
+      const cols = Math.min(1024, Math.max(2, Math.ceil((e - w) / dLng) + 1));
+      const rows = Math.min(1024, Math.max(2, Math.ceil((n - s) / dLat) + 1));
+      const qk = tileToQuadKey(tx, ty, CANOPY_TILE_Z);
+      let img = null;
+      for(const cogUrl of canopyCogUrls(qk)){               // local /cogs/ first, then S3
+        const url = canopyTitilerUrl(w, s, e, n, cols, rows, cogUrl);
+        try{ img = await loadClutterImage(url, cols, rows); break; }
+        catch(err){ /* tile not local / read failed — try the next url */ }
+      }
+      if(img){
+        images.push({ qk, w, s, e, n, cols, rows, data: img.data });
+      }else{
+        failed++;
+        dlog(`Canopy: titiler tile ${qk} failed from local /cogs and S3 — using geotiff fallback`,'warn');
+      }
+    }
+  }
+  if(failed || !images.length){
+    if(attempted && !images.length){
+      _titilerUnavailable = true;
+      dlog('Canopy: titiler unreachable (or url blocked) — using geotiff fallback','warn');
+    }else if(failed){
+      dlog(`Canopy: titiler loaded ${images.length}/${attempted} source tile(s); falling back to geotiff to avoid partial canopy data`,'warn');
+    }
+    return null;
+  }
+  return {
+    tiles: images.length,
+    heightAt(lat, lng){
+      for(const im of images){
+        if(lng < im.w || lng > im.e || lat < im.s || lat > im.n) continue;
+        const c = Math.max(0, Math.min(im.cols-1, Math.floor((lng - im.w) / (im.e - im.w) * im.cols)));
+        const r = Math.max(0, Math.min(im.rows-1, Math.floor((im.n - lat) / (im.n - im.s) * im.rows)));
+        const idx = (r * im.cols + c) * 4;
+        if(im.data[idx+3] === 0) return NaN;                // mask: no canopy data here
+        return im.data[idx] / 255 * CANOPY_HMAX;            // gray R → metres
+      }
+      return NaN;
+    }
+  };
 }
 
 // Coverage pre-screen: find tree points where a radial LOS to the ray's far end
@@ -2051,23 +2143,35 @@ async function _computeNodeCoverageImpl(node){
     const wc = await buildWorldCoverGrid(node.lat - dLat, node.lng - dLng,
       node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M, g.clutterHeights);
     if(wc){
-      let canopyMap = null;
+      let canopySrc = null, canopyLabel = '';
       if(canopyEnabled()){
-        toast(`${node.name}: screening canopy (grazing points)…`);
-        const flagged = await screenGrazingTreePoints(node, srcH, rays, samples, maxRange, g, wc);
-        if(flagged.length > CANOPY_MAX_POINTS){
-          dlog(`  Canopy: ${flagged.length} grazing tree points exceed the ${CANOPY_MAX_POINTS} read cap (dense forest) — keeping flat Forest(m). A server-side tiler handles this (docs/canopy-titiler.md).`,'warn');
-        } else if(flagged.length){
-          canopyMap = await readCanopyAtPoints(flagged);
-          dlog(`  Canopy: ${canopyMap.size}/${flagged.length} grazing tree point(s) refined with measured height`, canopyMap.size ? 'ok' : 'warn');
+        // Primary: one downsampled titiler PNG per source tile over the sweep
+        // bbox (uncapped — dense forest works). Fallback: the in-browser geotiff
+        // grazing-point read (capped) when the titiler VM is unreachable.
+        toast(`${node.name}: loading canopy (titiler)…`);
+        const cg = await buildCanopyGrid(node.lat - dLat, node.lng - dLng,
+          node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M);
+        if(cg){
+          canopySrc = cg; canopyLabel = ' + measured canopy (titiler)';
+          dlog(`  Canopy: titiler grid loaded over ${cg.tiles} source tile(s)`,'ok');
         } else {
-          dlog('  Canopy: no grazing tree points — flat Forest(m) is sufficient','ok');
+          toast(`${node.name}: titiler down — screening canopy (grazing points)…`);
+          const flagged = await screenGrazingTreePoints(node, srcH, rays, samples, maxRange, g, wc);
+          if(flagged.length > CANOPY_MAX_POINTS){
+            dlog(`  Canopy: titiler unavailable and ${flagged.length} grazing points exceed the ${CANOPY_MAX_POINTS} in-browser cap (dense forest) — keeping flat Forest(m).`,'warn');
+          } else if(flagged.length){
+            const m = await readCanopyAtPoints(flagged);
+            if(m.size){ canopySrc = { heightAt:(la,ln)=>{ const k=`${la.toFixed(6)},${ln.toFixed(6)}`; return m.has(k)?m.get(k):NaN; } }; canopyLabel = ' + measured canopy (geotiff)'; }
+            dlog(`  Canopy: titiler down — ${m.size}/${flagged.length} grazing point(s) via geotiff`, m.size ? 'ok' : 'warn');
+          } else {
+            dlog('  Canopy: no grazing tree points — flat Forest(m) is sufficient','ok');
+          }
         }
       }
       clutter = {
-        source: (canopyMap && canopyMap.size) ? `${wc.source} + measured canopy` : wc.source,
+        source: canopySrc ? `${wc.source}${canopyLabel}` : wc.source,
         heightAt(la, ln){
-          if(canopyMap){ const k = `${la.toFixed(6)},${ln.toFixed(6)}`; if(canopyMap.has(k)) return canopyMap.get(k); }
+          if(canopySrc){ const h = canopySrc.heightAt(la, ln); if(isFinite(h) && h > 0) return h; }
           return wc.heightAt(la, ln);
         }
       };
@@ -2424,23 +2528,35 @@ async function runAnalysis(){
           Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad,
           Math.max(20, dist/N), clutterHeights);
         if(wc){
-          const flagged=[];
-          for(let s=1;s<N;s++){
-            if(dists[s]<clutterExcludeM || (dist-dists[s])<clutterExcludeM) continue;
-            const [lat,lng]=llAt(s);
-            const cls=wc.classAt(lat,lng);
-            if(cls!==10 && cls!==95) continue;                          // tree / mangrove only
-            if(losAt(s)-fresnel1(dists[s],dist-dists[s],freq) < bareEffAt(s)+CANOPY_CEILING_M)
-              flagged.push({id:s, lat, lng});                           // Fresnel near max canopy top
+          // Prefer the titiler canopy grid (one fetch); fall back to in-browser
+          // geotiff reads at grazing tree points when the titiler VM is down.
+          const lo=[Math.min(a.lat,b.lat)-pad, Math.min(a.lng,b.lng)-pad];
+          const hi=[Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad];
+          let canopySrc = await buildCanopyGrid(lo[0], lo[1], hi[0], hi[1], Math.max(20, dist/N));
+          let canopyKind = canopySrc ? 'titiler' : '';
+          if(!canopySrc){
+            const flagged=[];
+            for(let s=1;s<N;s++){
+              if(dists[s]<clutterExcludeM || (dist-dists[s])<clutterExcludeM) continue;
+              const [lat,lng]=llAt(s);
+              const cls=wc.classAt(lat,lng);
+              if(cls!==10 && cls!==95) continue;                        // tree / mangrove only
+              if(losAt(s)-fresnel1(dists[s],dist-dists[s],freq) < bareEffAt(s)+CANOPY_CEILING_M)
+                flagged.push({id:s, lat, lng});                         // Fresnel near max canopy top
+            }
+            const canopyAt = flagged.length ? await readCanopyAtPoints(flagged) : null;
+            if(canopyAt && canopyAt.size){
+              canopySrc = { heightAt:(la,ln,s)=> canopyAt.has(s)?canopyAt.get(s):NaN };
+              canopyKind = 'geotiff';
+            }
           }
-          const canopyAt = flagged.length ? await readCanopyAtPoints(flagged) : null;
-          if(canopyAt && canopyAt.size)
-            dlog(`  Canopy: ${canopyAt.size}/${flagged.length} grazing tree point(s) refined with measured height`,'ok');
+          if(canopyKind) dlog(`  Canopy: measured height loaded (${canopyKind})`,'ok');
           clutterImpact=makeClutterImpactStats();
           clutterH=dists.map((d,s)=>{
             if(d<clutterExcludeM || (dist-d)<clutterExcludeM) return 0;
             const [lat,lng]=llAt(s);
-            const h = (canopyAt && canopyAt.has(s)) ? canopyAt.get(s) : wc.heightAt(lat,lng);
+            let h = wc.heightAt(lat,lng);
+            if(canopySrc){ const c = canopySrc.heightAt(lat,lng,s); if(isFinite(c) && c>0) h=c; }
             addClutterImpact(clutterImpact, h, d, [lat,lng], null);
             return h;
           });

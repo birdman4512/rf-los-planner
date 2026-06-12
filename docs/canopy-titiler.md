@@ -44,8 +44,12 @@ only runs the daemon):
 
 ```dockerfile
 FROM ghcr.io/osgeo/gdal:ubuntu-small-latest
-RUN apt-get update && apt-get install -y --no-install-recommends python3-pip \
+# build-essential + python3-dev: the base image's Python has no prebuilt wheel
+# for some titiler deps (e.g. color-operations), so pip compiles them from source.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3-pip python3-dev build-essential \
  && pip install --no-cache-dir --break-system-packages titiler.application uvicorn \
+ && apt-get purge -y build-essential python3-dev && apt-get autoremove -y \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 EXPOSE 8000
 CMD ["uvicorn","titiler.application.main:app","--host","0.0.0.0","--port","8000"]
@@ -153,6 +157,45 @@ https://titiler.nbird.com.au/cog/bbox/152.4,-27.5,153.4,-26.6/256x256.png
 > Cloudflare **Transform Rule → Modify Response Header** on `titiler.nbird.com.au`
 > setting `Access-Control-Allow-Origin: https://dea.nbird.com.au`. titiler tiles
 > are cacheable, so you can let Cloudflare cache this hostname.
+
+---
+
+## Security — don't run it as an open proxy
+
+The Cloudflare Tunnel puts titiler on the public internet with **no auth**, and
+titiler's `/cog/...?url=<anything>` endpoint fetches whatever `url` you give it
+(GDAL `/vsicurl/`). So out of the box **anyone who finds the hostname can make
+your VM fetch `.tif` URLs on their behalf** — an open `.tif` proxy and a cheap
+DoS target (no-overview COGs read full-res, so a few large-bbox requests pin a
+1-vCPU VM).
+
+What you already have:
+
+- `CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif"` blocks classic SSRF (cloud metadata
+  endpoints, internal JSON APIs, etc.) — GDAL won't open non-`.tif` targets. It
+  does **not** stop someone fetching arbitrary `.tif` files or hammering you.
+
+Lock it down with Cloudflare (you're already fronting it). Interactive
+Cloudflare **Access won't work** — it would block ClearPath's browser `fetch()`.
+Use WAF + rate limiting instead:
+
+1. **Pin `url` to your data** — WAF custom rule, action **Block**:
+   ```
+   (http.host eq "titiler.nbird.com.au"
+     and not http.request.uri.query contains "url=https://dataforgood-fb-data.s3.amazonaws.com/"
+     and not http.request.uri.query contains "url=/cogs/")
+   ```
+   Now titiler can only read the Meta COGs or your local `/cogs/` — open-proxy
+   value drops to ~zero.
+2. **Rate limit** — a Rate Limiting rule (e.g. 60 req/min per IP) caps the DoS
+   surface.
+3. **Lock CORS** — the `Access-Control-Allow-Origin: https://dea.nbird.com.au`
+   transform rule above. Defence-in-depth (CORS is browser-enforced, not a real
+   access control), but pairs with #1.
+
+For true auth (e.g. a non-browser client) use a Cloudflare Access **service
+token** with a custom header the client injects — but that complicates the
+browser flow, so WAF pinning is the right ceiling for ClearPath.
 
 ---
 
