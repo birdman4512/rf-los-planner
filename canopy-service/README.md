@@ -1,8 +1,12 @@
-# ClearPath clutter proxy (Cloudflare Worker)
+# ClearPath canopy service — Cloudflare Worker (COG proxy)
 
 Adds CORS + forwards HTTP Range requests to the public Meta/WRI canopy-height
 COGs on AWS S3, so ClearPath can read canopy heights in the browser with
 `geotiff.js`. Replaces the GFW tile server (titiler), which is currently down.
+
+This Worker is what the browser-side canopy reads use today. If you move to a
+self-hosted titiler (see [../docs/canopy-titiler.md](../docs/canopy-titiler.md))
+it reads the COGs server-side and this Worker can be retired.
 
 The underlying data is a public AWS Open Data bucket
 (`dataforgood-fb-data`); this Worker only proxies `/chm/<quadkey>.tif`.
@@ -21,7 +25,7 @@ The underlying data is a public AWS Open Data bucket
 ```bash
 npm i -g wrangler
 wrangler login
-# from cloudflare-worker/:
+# from canopy-service/:
 wrangler deploy clutter-proxy.js --name clearpath-clutter --compatibility-date 2024-01-01
 ```
 
