@@ -82,7 +82,6 @@ const WORLDCOVER_WMS_SOURCES = [
 // site, read in memory-safe chunks. Outside the ring, WorldCover Forest(m)
 // applies. See docs/canopy-titiler.md for the server-side alternative.
 const CANOPY_PROXY_BASE = 'https://clearpath-clutter.nbird.com.au';
-const CANOPY_RADIUS_M = 5000;   // coverage option: fetch measured canopy within this radius
 const CANOPY_CEILING_M = 70;    // worst-case canopy height used to screen grazing points
 const CANOPY_TILE_Z = 9;
 const CLUTTER_ATTEN_DB_PER_M_915 = 0.10; // reference loss while LOS passes through canopy/building clutter
@@ -1554,18 +1553,6 @@ function tileToQuadKey(x, y, z){
   return q;
 }
 
-function canopyTileKeysForBbox(minLat, minLng, maxLat, maxLng){
-  const nw = lonLatToTile(minLng, maxLat, CANOPY_TILE_Z);
-  const se = lonLatToTile(maxLng, minLat, CANOPY_TILE_Z);
-  const keys = [];
-  for(let y = Math.max(0, nw.y); y <= se.y; y++){
-    for(let x = Math.max(0, nw.x); x <= se.x; x++){
-      keys.push(tileToQuadKey(x, y, CANOPY_TILE_Z));
-    }
-  }
-  return keys;
-}
-
 // Lazy-load the chunky geotiff.js (~540 KB) only when canopy is first needed.
 let _geotiffPromise = null;
 function loadGeotiff(){
@@ -1658,97 +1645,6 @@ async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, height
   return null;
 }
 
-async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
-  if(!canopyEnabled()) return null;            // opt-in; quiet when off
-  if(_canopyUnavailable){ dlog('Canopy source status: skipped (unavailable earlier this session)','warn'); return null; }
-  const midLat = (minLat + maxLat) / 2;
-  const dLat = stepM / 111320;
-  const dLng = stepM / (111320 * Math.max(0.05, Math.cos(midLat * Math.PI/180)));
-  const cols = Math.min(2048, Math.max(2, Math.ceil((maxLng - minLng) / dLng) + 1));
-  const rows = Math.min(2048, Math.max(2, Math.ceil((maxLat - minLat) / dLat) + 1));
-  const lngSpan = maxLng - minLng, latSpan = maxLat - minLat;
-
-  // The COGs are 1 m with no overviews, so cap the full-res read to a ring
-  // around the site; the rest of the coverage area keeps WorldCover Forest(m).
-  const cLat = midLat, cLng = (minLng + maxLng) / 2;
-  const rLat = CANOPY_RADIUS_M / 111320;
-  const rLng = CANOPY_RADIUS_M / (111320 * Math.max(0.05, Math.cos(cLat * Math.PI/180)));
-  const ringMinLat = Math.max(minLat, cLat - rLat), ringMaxLat = Math.min(maxLat, cLat + rLat);
-  const ringMinLng = Math.max(minLng, cLng - rLng), ringMaxLng = Math.min(maxLng, cLng + rLng);
-  const tiles = canopyTileKeysForBbox(ringMinLat, ringMinLng, ringMaxLat, ringMaxLng);
-  if(!tiles.length) return null;
-
-  let GeoTIFF;
-  try{ GeoTIFF = await loadGeotiff(); }
-  catch(e){ _canopyUnavailable = true; dlog(`Canopy source status: geotiff.js failed to load — ${e.message||e}`,'err'); return null; }
-
-  const heights = new Float32Array(cols * rows);
-  let loaded = 0, nonZero = 0, maxH = 0, chunks = 0;
-  const CHUNK = 2048;   // max px per axis read at once (≤16 MB Float32) — keeps memory safe
-  dlog(`Meta/WRI canopy via COG: reading ${(CANOPY_RADIUS_M/1000).toFixed(0)}km ring from ${tiles.length} tile${tiles.length>1?'s':''} … (slow)`);
-  for(const tile of tiles){
-    const url = `${CANOPY_PROXY_BASE}/chm/${tile}.tif`;
-    try{
-      const tiff = await GeoTIFF.fromUrl(url);
-      const image = await tiff.getImage();
-      const bb = image.getBoundingBox();                 // tile space: 3857 metres or 4326 deg
-      const imgW = image.getWidth(), imgH = image.getHeight();
-      const resX = (bb[2] - bb[0]) / imgW, resY = (bb[3] - bb[1]) / imgH;   // resY > 0
-      const is3857 = Math.max(Math.abs(bb[0]), Math.abs(bb[2])) > 360;
-      const nodata = typeof image.getGDALNoData === 'function' ? image.getGDALNoData() : null;
-      const [rx0, ry0] = is3857 ? lngLatToMerc(ringMinLng, ringMinLat) : [ringMinLng, ringMinLat];
-      const [rx1, ry1] = is3857 ? lngLatToMerc(ringMaxLng, ringMaxLat) : [ringMaxLng, ringMaxLat];
-      const ix0 = Math.max(bb[0], rx0), ix1 = Math.min(bb[2], rx1);
-      const iy0 = Math.max(bb[1], ry0), iy1 = Math.min(bb[3], ry1);
-      if(ix0 >= ix1 || iy0 >= iy1){ loaded++; continue; }   // tile outside ring
-      const px0 = Math.max(0, Math.floor((ix0 - bb[0]) / resX));
-      const px1 = Math.min(imgW, Math.ceil((ix1 - bb[0]) / resX));
-      const pyTop = Math.max(0, Math.floor((bb[3] - iy1) / resY));   // row 0 = north
-      const pyBot = Math.min(imgH, Math.ceil((bb[3] - iy0) / resY));
-      for(let wy = pyTop; wy < pyBot; wy += CHUNK){
-        const ch = Math.min(CHUNK, pyBot - wy);
-        for(let wx = px0; wx < px1; wx += CHUNK){
-          const cw = Math.min(CHUNK, px1 - wx);
-          const band = (await image.readRasters({ window: [wx, wy, wx + cw, wy + ch] }))[0];
-          chunks++;
-          for(let ry = 0; ry < ch; ry++){
-            const yImg = bb[3] - (wy + ry + 0.5) * resY;
-            for(let rx = 0; rx < cw; rx++){
-              const v = band[ry * cw + rx];
-              if(v == null || !isFinite(v) || (nodata != null && v === nodata)) continue;
-              if(!(v > 0.25) || v > 120) continue;
-              const xImg = bb[0] + (wx + rx + 0.5) * resX;
-              const [lng, lat] = is3857 ? mercToLngLat(xImg, yImg) : [xImg, yImg];
-              const gc = Math.floor((lng - minLng) / lngSpan * cols);
-              const gr = Math.floor((maxLat - lat) / latSpan * rows);
-              if(gc < 0 || gc >= cols || gr < 0 || gr >= rows) continue;
-              const gi = gr * cols + gc;
-              if(v > heights[gi]){ if(heights[gi] === 0) nonZero++; heights[gi] = v; if(v > maxH) maxH = v; }
-            }
-          }
-        }
-      }
-      loaded++;
-    }catch(e){
-      dlog(`Canopy source status: tile ${tile} FAILED — ${e.message||e}`,'err');
-    }
-  }
-  if(!loaded){
-    _canopyUnavailable = true; // don't re-try on the next site this session
-    dlog('Canopy source status: COG reads failed (using WorldCover fallback)','warn');
-    return null;
-  }
-  dlog(`Canopy source status: Meta/WRI COG OK (${tiles.length} tile(s), ${chunks} chunk(s), ${nonZero}/${heights.length} px >0m, max ${maxH.toFixed(1)}m)`,'ok');
-  return {
-    source: `Meta/WRI canopy height (COG, ≤${(CANOPY_RADIUS_M/1000).toFixed(0)}km)`,
-    heightAt(lat, lng){
-      const c = Math.max(0, Math.min(cols-1, Math.floor((lng - minLng) / (maxLng - minLng) * cols)));
-      const r = Math.max(0, Math.min(rows-1, Math.floor((maxLat - lat) / (maxLat - minLat) * rows)));
-      return heights[r * cols + c] || 0;
-    }
-  };
-}
-
 // Sample measured canopy height (m) at specific points, grouped by COG tile so
 // each tile opens once and geotiff.js caches the internal tiles. Used for the
 // targeted "grazing point" reads on links. Returns Map(point.id → height).
@@ -1788,27 +1684,38 @@ async function readCanopyAtPoints(points){
   return out;
 }
 
-async function buildClutterGrid(minLat, minLng, maxLat, maxLng, stepM, heights){
-  // Canopy and land-cover are independent fetches — run them concurrently.
-  const [canopy, landCover] = await Promise.all([
-    buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM),
-    buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, heights)
-  ]);
-  if(canopy && landCover){
-    return {
-      source: `${canopy.source} gated to WorldCover trees + ${landCover.source || 'WorldCover land cover'}`,
-      heightAt(lat, lng){
-        const cls = landCover.classAt?.(lat, lng);
-        const landCoverH = landCover.heightAt(lat, lng);
-        const canopyH = (cls === 10 || cls === 95) ? canopy.heightAt(lat, lng) : 0;
-        return Math.max(canopyH, landCoverH);
+// Coverage pre-screen: find tree points where a radial LOS to the ray's far end
+// could graze the tallest possible canopy, so measured canopy is read only
+// there. Fetches terrain per ray (cached for the main sweep). Returns deduped
+// [{id:coordKey, lat, lng}].
+async function screenGrazingTreePoints(node, srcH, rays, samples, maxRange, g, worldCover){
+  const flagged = [], seen = new Set();
+  for(let r = 0; r < rays; r++){
+    const az = r * 360 / rays;
+    const dists = [], points = [];
+    for(let s = 0; s <= samples; s++){
+      const d = maxRange * s / samples;
+      const [la, ln] = destPoint(node.lat, node.lng, az, d);
+      dists.push(d); points.push([la, ln]);
+    }
+    let elevs;
+    try{ elevs = await Promise.all(points.map(([la, ln]) => tileElevAt(la, ln))); }
+    catch{ continue; }                                  // main sweep surfaces terrain errors
+    const dFar = dists[samples], rxAltFar = elevs[samples] + g.rxAntH;
+    for(let j = 1; j < samples; j++){
+      if(dists[j] < g.clutterExcludeM) continue;
+      const [la, ln] = points[j];
+      const cls = worldCover.classAt(la, ln);
+      if(cls !== 10 && cls !== 95) continue;            // tree / mangrove only
+      const bareEff = elevs[j] + bulge(dists[j], dFar - dists[j], g.K);
+      const losFar = srcH + (rxAltFar - srcH) * (dists[j] / dFar);
+      if(losFar - fresnel1(dists[j], dFar - dists[j], g.freq) < bareEff + CANOPY_CEILING_M){
+        const key = `${la.toFixed(6)},${ln.toFixed(6)}`;
+        if(!seen.has(key)){ seen.add(key); flagged.push({ id: key, lat: la, lng: ln }); }
       }
-    };
+    }
   }
-  if(canopy && !landCover){
-    dlog('Canopy source status: loaded but not applied because WorldCover tree-class gate was unavailable','warn');
-  }
-  return landCover || null;
+  return flagged;
 }
 
 // Resolve the active per-class clutter height table from the UI (forest +
@@ -2130,15 +2037,37 @@ async function _computeNodeCoverageImpl(node){
   dlog(`  Sweep: ${rays} rays × ${samples} samples (~${(maxRange/samples).toFixed(0)}m step) · Fresnel ${(g.fresnelPct*100).toFixed(0)}% · RX ant ${g.rxAntH}m`);
 
   // Optional land-cover clutter over the sweep bbox (null = bare terrain).
+  // WorldCover gives class + flat per-class height; the opt-in canopy toggle
+  // additionally reads measured Meta/WRI canopy at grazing tree points.
   let clutter = null;
   if(g.clutterOn){
     const dLat = maxRange / 111320;
     const dLng = maxRange / (111320 * Math.max(0.05, Math.cos(node.lat * Math.PI/180)));
     dlog(`  Clutter ON: forest ${g.clutterHeights[10]}m, urban ${g.clutterHeights[50]}m, clear-radius ${g.clutterExcludeM}m, atten ${clutterAttenDbPerM(g.freq, g.clutterAttenRef).toFixed(3)}dB/m — loading…`);
     toast(`${node.name}: loading land cover…`);
-    clutter = await buildClutterGrid(node.lat - dLat, node.lng - dLng,
+    const wc = await buildWorldCoverGrid(node.lat - dLat, node.lng - dLng,
       node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M, g.clutterHeights);
-    dlog(clutter ? `  Clutter: APPLIED ✓ (${clutter.source || 'WorldCover WMS'})`
+    if(wc){
+      let canopyMap = null;
+      if(canopyEnabled()){
+        toast(`${node.name}: screening canopy (grazing points)…`);
+        const flagged = await screenGrazingTreePoints(node, srcH, rays, samples, maxRange, g, wc);
+        if(flagged.length){
+          canopyMap = await readCanopyAtPoints(flagged);
+          dlog(`  Canopy: ${canopyMap.size}/${flagged.length} grazing tree point(s) refined with measured height`, canopyMap.size ? 'ok' : 'warn');
+        } else {
+          dlog('  Canopy: no grazing tree points — flat Forest(m) is sufficient','ok');
+        }
+      }
+      clutter = {
+        source: (canopyMap && canopyMap.size) ? `${wc.source} + measured canopy` : wc.source,
+        heightAt(la, ln){
+          if(canopyMap){ const k = `${la.toFixed(6)},${ln.toFixed(6)}`; if(canopyMap.has(k)) return canopyMap.get(k); }
+          return wc.heightAt(la, ln);
+        }
+      };
+    }
+    dlog(clutter ? `  Clutter: APPLIED ✓ (${clutter.source})`
                  : `  Clutter: NOT applied — bare terrain used`, clutter?'ok':'warn');
     toast(clutter ? `${node.name}: land cover loaded.`
                   : `${node.name}: land cover unavailable — using bare terrain.`, 3500);
