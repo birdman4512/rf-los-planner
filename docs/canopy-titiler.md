@@ -32,7 +32,7 @@ Use your existing public Caddy site on `tracker.quirkyit.com.au` and proxy the
 ClearPath browser
   -> https://tracker.quirkyit.com.au/canopy/...
   -> Caddy
-  -> 127.0.0.1:8090 on the VM host
+  -> VM host port 8090
   -> canopy-proxy:8080 in Docker
   -> titiler:8000, using /cogs/<quadkey>.cog.tif only
 ```
@@ -64,14 +64,15 @@ docker compose up -d --build
 docker compose ps
 ```
 
-The host publishes the canopy proxy on `127.0.0.1:8090`, not `8080`, to avoid
-clashing with your existing service.
+The host publishes the canopy proxy on `8090`, not `8080`, to avoid clashing
+with your existing service. If Caddy also runs in Docker, it cannot reliably
+reach a port bound only to `127.0.0.1`, so publish `8090:8080`.
 
 In your existing Caddy site for `tracker.quirkyit.com.au`, add:
 
 ```caddy
 handle /canopy/* {
-    reverse_proxy 127.0.0.1:8090
+    reverse_proxy host.docker.internal:8090
 }
 
 handle /canopy {

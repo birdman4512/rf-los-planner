@@ -93,8 +93,9 @@ const TITILER_BASE = 'https://tracker.quirkyit.com.au';
 const CANOPY_HMAX = 60;         // rescale ceiling: PNG gray 0–255 ↔ 0–CANOPY_HMAX m
 // Public endpoint is a narrow reverse proxy, not titiler's generic /cog?url=
 // surface. It only serves local /cogs/<quadkey>.cog.tif files through titiler.
-function canopyTitilerUrl(qk, w, s, e, n, cols, rows){
-  return `${TITILER_BASE}/canopy/${qk}/bbox/${w},${s},${e},${n}/${cols}x${rows}.png`;
+function canopyTitilerUrl(qk, w, s, e, n, cols, rows, cacheKey=''){
+  const suffix = cacheKey ? `?v=${encodeURIComponent(cacheKey)}` : '';
+  return `${TITILER_BASE}/canopy/${qk}/bbox/${w},${s},${e},${n}/${cols}x${rows}.png${suffix}`;
 }
 const CLUTTER_ATTEN_DB_PER_M_915 = 0.10; // reference loss while LOS passes through canopy/building clutter
 const CLUTTER_ATTEN_CAP_DB = 45;         // avoid treating clutter as infinite terrain
@@ -1512,6 +1513,10 @@ function canopyManifestHasTile(manifest, qk){
   return !!(manifest.tiles && manifest.tiles[qk]);
 }
 
+function canopyManifestCacheKey(manifest){
+  return manifest && manifest.generated ? manifest.generated : '';
+}
+
 function makeClutterImpactStats(){
   return { total:0, hits:0, sum:0, max:0, maxDist:0, maxLatLng:null, maxAz:null, blockedByClutter:0, maxLossDb:0 };
 }
@@ -1765,7 +1770,7 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
         dlog(`Canopy: local COG ${qk} not listed — using geotiff fallback; build /cogs/${qk}.cog.tif for fast titiler coverage`,'warn');
         continue;
       }
-      const url = canopyTitilerUrl(qk, w, s, e, n, cols, rows);
+      const url = canopyTitilerUrl(qk, w, s, e, n, cols, rows, canopyManifestCacheKey(manifest));
       let img = null;
       try{
         img = await loadClutterImage(url, cols, rows);
