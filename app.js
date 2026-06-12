@@ -91,18 +91,10 @@ const CANOPY_TILE_Z = 9;
 // canopy source; the geotiff.js path above remains the fallback when it's down.
 const TITILER_BASE = 'https://titiler.nbird.com.au';
 const CANOPY_HMAX = 60;         // rescale ceiling: PNG gray 0–255 ↔ 0–CANOPY_HMAX m
-// titiler opens pre-built local COGs only. The raw S3 GeoTIFFs have no useful
-// overviews and can hang the VM on bbox PNG requests, so missing local COGs fall
-// back to the existing geotiff Worker path instead.
-function canopyCogSources(qk){
-  const sources = [];
-  if(!_canopyLocalCogMisses.has(qk)) sources.push({ kind:'local', url:`/cogs/${qk}.cog.tif` });
-  return sources;
-}
-function canopyTitilerUrl(w, s, e, n, cols, rows, cogUrl){
-  return `${TITILER_BASE}/cog/bbox/${w},${s},${e},${n}/${cols}x${rows}.png`
-    + `?url=${cogUrl}&rescale=0,${CANOPY_HMAX}`
-    + `&colormap_name=gray&return_mask=true&resampling=bilinear`;
+// Public endpoint is a narrow reverse proxy, not titiler's generic /cog?url=
+// surface. It only serves local /cogs/<quadkey>.cog.tif files through titiler.
+function canopyTitilerUrl(qk, w, s, e, n, cols, rows){
+  return `${TITILER_BASE}/canopy/${qk}/bbox/${w},${s},${e},${n}/${cols}x${rows}.png`;
 }
 const CLUTTER_ATTEN_DB_PER_M_915 = 0.10; // reference loss while LOS passes through canopy/building clutter
 const CLUTTER_ATTEN_CAP_DB = 45;         // avoid treating clutter as infinite terrain
@@ -1455,6 +1447,7 @@ let _clutterUnavailable = false;    // sticky: once load fails, stop retrying th
 let _canopyUnavailable = false;     // sticky: GFW/Meta canopy is flaky — skip after first failure
 let _titilerUnavailable = false;    // sticky: titiler VM is part-time — fall back after first failure
 const _canopyLocalCogMisses = new Set(); // qk values missing from titiler's /cogs mount this session
+let _canopyManifestPromise = null;
 const CLUTTER_IMG_TIMEOUT_MS = 20000; // fail a hung tile fast instead of waiting ~90s for the browser
 
 function worldCoverClassFromRgb(r,g,b,a){
@@ -1498,6 +1491,25 @@ function loadClutterImage(url, w, h){
   // Decoded clutter images can be up to 2048×2048 RGBA (~16 MB) — keep few.
   trimCache(_clutterImgCache, 8);
   return p;
+}
+
+async function loadCanopyManifest(){
+  if(_titilerUnavailable) return null;
+  if(_canopyManifestPromise) return _canopyManifestPromise;
+  _canopyManifestPromise = fetch(`${TITILER_BASE}/canopy/manifest.json`, { cache:'no-store' })
+    .then(r => r.ok ? r.json() : null)
+    .catch(e => {
+      _titilerUnavailable = true;
+      dlog(`Canopy: manifest unavailable — ${e.message||e}`,'warn');
+      return null;
+    });
+  return _canopyManifestPromise;
+}
+
+function canopyManifestHasTile(manifest, qk){
+  if(!manifest) return true; // old proxy or offline manifest: probe the image endpoint.
+  if(Array.isArray(manifest.tiles)) return manifest.tiles.includes(qk);
+  return !!(manifest.tiles && manifest.tiles[qk]);
 }
 
 function makeClutterImpactStats(){
@@ -1725,6 +1737,8 @@ async function readCanopyAtPoints(points){
 // unreachable (caller then falls back to the in-browser geotiff read).
 async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
   if(_titilerUnavailable) return null;
+  const manifest = await loadCanopyManifest();
+  if(_titilerUnavailable) return null;
   const midLat = (minLat + maxLat) / 2;
   const dLat = stepM / 111320;
   const dLng = stepM / (111320 * Math.max(0.05, Math.cos(midLat * Math.PI/180)));
@@ -1733,6 +1747,7 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
   const images = [];
   let attempted = 0;
   let failed = 0;
+  let missing = 0;
   for(let tx = tl.x; tx <= br.x; tx++){
     for(let ty = tl.y; ty <= br.y; ty++){
       const tb = tileLonLatBounds(tx, ty, CANOPY_TILE_Z);
@@ -1743,18 +1758,20 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
       const cols = Math.min(1024, Math.max(2, Math.ceil((e - w) / dLng) + 1));
       const rows = Math.min(1024, Math.max(2, Math.ceil((n - s) / dLat) + 1));
       const qk = tileToQuadKey(tx, ty, CANOPY_TILE_Z);
+      if(_canopyLocalCogMisses.has(qk) || !canopyManifestHasTile(manifest, qk)){
+        _canopyLocalCogMisses.add(qk);
+        failed++;
+        missing++;
+        dlog(`Canopy: local COG ${qk} not listed — using geotiff fallback; build /cogs/${qk}.cog.tif for fast titiler coverage`,'warn');
+        continue;
+      }
+      const url = canopyTitilerUrl(qk, w, s, e, n, cols, rows);
       let img = null;
-      for(const src of canopyCogSources(qk)){               // local /cogs/ only
-        const url = canopyTitilerUrl(w, s, e, n, cols, rows, src.url);
-        try{
-          img = await loadClutterImage(url, cols, rows);
-          break;
-        }catch(err){
-          if(src.kind === 'local'){
-            _canopyLocalCogMisses.add(qk);
-            dlog(`Canopy: local COG ${qk} not available — using geotiff fallback; build /cogs/${qk}.cog.tif for fast titiler coverage`,'warn');
-          }
-        }
+      try{
+        img = await loadClutterImage(url, cols, rows);
+      }catch(err){
+        _canopyLocalCogMisses.add(qk);
+        dlog(`Canopy: local COG ${qk} failed — ${err.message||err}; using geotiff fallback`,'warn');
       }
       if(img){
         images.push({ qk, w, s, e, n, cols: img.w, rows: img.h, data: img.data });
@@ -1764,7 +1781,7 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
     }
   }
   if(failed || !images.length){
-    if(attempted && !images.length){
+    if(attempted && !images.length && failed > missing){
       _titilerUnavailable = true;
       dlog('Canopy: titiler unreachable (or url blocked) — using geotiff fallback','warn');
     }else if(failed){

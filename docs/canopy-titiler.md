@@ -1,223 +1,176 @@
 # Canopy via a self-hosted titiler
 
-ClearPath reads per-pixel Meta/WRI canopy heights, but the source COGs are 1 m
-with **no overviews** (65536² px), so the browser can only read them at full
-resolution. That's fine for **links** (a few grazing points) but caps out for
-**coverage in dense forest** (tens of thousands of grazing points — see the
-`CANOPY_MAX_POINTS` cap in `app.js`).
+ClearPath can refine tree clutter with Meta/WRI canopy-height COGs. The source
+tiles are 1 m and huge, so browser `geotiff.js` reads are acceptable for a few
+link grazing points but are too slow/noisy for dense coverage sweeps.
 
-A **titiler** fixes this: it reads the COGs server-side (GDAL `/vsicurl/`) and
-returns a small **downsampled** image for any bbox — so dense-forest coverage
-canopy becomes one fast fetch, like the old (now-dead) GFW tile server.
+The smooth path is:
 
-> ⚠️ Because the COGs have **no overviews**, *any* server still reads full-res
-> to downsample a large bbox. The win is it happens server-side and only a small
-> image crosses the wire. To make it genuinely fast — especially on a tiny VM —
-> **pre-build overviews on the few tiles covering your sites** ("Make it fast").
+1. Pre-build the few source tiles you need as local COGs with overviews.
+2. Serve only those local COGs through a narrow `/canopy/...` proxy.
+3. Let ClearPath fall back to the existing browser geotiff path when a local COG
+   is not present.
 
-The whole stack runs from one `docker-compose.yml` (titiler + the Cloudflare
-Tunnel connector), so it's the same on a local box or a cloud VM.
+The deployable files live in [`docs/canopy-titiler/`](canopy-titiler/):
 
----
+- `Dockerfile` builds the titiler image.
+- `docker-compose.yml` runs titiler, the restricted Nginx proxy, and cloudflared.
+- `nginx.conf` exposes only `/canopy/<quadkey>/bbox/.../*.png` and
+  `/canopy/manifest.json`; it does not expose titiler's generic `/cog?url=`.
+- `scripts/build-cog.sh` downloads one Meta/WRI source tile and rebuilds it as a
+  local COG with overviews.
+- `scripts/refresh-manifest.sh` writes `cogs/manifest.json` for the app.
+- `scripts/check-updates.sh` compares local tile metadata with the upstream S3
+  headers.
 
-## Option 1 — Local VM (e.g. Alpine, small specs)  ⭐ can't be billed, simplest
+## Recommended Network Shape
 
-Your hardware, no cloud bill ever, and it only needs to be **on while you're
-planning** (off → ClearPath just falls back to flat Forest(m)). **1 vCPU / 1 GB**
-is comfortable; 512 MB works with the low `GDAL_CACHEMAX` below.
+Keep the VM closed to inbound traffic and use a Cloudflare Tunnel:
 
-### 1. Install Docker + Compose (Alpine)
+```txt
+ClearPath browser
+  -> https://titiler.nbird.com.au/canopy/...
+  -> Cloudflare Tunnel
+  -> canopy-proxy:8080
+  -> titiler:8000, using /cogs/<quadkey>.cog.tif only
+```
+
+This closes the open proxy issue because the public service never accepts an
+arbitrary `url=` parameter. It also avoids public firewall rules, public VM ports,
+and TLS certificate management.
+
+Direct internet exposure can work, but it is not easier overall: you would need
+to expose only the Nginx proxy, add TLS, keep ports/firewall tight, and never
+publish titiler's `8000` port. If you do expose the VM directly, put Caddy/Nginx
+with HTTPS in front of `canopy-proxy:8080`; do not expose titiler itself.
+
+## VM Setup
+
+On the VM:
 
 ```sh
-apk add docker docker-cli-compose
-rc-update add docker boot && service docker start
+mkdir -p ~/titiler
 ```
 
-### 2. Create the project
-
-```sh
-mkdir -p ~/titiler/cogs && cd ~/titiler
-```
-
-`~/titiler/Dockerfile` — Debian/GDAL base (don't fight Alpine's musl; the host
-only runs the daemon):
-
-```dockerfile
-FROM ghcr.io/osgeo/gdal:ubuntu-small-latest
-# build-essential + python3-dev: the base image's Python has no prebuilt wheel
-# for some titiler deps (e.g. color-operations), so pip compiles them from source.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3-pip python3-dev build-essential \
- && pip install --no-cache-dir --break-system-packages titiler.application uvicorn \
- && apt-get purge -y build-essential python3-dev && apt-get autoremove -y \
- && apt-get clean && rm -rf /var/lib/apt/lists/*
-EXPOSE 8000
-CMD ["uvicorn","titiler.application.main:app","--host","0.0.0.0","--port","8000"]
-```
-
-`~/titiler/docker-compose.yml`:
-
-```yaml
-services:
-  titiler:
-    build: .
-    restart: unless-stopped
-    expose: ["8000"]                 # internal only; cloudflared reaches it as titiler:8000
-    ports: ["127.0.0.1:8000:8000"]   # optional: lets you curl it locally on the VM
-    volumes:
-      - ./cogs:/cogs:ro
-    environment:
-      CPL_VSIL_CURL_ALLOWED_EXTENSIONS: ".tif"
-      GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR"
-      GDAL_CACHEMAX: "256"
-      VSI_CACHE: "TRUE"
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run
-    environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
-    depends_on: [titiler]
-```
-
-### 3. Create the Cloudflare Tunnel (dashboard → token)
-
-1. **Cloudflare Zero Trust dashboard → Networks → Tunnels → Create a tunnel →
-   Cloudflared**, name it `clearpath-titiler`, **Save**.
-2. On the "Install connector" screen, copy the **token** (the long `eyJ…`
-   string). Put it in `~/titiler/.env`:
-   ```
-   TUNNEL_TOKEN=eyJ...your-token...
-   ```
-3. In the tunnel's **Public Hostname** tab → **Add a public hostname**:
-   - Subdomain `titiler`, Domain `nbird.com.au`
-   - Type **HTTP**, URL **`titiler:8000`**  *(the compose service name, not
-     localhost — cloudflared resolves it over the compose network)*
-   - **Save**.
-
-### 4. Start it
+Copy the contents of `docs/canopy-titiler/` from this repo to `~/titiler/`.
+Then:
 
 ```sh
 cd ~/titiler
+cp .env.example .env
+chmod +x scripts/*.sh
+mkdir -p cogs
+```
+
+Put your Cloudflare Tunnel token in `.env`:
+
+```txt
+TUNNEL_TOKEN=eyJ...your-token...
+```
+
+In the Cloudflare Tunnel public hostname settings, point
+`titiler.nbird.com.au` to:
+
+```txt
+http://canopy-proxy:8080
+```
+
+Then start the stack:
+
+```sh
 docker compose up -d --build
-docker compose logs -f cloudflared   # should show "Registered tunnel connection"
+docker compose logs -f cloudflared
 ```
 
-### Make it fast (recommended): pre-build overviews
+## Build Local Canopy Tiles
 
-The source COGs have no overviews, so downsampling reads full-res — slow on a
-small VM. Download the few tiles covering your sites and rebuild each as a COG
-**with** overviews (one-off; ClearPath's LOG prints the tile ids):
+When ClearPath logs a missing tile such as `311213001`, build it on the VM:
 
 ```sh
-cd ~/titiler/cogs
-TILE=311211222
-curl -L -o $TILE.tif \
-  "https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/$TILE.tif"
-docker run --rm -v "$PWD":/cogs ghcr.io/osgeo/gdal:ubuntu-small-latest \
-  gdal_translate /cogs/$TILE.tif /cogs/$TILE.cog.tif \
-  -of COG -co OVERVIEWS=AUTO -co COMPRESS=DEFLATE -co BLOCKSIZE=512
+cd ~/titiler
+./scripts/build-cog.sh 311213001
 ```
 
-Then ClearPath requests `url=/cogs/<tile>.cog.tif` (local, with overviews) →
-instant, and works offline. A handful of tiles is a few GB of disk.
+That creates:
 
----
+```txt
+cogs/311213001.cog.tif
+cogs/311213001.meta
+cogs/manifest.json
+```
 
-## Option 2 — Oracle Cloud "Always Free" VM (cloud, also can't be billed)
+ClearPath fetches `manifest.json` first. If the tile is listed, it requests:
 
-A Free-Tier account you **don't** upgrade to "Pay As You Go" cannot be charged.
+```txt
+https://titiler.nbird.com.au/canopy/311213001/bbox/152.77,-27.22,153.08,-27.06/751x451.png
+```
 
-1. <https://www.oracle.com/cloud/free/> — sign up, **never** "Upgrade to Pay As
-   You Go".
-2. **Compute → Create instance:** **Ampere A1 (ARM)** "Always Free"
-   (~2 OCPU / 12 GB), **Ubuntu 22.04**. *(Ampere "out of capacity" → retry /
-   change region, or use the always-free AMD `VM.Standard.E2.1.Micro`.)*
-3. No inbound firewall changes — the tunnel is outbound-only.
-4. Install Docker (`curl -fsSL https://get.docker.com | sudo sh`) then follow the
-   **same Option 1 steps 2–4** (identical `docker-compose.yml`).
+If the tile is missing, ClearPath skips titiler and falls back to the existing
+geotiff Worker path. That avoids user-visible 500s from probing missing local
+files.
 
----
+## Verify
 
-## Verify (from your own PC)
+Health check:
 
 ```sh
-curl "https://titiler.nbird.com.au/cog/info?url=https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/311211222.tif"
+curl -i https://titiler.nbird.com.au/healthz
 ```
 
-JSON back = working end to end. The downsampled bbox PNG ClearPath will request
-local `/cogs/` COGs only. Raw S3 tiles are valid for `/cog/info`, but they have
-no useful overviews for this workflow and can hang bbox PNG rendering; missing
-local COGs fall back to the existing browser geotiff path.
+Manifest:
 
-```
-https://titiler.nbird.com.au/cog/bbox/152.4,-27.5,153.4,-26.6/256x256.png
-  ?url=/cogs/<local cog url>&rescale=0,60&colormap_name=gray&return_mask=true&resampling=bilinear
+```sh
+curl https://titiler.nbird.com.au/canopy/manifest.json
 ```
 
-> CORS: titiler allows all origins by default. To restrict to ClearPath, add a
-> Cloudflare **Transform Rule → Modify Response Header** on `titiler.nbird.com.au`
-> setting `Access-Control-Allow-Origin: https://dea.nbird.com.au`. titiler tiles
-> are cacheable, so you can let Cloudflare cache this hostname.
+Tile render:
 
----
+```sh
+curl -L -o test.png \
+  "https://titiler.nbird.com.au/canopy/311213001/bbox/152.77568137888179,-27.220726676248653,153.07837262111823,-27.059125784374057/751x451.png"
+```
 
-## Security — don't run it as an open proxy
+The old titiler URL should not be exposed publicly:
 
-The Cloudflare Tunnel puts titiler on the public internet with **no auth**, and
-titiler's `/cog/...?url=<anything>` endpoint fetches whatever `url` you give it
-(GDAL `/vsicurl/`). So out of the box **anyone who finds the hostname can make
-your VM fetch `.tif` URLs on their behalf** — an open `.tif` proxy and a cheap
-DoS target (no-overview COGs read full-res, so a few large-bbox requests pin a
-1-vCPU VM).
+```sh
+curl -i "https://titiler.nbird.com.au/cog/info?url=https://example.com/test.tif"
+```
 
-What you already have:
+Expected result: `404`.
 
-- `CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif"` blocks classic SSRF (cloud metadata
-  endpoints, internal JSON APIs, etc.) — GDAL won't open non-`.tif` targets. It
-  does **not** stop someone fetching arbitrary `.tif` files or hammering you.
+## Updates
 
-Lock it down with Cloudflare (you're already fronting it). Interactive
-Cloudflare **Access won't work** — it would block ClearPath's browser `fetch()`.
-Use WAF + rate limiting instead:
+The local COGs are a cache of a specific upstream Meta/WRI dataset path:
 
-1. **Pin `url` to your data** — WAF custom rule, action **Block**:
-   ```
-   (http.host eq "titiler.nbird.com.au"
-     and not http.request.uri.query contains "url=https://dataforgood-fb-data.s3.amazonaws.com/"
-     and not http.request.uri.query contains "url=/cogs/")
-   ```
-   Now titiler can only read the Meta COGs or your local `/cogs/` — open-proxy
-   value drops to ~zero.
-2. **Rate limit** — a Rate Limiting rule (e.g. 60 req/min per IP) caps the DoS
-   surface.
-3. **Lock CORS** — the `Access-Control-Allow-Origin: https://dea.nbird.com.au`
-   transform rule above. Defence-in-depth (CORS is browser-enforced, not a real
-   access control), but pairs with #1.
+```txt
+https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/
+```
 
-For true auth (e.g. a non-browser client) use a Cloudflare Access **service
-token** with a custom header the client injects — but that complicates the
-browser flow, so WAF pinning is the right ceiling for ClearPath.
+Each `build-cog.sh` run records the upstream `ETag` and `Last-Modified` headers
+in `cogs/<tile>.meta`. To audit for source updates:
 
----
+```sh
+cd ~/titiler
+./scripts/check-updates.sh
+```
 
-## Wire ClearPath to it
+If a tile reports changed metadata, rebuild it:
 
-Once the verify curl returns JSON, ping me and I'll switch the client to
-**server-tiled PNG fetches**: per quadkey, fetch one downsampled
-`cog/bbox/.../{cols}x{rows}.png`, decode `height = pixel/255 * 60`, mask via
-alpha. This **drops `geotiff.js` (538 KB), the `CANOPY_MAX_POINTS` cap, and the
-`canopy-service` Cloudflare Worker**, makes **dense-forest coverage canopy work**,
-and adds `https://titiler.nbird.com.au` to the CSP `img-src`.
+```sh
+./scripts/build-cog.sh <tile>
+```
 
----
+If Meta/WRI publish a new dataset version under a different path, update
+`SOURCE_PREFIX` when running the scripts, rebuild the tiles you care about, and
+restart the stack if needed:
 
-## Option 3 — AWS Lambda (co-located with the data, but can bill on overage)
+```sh
+SOURCE_PREFIX="https://.../new/path/chm" ./scripts/build-cog.sh 311213001
+```
 
-Lambda in **us-east-1** is next to the COGs (fastest reads); the always-free tier
-(1M req + 400k GB-s/mo) covers personal use — but AWS has **no hard cap**, so set
-Budgets alerts. Deploy with **AWS SAM** (CloudFormation) using a **Lambda
-Function URL** (free; avoids API Gateway's 12-month-only free tier), container
-image or GDAL layer, region `us-east-1`. titiler's repo ships an adaptable CDK
-deployment under `deployment/aws`.
+## Why Not Raw S3 In The Live App?
+
+The raw source tiles are valid GeoTIFFs, but they are huge and do not have useful
+overviews for this workflow. Rendering a bbox PNG from raw S3 through titiler can
+hang a small VM for long enough to feel broken. Local COGs with overviews make
+the fast path predictable; the browser geotiff fallback remains the safety net.
