@@ -89,7 +89,7 @@ const CANOPY_TILE_Z = 9;
 // returns a small downsampled PNG, so dense-forest coverage canopy is one fast
 // fetch (uncapped) instead of thousands of in-browser per-pixel reads. Primary
 // canopy source; the geotiff.js path above remains the fallback when it's down.
-const TITILER_BASE = 'https://titiler.nbird.com.au';
+const TITILER_BASE = 'https://tracker.quirkyit.com.au';
 const CANOPY_HMAX = 60;         // rescale ceiling: PNG gray 0–255 ↔ 0–CANOPY_HMAX m
 // Public endpoint is a narrow reverse proxy, not titiler's generic /cog?url=
 // surface. It only serves local /cogs/<quadkey>.cog.tif files through titiler.

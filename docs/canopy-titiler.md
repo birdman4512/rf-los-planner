@@ -14,7 +14,7 @@ The smooth path is:
 The deployable files live in [`docs/canopy-titiler/`](canopy-titiler/):
 
 - `Dockerfile` builds the titiler image.
-- `docker-compose.yml` runs titiler, the restricted Nginx proxy, and cloudflared.
+- `docker-compose.yml` runs titiler and the restricted Nginx proxy.
 - `nginx.conf` exposes only `/canopy/<quadkey>/bbox/.../*.png` and
   `/canopy/manifest.json`; it does not expose titiler's generic `/cog?url=`.
 - `scripts/build-cog.sh` downloads one Meta/WRI source tile and rebuilds it as a
@@ -25,24 +25,20 @@ The deployable files live in [`docs/canopy-titiler/`](canopy-titiler/):
 
 ## Recommended Network Shape
 
-Keep the VM closed to inbound traffic and use a Cloudflare Tunnel:
+Use your existing public Caddy site on `tracker.quirkyit.com.au` and proxy the
+`/canopy/` subfolder to the VM-local canopy proxy:
 
 ```txt
 ClearPath browser
-  -> https://titiler.nbird.com.au/canopy/...
-  -> Cloudflare Tunnel
-  -> canopy-proxy:8080
+  -> https://tracker.quirkyit.com.au/canopy/...
+  -> Caddy
+  -> 127.0.0.1:8090 on the VM host
+  -> canopy-proxy:8080 in Docker
   -> titiler:8000, using /cogs/<quadkey>.cog.tif only
 ```
 
 This closes the open proxy issue because the public service never accepts an
-arbitrary `url=` parameter. It also avoids public firewall rules, public VM ports,
-and TLS certificate management.
-
-Direct internet exposure can work, but it is not easier overall: you would need
-to expose only the Nginx proxy, add TLS, keep ports/firewall tight, and never
-publish titiler's `8000` port. If you do expose the VM directly, put Caddy/Nginx
-with HTTPS in front of `canopy-proxy:8080`; do not expose titiler itself.
+arbitrary `url=` parameter. It also reuses the TLS and hostname you already run.
 
 ## VM Setup
 
@@ -57,30 +53,34 @@ Then:
 
 ```sh
 cd ~/titiler
-cp .env.example .env
 chmod +x scripts/*.sh
 mkdir -p cogs
-```
-
-Put your Cloudflare Tunnel token in `.env`:
-
-```txt
-TUNNEL_TOKEN=eyJ...your-token...
-```
-
-In the Cloudflare Tunnel public hostname settings, point
-`titiler.nbird.com.au` to:
-
-```txt
-http://canopy-proxy:8080
 ```
 
 Then start the stack:
 
 ```sh
 docker compose up -d --build
-docker compose logs -f cloudflared
+docker compose ps
 ```
+
+The host publishes the canopy proxy on `127.0.0.1:8090`, not `8080`, to avoid
+clashing with your existing service.
+
+In your existing Caddy site for `tracker.quirkyit.com.au`, add:
+
+```caddy
+handle /canopy/* {
+    reverse_proxy 127.0.0.1:8090
+}
+
+handle /canopy {
+    redir /canopy/ 308
+}
+```
+
+Use `handle`, not `handle_path`, because the inner Nginx config expects the
+request path to still begin with `/canopy/`.
 
 ## Build Local Canopy Tiles
 
@@ -102,7 +102,7 @@ cogs/manifest.json
 ClearPath fetches `manifest.json` first. If the tile is listed, it requests:
 
 ```txt
-https://titiler.nbird.com.au/canopy/311213001/bbox/152.77,-27.22,153.08,-27.06/751x451.png
+https://tracker.quirkyit.com.au/canopy/311213001/bbox/152.77,-27.22,153.08,-27.06/751x451.png
 ```
 
 If the tile is missing, ClearPath skips titiler and falls back to the existing
@@ -111,29 +111,38 @@ files.
 
 ## Verify
 
-Health check:
+Legacy hostname check from the old tunnel setup is no longer relevant; use the
+host-local and public Caddy checks below.
+
+Host-local health check:
 
 ```sh
-curl -i https://titiler.nbird.com.au/healthz
+curl -i http://127.0.0.1:8090/healthz
+```
+
+Public health check through Caddy:
+
+```sh
+curl -i https://tracker.quirkyit.com.au/canopy/healthz
 ```
 
 Manifest:
 
 ```sh
-curl https://titiler.nbird.com.au/canopy/manifest.json
+curl https://tracker.quirkyit.com.au/canopy/manifest.json
 ```
 
 Tile render:
 
 ```sh
 curl -L -o test.png \
-  "https://titiler.nbird.com.au/canopy/311213001/bbox/152.77568137888179,-27.220726676248653,153.07837262111823,-27.059125784374057/751x451.png"
+  "https://tracker.quirkyit.com.au/canopy/311213001/bbox/152.77568137888179,-27.220726676248653,153.07837262111823,-27.059125784374057/751x451.png"
 ```
 
 The old titiler URL should not be exposed publicly:
 
 ```sh
-curl -i "https://titiler.nbird.com.au/cog/info?url=https://example.com/test.tif"
+curl -i "https://tracker.quirkyit.com.au/cog/info?url=https://example.com/test.tif"
 ```
 
 Expected result: `404`.
