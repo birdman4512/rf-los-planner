@@ -60,11 +60,12 @@ const LIMITS = {
 };
 const COVERAGE_RAY_OPTIONS = [24, 36, 72, 144, 360];
 const COVERAGE_SAMPLE_OPTIONS = [30, 50, 80];
-// Target terrain sample step (m) along each coverage ray — roughly the DEM
-// pixel size so near-field hills are resolved. The Samples setting is a floor;
-// COVERAGE_MAX_SAMPLES caps total samples per ray so large radii stay fast.
-const COVERAGE_STEP_M = 40;
-const COVERAGE_MAX_SAMPLES = 1600;
+// Target sample step (m) along each coverage ray. Finer than the ~30-40 m DEM
+// on purpose: it oversamples terrain (cheap interpolation) so the 1 m measured
+// canopy resolves narrow tree lines and clearings the old 40 m step walked over.
+// The Samples setting is a floor; COVERAGE_MAX_SAMPLES caps total samples per ray.
+const COVERAGE_STEP_M = 20;
+const COVERAGE_MAX_SAMPLES = 3200; // 20 m step holds out to ~64 km before capping
 const FRESNEL_OPTIONS = [0, 0.4, 0.6, 1];
 
 // ── Surface clutter via Meta/WRI canopy height + ESA WorldCover land cover ──
@@ -82,7 +83,11 @@ const WORLDCOVER_WMS_SOURCES = [
 // pixels fall back to WorldCover's flat Forest(m).
 const CANOPY_TILE_Z = 9;
 const TITILER_BASE = 'https://tracker.quirkyit.com.au';
-const CANOPY_HMAX = 60;         // rescale ceiling: PNG gray 0–255 ↔ 0–CANOPY_HMAX m
+// Rescale ceiling: PNG gray 0–255 ↔ 0–CANOPY_HMAX m. The <img>/canvas decode is
+// 8-bit (256 levels), so a lower ceiling is the only browser-side precision lever.
+// The Meta CHM rarely exceeds ~40 m (the model saturates below that), so 40 gives
+// 0.157 m/level vs 0.235 at 60 with negligible clipping. MUST equal nginx rescale.
+const CANOPY_HMAX = 40;
 // Public endpoint is a narrow reverse proxy, not titiler's generic /cog?url=
 // surface. It only serves local /cogs/<quadkey>.cog.tif files through titiler.
 function canopyTitilerUrl(qk, w, s, e, n, cols, rows, cacheKey=''){
