@@ -1443,8 +1443,12 @@ async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
 const _clutterImgCache = new Map(); // url → Promise<{data,w,h}>
 let _clutterUnavailable = false;    // sticky: once load fails, stop retrying this session
 let _titilerUnavailable = false;    // sticky: titiler VM is part-time — fall back after first failure
-const _canopyLocalCogMisses = new Set(); // qk values missing from titiler's /cogs mount this session
-let _canopyManifestPromise = null;
+const _canopyLocalCogMisses = new Set(); // qk values that failed this session; cleared when a newer manifest generation appears (i.e. a COG was built)
+let _canopyManifestPromise = null;       // in-flight manifest fetch, shared by concurrent callers
+let _canopyManifest = null;              // last resolved manifest
+let _canopyManifestFetchedAt = 0;        // Date.now() of last successful fetch (TTL gate)
+let _canopyManifestGenerated = '';       // 'generated' stamp last seen; a change means a COG was (re)built → drop stale misses
+const CANOPY_MANIFEST_TTL_MS = 60000;    // re-poll at most this often so COGs built mid-session appear without a page reload
 const CLUTTER_IMG_TIMEOUT_MS = 20000; // fail a hung tile fast instead of waiting ~90s for the browser
 
 function worldCoverClassFromRgb(r,g,b,a){
@@ -1490,12 +1494,31 @@ function loadClutterImage(url, w, h){
   return p;
 }
 
-async function loadCanopyManifest(){
+async function loadCanopyManifest(force){
   if(_titilerUnavailable) return null;
-  if(_canopyManifestPromise) return _canopyManifestPromise;
+  if(!force && _canopyManifest && (Date.now() - _canopyManifestFetchedAt) < CANOPY_MANIFEST_TTL_MS){
+    return _canopyManifest; // fresh enough — skip the network round-trip
+  }
+  if(_canopyManifestPromise) return _canopyManifestPromise; // a fetch is already in flight — share it
   _canopyManifestPromise = fetch(`${TITILER_BASE}/canopy/manifest.json`, { cache:'no-store' })
     .then(r => r.ok ? r.json() : null)
+    .then(m => {
+      _canopyManifestPromise = null;
+      if(m){
+        _canopyManifest = m;
+        _canopyManifestFetchedAt = Date.now();
+        const gen = canopyManifestCacheKey(m);
+        if(gen !== _canopyManifestGenerated){
+          // refresh-manifest.sh stamps a new 'generated' on every build, so a
+          // changed stamp means tiles we previously gave up on may now exist.
+          _canopyManifestGenerated = gen;
+          _canopyLocalCogMisses.clear();
+        }
+      }
+      return m;
+    })
     .catch(e => {
+      _canopyManifestPromise = null;
       _titilerUnavailable = true;
       dlog(`Canopy: manifest unavailable — ${e.message||e}`,'warn');
       return null;
@@ -1669,7 +1692,10 @@ async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, height
 // unreachable (caller then falls back to WorldCover's flat Forest(m)).
 async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
   if(_titilerUnavailable) return null;
-  const manifest = await loadCanopyManifest();
+  // If we gave up on any tiles earlier this session, force a fresh manifest read:
+  // a COG built since then bumps the manifest's 'generated' stamp, which clears
+  // those misses so the newly built tile is picked up without a page reload.
+  const manifest = await loadCanopyManifest(_canopyLocalCogMisses.size > 0);
   if(_titilerUnavailable) return null;
   const midLat = (minLat + maxLat) / 2;
   const dLat = stepM / 111320;
