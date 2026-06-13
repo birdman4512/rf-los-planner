@@ -169,7 +169,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 
 /* ── ANALYSE BUTTON ── */
 .analyse-wrap{padding:7px 9px;border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:6px}
-.analyse-wrap .btn{flex:1;min-width:0;font-size:10px;letter-spacing:.5px;padding:6px 6px;white-space:normal;line-height:1.15;text-align:center}
+.analyse-wrap .btn{flex:1;min-width:0;font-size:11px;letter-spacing:1px;padding:7px 6px;white-space:nowrap;text-align:center}
 #btnComputeAllCov{background:var(--green);border-color:var(--green)}
 #btnComputeAllCov:hover{opacity:.85}
 .analyse-wrap .btn{width:100%;font-size:13px;padding:9px}
@@ -533,7 +533,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260613-9">BUILD 20260613-9</span>
+      <span class="hdr-tag" title="Build 20260613-10">BUILD 20260613-10</span>
     </div>
   </header>
 
@@ -595,8 +595,8 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 
       <!-- Anchored at the very bottom of the sidebar -->
       <div class="analyse-wrap">
-        <button class="btn primary" id="btnAnalyse">▶ ANALYSE ALL LINKS</button>
-        <button class="btn primary" id="btnComputeAllCov" title="Compute terrain-aware coverage for every coverage-enabled node">▣ COMPUTE ALL COVERAGE</button>
+        <button class="btn primary" id="btnAnalyse" title="Analyse all links">▶ ANALYSE</button>
+        <button class="btn primary" id="btnComputeAllCov" title="Compute terrain-aware coverage for every coverage-enabled node">▣ COVERAGE</button>
       </div>
 
     </div><!-- /sidebar -->
@@ -639,7 +639,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="share-codec.js?v=20260613-9"></script>
-<script src="app.js?v=20260613-9"></script>
+<script src="share-codec.js?v=20260613-10"></script>
+<script src="app.js?v=20260613-10"></script>
 </body>
 </html>
