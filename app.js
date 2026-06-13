@@ -3169,7 +3169,7 @@ function buildShareHash(){
       f:inpVal('inpFreq'), k:inpVal('inpK'), tx:inpVal('inpTx'), gn:inpVal('inpGain'),
       rx:inpVal('inpRx'), mg:inpVal('inpMargin'), ra:inpVal('inpRxAntH'),
       cr:inpVal('inpCovRays'), cs:inpVal('inpCovSamples'), cf:inpVal('inpCovFresnel'),
-      cm:inpVal('inpCovMaxKm'), co:clutterEnabled()?1:0,
+      cm:inpVal('inpCovMaxKm'), co:clutterEnabled()?1:0, cy:canopyEnabled()?1:0,
       fh:inpVal('inpClutterForest'), uh:inpVal('inpClutterUrban'),
       xe:inpVal('inpClutterExclude'), ca:inpVal('inpClutterAtten')
     },
@@ -3337,6 +3337,7 @@ function normaliseV3Hash(raw) {
     covFresnel: optionNum(parseFloat(legacyCoverageDefaults ? presetRf.fresnel : raw.cf), FRESNEL_OPTIONS, 0.4),
     covMaxKm: clampNum(raw.cm ?? presetRf?.maxKm, 1, LIMITS.covMaxKm, 30),
     clutterOn: !!raw.co,
+    canopyOn: !!raw.cy,
     clutterForest: clampNum(raw.fh, 0, 200, 15),
     clutterUrban: clampNum(raw.uh, 0, 200, 8),
     clutterExclude: clampNum(raw.xe, 0, 5000, 100),
@@ -3457,6 +3458,8 @@ function loadFromHash(){
     setInputValue('inpClutterAtten',data.clutterAtten);
     const clutterCb=document.getElementById('inpClutterOn');
     if(clutterCb) clutterCb.checked=!!data.clutterOn;
+    const canopyCb=document.getElementById('inpCanopyOn');
+    if(canopyCb) canopyCb.checked=!!data.canopyOn;
     S.nextId=data.nextId;
     // Restore nodes
     data.nodes.forEach(nd=>{
