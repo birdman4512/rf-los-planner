@@ -10,6 +10,15 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com https://tracker.quirkyit.com.au; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self'; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com/elevation-tiles-prod/ https://services.terrascope.be https://titiler.terrascope.be https://tracker.quirkyit.com.au; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
 <meta name="referrer" content="no-referrer">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
+<!-- PWA / iOS home-screen install. iOS uses the apple-* tags + PNG touch icon
+     (not the manifest) for a full-screen, custom-icon launch from Safari. -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b0f17">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="ClearPath">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js" integrity="sha512-qtX0GLM3qX8rxJN1gyDfcnMFFrKvixfoEOwbBib9VafR5vbChV5LeE5wSI/x+IlCkTY5ZFddFDCCfaVJJNnuKQ==" crossorigin="anonymous"></script>
@@ -533,7 +542,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260614-02">BUILD 20260614-02</span>
+      <span class="hdr-tag" title="Build 20260614-03">BUILD 20260614-03</span>
     </div>
   </header>
 
@@ -639,7 +648,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="share-codec.js?v=20260614-02"></script>
-<script src="app.js?v=20260614-02"></script>
+<script src="share-codec.js?v=20260614-03"></script>
+<script src="app.js?v=20260614-03"></script>
 </body>
 </html>

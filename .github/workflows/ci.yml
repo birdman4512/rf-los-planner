@@ -70,9 +70,10 @@ jobs:
       - name: Assemble static site
         run: |
           mkdir -p _site/data
-          cp index.html app.js share-codec.js repeaters.html repeaters.js favicon.svg _site/
+          cp index.html app.js share-codec.js repeaters.html repeaters.js favicon.svg manifest.webmanifest _site/
           cp data/repeaters-au.json _site/data/
           cp -r fonts _site/fonts
+          cp -r icons _site/icons
 
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
