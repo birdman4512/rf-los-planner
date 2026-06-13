@@ -1,44 +1,49 @@
 # Canopy via a self-hosted titiler
 
-ClearPath can refine tree clutter with Meta/WRI canopy-height COGs. The source
-tiles are 1 m and huge, so browser `geotiff.js` reads are acceptable for a few
-link grazing points but are too slow/noisy for dense coverage sweeps.
+ClearPath refines tree clutter with Meta/WRI canopy-height COGs. The source tiles
+are 1 m and huge with no usable overviews, so they are read **server-side** by a
+self-hosted titiler that returns a small downsampled PNG per tile. Where a tile
+isn't served, ClearPath falls back to the flat WorldCover Forest(m) value.
 
 The smooth path is:
 
 1. Pre-build the few source tiles you need as local COGs with overviews.
 2. Serve only those local COGs through a narrow `/canopy/...` proxy.
-3. Let ClearPath fall back to the existing browser geotiff path when a local COG
-   is not present.
+3. ClearPath uses the flat WorldCover Forest(m) value for any tile not built.
 
 The deployable files live in [`docs/canopy-titiler/`](canopy-titiler/):
 
 - `Dockerfile` builds the titiler image.
 - `docker-compose.yml` runs titiler and the restricted Nginx proxy.
 - `nginx.conf` exposes only `/canopy/<quadkey>/bbox/.../*.png` and
-  `/canopy/manifest.json`; it does not expose titiler's generic `/cog?url=`.
+  `/canopy/manifest.json`; it does not expose titiler's generic `/cog?url=`, and
+  it is the single source of CORS for the stack.
 - `scripts/build-cog.sh` downloads one Meta/WRI source tile and rebuilds it as a
   local COG with overviews.
 - `scripts/refresh-manifest.sh` writes `cogs/manifest.json` for the app.
 - `scripts/check-updates.sh` compares local tile metadata with the upstream S3
   headers.
 
-## Recommended Network Shape
+## Network Shape
 
-Use your existing public Caddy site on `tracker.quirkyit.com.au` and proxy the
-`/canopy/` subfolder to the VM-local canopy proxy:
+The stack is self-contained and publishes the canopy API on **host port 8090**.
+Front it with any TLS reverse proxy (nginx, Caddy, Traefik, …) on a public
+hostname. That reverse proxy is independent of this stack — it only forwards the
+`/canopy/` path through unchanged and adds nothing:
 
 ```txt
 ClearPath browser
-  -> https://tracker.quirkyit.com.au/canopy/...
-  -> Caddy
-  -> VM host port 8090
-  -> canopy-proxy:8080 in Docker
+  -> https://<your-host>/canopy/...
+  -> your TLS reverse proxy   (forward /canopy/* → host:8090; add NO CORS)
+  -> host port 8090
+  -> canopy-proxy:8080 in Docker   (path restriction + CORS + rewrite)
   -> titiler:8000, using /cogs/<quadkey>.cog.tif only
 ```
 
-This closes the open proxy issue because the public service never accepts an
-arbitrary `url=` parameter. It also reuses the TLS and hostname you already run.
+This closes the open-proxy issue because the public service never accepts an
+arbitrary `url=` parameter. CORS is set once, **inside** the stack (the canopy
+proxy), so your reverse proxy must **not** add its own `Access-Control-*`
+headers — a duplicated header makes the browser reject the response.
 
 ## VM Setup
 
@@ -65,10 +70,16 @@ docker compose ps
 ```
 
 The host publishes the canopy proxy on `8090`, not `8080`, to avoid clashing
-with your existing service. If Caddy also runs in Docker, it cannot reliably
-reach a port bound only to `127.0.0.1`, so publish `8090:8080`.
+with other services. If your reverse proxy also runs in Docker, it cannot
+reliably reach a port bound only to `127.0.0.1`, so the stack publishes
+`8090:8080`.
 
-In your existing Caddy site for `tracker.quirkyit.com.au`, add:
+### Front it with your TLS reverse proxy
+
+Point your existing public reverse proxy at the stack on `host:8090`, forwarding
+the `/canopy/` path **unchanged** (the inner Nginx matches on the `/canopy/`
+prefix) and adding **no** headers of its own. A Caddy site, for example, needs
+only a plain pass-through:
 
 ```caddy
 handle /canopy/* {
@@ -80,8 +91,12 @@ handle /canopy {
 }
 ```
 
-Use `handle`, not `handle_path`, because the inner Nginx config expects the
-request path to still begin with `/canopy/`.
+> **Do not add `Access-Control-*` headers at the reverse proxy.** CORS is set
+> once, inside the stack (`nginx.conf` → `set $cors_origin`). A second copy makes
+> the browser reject the doubled header. No OPTIONS/preflight handling is needed
+> either — ClearPath only makes simple requests (`<img crossorigin>` + a plain
+> `fetch`), which never trigger a preflight. To change the allowed browser
+> origin, edit `set $cors_origin` in `nginx.conf`, not the reverse proxy.
 
 ## Build Local Canopy Tiles
 
@@ -106,14 +121,11 @@ ClearPath fetches `manifest.json` first. If the tile is listed, it requests:
 https://tracker.quirkyit.com.au/canopy/311213001/bbox/152.77,-27.22,153.08,-27.06/751x451.png
 ```
 
-If the tile is missing, ClearPath skips titiler and falls back to the existing
-geotiff Worker path. That avoids user-visible 500s from probing missing local
-files.
+If the tile isn't built, ClearPath uses the flat WorldCover Forest(m) value for
+that area instead. It checks the manifest first, so it never probes missing
+local files (no user-visible 500s).
 
 ## Verify
-
-Legacy hostname check from the old tunnel setup is no longer relevant; use the
-host-local and public Caddy checks below.
 
 Host-local health check:
 
@@ -121,7 +133,7 @@ Host-local health check:
 curl -i http://127.0.0.1:8090/healthz
 ```
 
-Public health check through Caddy:
+Public health check (through your reverse proxy):
 
 ```sh
 curl -i https://tracker.quirkyit.com.au/canopy/healthz
@@ -138,6 +150,13 @@ Tile render:
 ```sh
 curl -L -o test.png \
   "https://tracker.quirkyit.com.au/canopy/311213001/bbox/152.77568137888179,-27.220726676248653,153.07837262111823,-27.059125784374057/751x451.png"
+```
+
+CORS — expect **exactly one** `access-control-allow-origin` line:
+
+```sh
+curl -sI -H "Origin: https://dea.nbird.com.au" \
+  "https://tracker.quirkyit.com.au/canopy/manifest.json" | grep -i access-control
 ```
 
 The old titiler URL should not be exposed publicly:
@@ -183,4 +202,5 @@ SOURCE_PREFIX="https://.../new/path/chm" ./scripts/build-cog.sh 311213001
 The raw source tiles are valid GeoTIFFs, but they are huge and do not have useful
 overviews for this workflow. Rendering a bbox PNG from raw S3 through titiler can
 hang a small VM for long enough to feel broken. Local COGs with overviews make
-the fast path predictable; the browser geotiff fallback remains the safety net.
+the fast path predictable; the flat WorldCover Forest(m) value is the fallback
+for any area whose tile hasn't been built.

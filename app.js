@@ -75,20 +75,12 @@ const WORLDCOVER_WMS_SOURCES = [
   { name:'Terrascope TiTiler', url:'https://titiler.terrascope.be/wms', layer:'esa-worldcover-map-10m-2021-v2_map', time:'2021-01-01' },
   { name:'Terrascope legacy', url:'https://services.terrascope.be/wms/v2', layer:'WORLDCOVER_2021_MAP' }
 ];
-// Per-pixel Meta/WRI canopy height, read in-browser (geotiff.js) from the COGs
-// via the Cloudflare Worker. The COGs have NO overviews and are 1 m (65536²),
-// so reading the whole coverage area would need hundreds of MB in one array.
-// Instead canopy is OPT-IN (a toggle) and capped to a small ring around each
-// site, read in memory-safe chunks. Outside the ring, WorldCover Forest(m)
-// applies. See docs/canopy-titiler.md for the server-side alternative.
-const CANOPY_PROXY_BASE = 'https://clearpath-clutter.nbird.com.au';
-const CANOPY_CEILING_M = 70;    // worst-case canopy height used to screen grazing points
-const CANOPY_MAX_POINTS = 1500; // coverage: above this many grazing points, skip (too dense to read per-point)
+// Per-pixel Meta/WRI canopy height refines tree clutter. The source COGs have NO
+// overviews and are 1 m (65536²), so they are read SERVER-SIDE by a self-hosted
+// titiler (docs/canopy-titiler.md): one small downsampled PNG per source tile,
+// uncapped, so dense-forest coverage works. When titiler is unavailable, tree
+// pixels fall back to WorldCover's flat Forest(m).
 const CANOPY_TILE_Z = 9;
-// Self-hosted titiler (docs/canopy-titiler.md): reads the COGs server-side and
-// returns a small downsampled PNG, so dense-forest coverage canopy is one fast
-// fetch (uncapped) instead of thousands of in-browser per-pixel reads. Primary
-// canopy source; the geotiff.js path above remains the fallback when it's down.
 const TITILER_BASE = 'https://tracker.quirkyit.com.au';
 const CANOPY_HMAX = 60;         // rescale ceiling: PNG gray 0–255 ↔ 0–CANOPY_HMAX m
 // Public endpoint is a narrow reverse proxy, not titiler's generic /cog?url=
@@ -1445,7 +1437,6 @@ async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
 // ═══════════════════════════════════════════════════════════
 const _clutterImgCache = new Map(); // url → Promise<{data,w,h}>
 let _clutterUnavailable = false;    // sticky: once load fails, stop retrying this session
-let _canopyUnavailable = false;     // sticky: GFW/Meta canopy is flaky — skip after first failure
 let _titilerUnavailable = false;    // sticky: titiler VM is part-time — fall back after first failure
 const _canopyLocalCogMisses = new Set(); // qk values missing from titiler's /cogs mount this session
 let _canopyManifestPromise = null;
@@ -1601,34 +1592,6 @@ function tileLonLatBounds(x, y, z){
   return [lng1, Math.min(lat1, lat2), lng2, Math.max(lat1, lat2)];
 }
 
-// Lazy-load the chunky geotiff.js (~540 KB) only when canopy is first needed.
-let _geotiffPromise = null;
-function loadGeotiff(){
-  if(window.GeoTIFF) return Promise.resolve(window.GeoTIFF);
-  if(_geotiffPromise) return _geotiffPromise;
-  _geotiffPromise = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'vendor/geotiff.min.js';
-    s.onload = () => window.GeoTIFF ? resolve(window.GeoTIFF) : reject(new Error('geotiff global missing'));
-    s.onerror = () => reject(new Error('failed to load geotiff.js'));
-    document.head.appendChild(s);
-  });
-  return _geotiffPromise;
-}
-
-// Web Mercator (EPSG:3857) ↔ lon/lat. The canopy COGs are tagged 3857 but the
-// data is actually 4326; we read each tile in whatever space its bounding box
-// reports, converting query coords to match.
-const WEBMERC_R = 6378137;
-function lngLatToMerc(lng, lat){
-  return [ lng * Math.PI/180 * WEBMERC_R,
-           Math.log(Math.tan(Math.PI/4 + lat*Math.PI/360)) * WEBMERC_R ];
-}
-function mercToLngLat(x, y){
-  return [ x / WEBMERC_R * 180/Math.PI,
-           (2*Math.atan(Math.exp(y / WEBMERC_R)) - Math.PI/2) * 180/Math.PI ];
-}
-
 // Build a land-cover→clutter-height sampler over [minLat,minLng]–[maxLat,maxLng]
 // at ~stepM resolution. `heights` maps WorldCover class → metres. Returns a
 // sampler {heightAt(lat,lng)} or null if no data could be loaded (→ bare earth).
@@ -1693,53 +1656,12 @@ async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, height
   return null;
 }
 
-// Sample measured canopy height (m) at specific points, grouped by COG tile so
-// each tile opens once and geotiff.js caches the internal tiles. Used for the
-// targeted "grazing point" reads on links. Returns Map(point.id → height).
-async function readCanopyAtPoints(points){
-  const out = new Map();
-  if(_canopyUnavailable || !points.length) return out;
-  let GeoTIFF;
-  try{ GeoTIFF = await loadGeotiff(); }
-  catch(e){ _canopyUnavailable = true; dlog(`Canopy: geotiff.js failed to load — ${e.message||e}`,'err'); return out; }
-  const byTile = new Map();
-  for(const p of points){
-    const { x, y } = lonLatToTile(p.lng, p.lat, CANOPY_TILE_Z);
-    const qk = tileToQuadKey(x, y, CANOPY_TILE_Z);
-    if(!byTile.has(qk)) byTile.set(qk, []);
-    byTile.get(qk).push(p);
-  }
-  for(const [qk, pts] of byTile){
-    try{
-      // ?cb escapes any stale full-file 200 cached before the Worker's no-store
-      // fix (the Worker ignores the query; S3 is fetched by clean pathname).
-      const tiff = await GeoTIFF.fromUrl(`${CANOPY_PROXY_BASE}/chm/${qk}.tif?cb=1`);
-      const image = await tiff.getImage();
-      const bb = image.getBoundingBox();
-      const imgW = image.getWidth(), imgH = image.getHeight();
-      const resX = (bb[2] - bb[0]) / imgW, resY = (bb[3] - bb[1]) / imgH;
-      const is3857 = Math.max(Math.abs(bb[0]), Math.abs(bb[2])) > 360;
-      const nodata = typeof image.getGDALNoData === 'function' ? image.getGDALNoData() : null;
-      for(const p of pts){
-        const [px, py] = is3857 ? lngLatToMerc(p.lng, p.lat) : [p.lng, p.lat];
-        const col = Math.floor((px - bb[0]) / resX), row = Math.floor((bb[3] - py) / resY);
-        if(col < 0 || col >= imgW || row < 0 || row >= imgH) continue;
-        const v = (await image.readRasters({ window: [col, row, col + 1, row + 1] }))[0][0];
-        if(isFinite(v) && (nodata == null || v !== nodata) && v > 0.25 && v < 120) out.set(p.id, v);
-      }
-    }catch(e){
-      dlog(`Canopy: tile ${qk} read failed — ${e.message||e}`,'err');
-    }
-  }
-  return out;
-}
-
 // Build a measured-canopy sampler over [minLat,minLng]–[maxLat,maxLng] from the
 // self-hosted titiler: one downsampled gray PNG per source COG tile the bbox
 // touches (rescale 0–CANOPY_HMAX, return_mask=true). Decodes height = R/255*HMAX,
 // alpha 0 = no data. Uncapped, so dense-forest coverage is a handful of fetches.
 // Returns {heightAt(lat,lng)→metres or NaN, tiles} or null if titiler is
-// unreachable (caller then falls back to the in-browser geotiff read).
+// unreachable (caller then falls back to WorldCover's flat Forest(m)).
 async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
   if(_titilerUnavailable) return null;
   const manifest = await loadCanopyManifest();
@@ -1767,7 +1689,7 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
         _canopyLocalCogMisses.add(qk);
         failed++;
         missing++;
-        dlog(`Canopy: local COG ${qk} not listed — using geotiff fallback; build /cogs/${qk}.cog.tif for fast titiler coverage`,'warn');
+        dlog(`Canopy: local COG ${qk} not built — using flat Forest(m); run build-cog.sh ${qk} to enable measured canopy here`,'warn');
         continue;
       }
       const url = canopyTitilerUrl(qk, w, s, e, n, cols, rows, canopyManifestCacheKey(manifest));
@@ -1776,7 +1698,7 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
         img = await loadClutterImage(url, cols, rows);
       }catch(err){
         _canopyLocalCogMisses.add(qk);
-        dlog(`Canopy: local COG ${qk} failed — ${err.message||err}; using geotiff fallback`,'warn');
+        dlog(`Canopy: local COG ${qk} failed — ${err.message||err}; using flat Forest(m)`,'warn');
       }
       if(img){
         images.push({ qk, w, s, e, n, cols: img.w, rows: img.h, data: img.data });
@@ -1788,9 +1710,9 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
   if(failed || !images.length){
     if(attempted && !images.length && failed > missing){
       _titilerUnavailable = true;
-      dlog('Canopy: titiler unreachable (or url blocked) — using geotiff fallback','warn');
+      dlog('Canopy: titiler unreachable — using flat Forest(m)','warn');
     }else if(failed){
-      dlog(`Canopy: titiler loaded ${images.length}/${attempted} source tile(s); falling back to geotiff to avoid partial canopy data`,'warn');
+      dlog(`Canopy: titiler loaded ${images.length}/${attempted} source tile(s); using flat Forest(m) to avoid partial canopy data`,'warn');
     }
     return null;
   }
@@ -1808,40 +1730,6 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
       return NaN;
     }
   };
-}
-
-// Coverage pre-screen: find tree points where a radial LOS to the ray's far end
-// could graze the tallest possible canopy, so measured canopy is read only
-// there. Fetches terrain per ray (cached for the main sweep). Returns deduped
-// [{id:coordKey, lat, lng}].
-async function screenGrazingTreePoints(node, srcH, rays, samples, maxRange, g, worldCover){
-  const flagged = [], seen = new Set();
-  for(let r = 0; r < rays; r++){
-    const az = r * 360 / rays;
-    const dists = [], points = [];
-    for(let s = 0; s <= samples; s++){
-      const d = maxRange * s / samples;
-      const [la, ln] = destPoint(node.lat, node.lng, az, d);
-      dists.push(d); points.push([la, ln]);
-    }
-    let elevs;
-    try{ elevs = await Promise.all(points.map(([la, ln]) => tileElevAt(la, ln))); }
-    catch{ continue; }                                  // main sweep surfaces terrain errors
-    const dFar = dists[samples], rxAltFar = elevs[samples] + g.rxAntH;
-    for(let j = 1; j < samples; j++){
-      if(dists[j] < g.clutterExcludeM) continue;
-      const [la, ln] = points[j];
-      const cls = worldCover.classAt(la, ln);
-      if(cls !== 10 && cls !== 95) continue;            // tree / mangrove only
-      const bareEff = elevs[j] + bulge(dists[j], dFar - dists[j], g.K);
-      const losFar = srcH + (rxAltFar - srcH) * (dists[j] / dFar);
-      if(losFar - fresnel1(dists[j], dFar - dists[j], g.freq) < bareEff + CANOPY_CEILING_M){
-        const key = `${la.toFixed(6)},${ln.toFixed(6)}`;
-        if(!seen.has(key)){ seen.add(key); flagged.push({ id: key, lat: la, lng: ln }); }
-      }
-    }
-  }
-  return flagged;
 }
 
 // Resolve the active per-class clutter height table from the UI (forest +
@@ -2176,9 +2064,9 @@ async function _computeNodeCoverageImpl(node){
     if(wc){
       let canopySrc = null, canopyLabel = '';
       if(canopyEnabled()){
-        // Primary: one downsampled titiler PNG per source tile over the sweep
-        // bbox (uncapped — dense forest works). Fallback: the in-browser geotiff
-        // grazing-point read (capped) when the titiler VM is unreachable.
+        // Measured canopy: one downsampled titiler PNG per source tile over the
+        // sweep bbox (uncapped — dense forest works). If titiler is unavailable,
+        // tree pixels fall back to WorldCover's flat Forest(m).
         toast(`${node.name}: loading canopy (titiler)…`);
         const cg = await buildCanopyGrid(node.lat - dLat, node.lng - dLng,
           node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M);
@@ -2186,17 +2074,7 @@ async function _computeNodeCoverageImpl(node){
           canopySrc = cg; canopyLabel = ' + measured canopy (titiler)';
           dlog(`  Canopy: titiler grid loaded over ${cg.tiles} source tile(s)`,'ok');
         } else {
-          toast(`${node.name}: titiler down — screening canopy (grazing points)…`);
-          const flagged = await screenGrazingTreePoints(node, srcH, rays, samples, maxRange, g, wc);
-          if(flagged.length > CANOPY_MAX_POINTS){
-            dlog(`  Canopy: titiler unavailable and ${flagged.length} grazing points exceed the ${CANOPY_MAX_POINTS} in-browser cap (dense forest) — keeping flat Forest(m).`,'warn');
-          } else if(flagged.length){
-            const m = await readCanopyAtPoints(flagged);
-            if(m.size){ canopySrc = { heightAt:(la,ln)=>{ const k=`${la.toFixed(6)},${ln.toFixed(6)}`; return m.has(k)?m.get(k):NaN; } }; canopyLabel = ' + measured canopy (geotiff)'; }
-            dlog(`  Canopy: titiler down — ${m.size}/${flagged.length} grazing point(s) via geotiff`, m.size ? 'ok' : 'warn');
-          } else {
-            dlog('  Canopy: no grazing tree points — flat Forest(m) is sufficient','ok');
-          }
+          dlog('  Canopy: titiler unavailable — using flat Forest(m)','warn');
         }
       }
       clutter = {
@@ -2559,35 +2437,18 @@ async function runAnalysis(){
           Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad,
           Math.max(20, dist/N), clutterHeights);
         if(wc){
-          // Prefer the titiler canopy grid (one fetch); fall back to in-browser
-          // geotiff reads at grazing tree points when the titiler VM is down.
-          const lo=[Math.min(a.lat,b.lat)-pad, Math.min(a.lng,b.lng)-pad];
-          const hi=[Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad];
-          let canopySrc = await buildCanopyGrid(lo[0], lo[1], hi[0], hi[1], Math.max(20, dist/N));
-          let canopyKind = canopySrc ? 'titiler' : '';
-          if(!canopySrc){
-            const flagged=[];
-            for(let s=1;s<N;s++){
-              if(dists[s]<clutterExcludeM || (dist-dists[s])<clutterExcludeM) continue;
-              const [lat,lng]=llAt(s);
-              const cls=wc.classAt(lat,lng);
-              if(cls!==10 && cls!==95) continue;                        // tree / mangrove only
-              if(losAt(s)-fresnel1(dists[s],dist-dists[s],freq) < bareEffAt(s)+CANOPY_CEILING_M)
-                flagged.push({id:s, lat, lng});                         // Fresnel near max canopy top
-            }
-            const canopyAt = flagged.length ? await readCanopyAtPoints(flagged) : null;
-            if(canopyAt && canopyAt.size){
-              canopySrc = { heightAt:(la,ln,s)=> canopyAt.has(s)?canopyAt.get(s):NaN };
-              canopyKind = 'geotiff';
-            }
-          }
-          if(canopyKind) dlog(`  Canopy: measured height loaded (${canopyKind})`,'ok');
+          // Measured canopy from the titiler grid (one fetch over the link bbox);
+          // where titiler is unavailable, tree pixels use WorldCover Forest(m).
+          const canopySrc = await buildCanopyGrid(
+            Math.min(a.lat,b.lat)-pad, Math.min(a.lng,b.lng)-pad,
+            Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad, Math.max(20, dist/N));
+          if(canopySrc) dlog(`  Canopy: titiler grid loaded over ${canopySrc.tiles} source tile(s)`,'ok');
           clutterImpact=makeClutterImpactStats();
           clutterH=dists.map((d,s)=>{
             if(d<clutterExcludeM || (dist-d)<clutterExcludeM) return 0;
             const [lat,lng]=llAt(s);
             let h = wc.heightAt(lat,lng);
-            if(canopySrc){ const c = canopySrc.heightAt(lat,lng,s); if(isFinite(c) && c>0) h=c; }
+            if(canopySrc){ const c = canopySrc.heightAt(lat,lng); if(isFinite(c) && c>0) h=c; }
             addClutterImpact(clutterImpact, h, d, [lat,lng], null);
             return h;
           });
