@@ -3482,6 +3482,23 @@ function initStaticHandlers(){
   on('btnPathsNone','click',ev=>{ ev.stopPropagation(); hideAllPaths(); });
   on('btnNewPath','click',addPath);
   on('btnAnalyse','click',runAnalysis);
+  on('btnComputeAllCov','click',computeAllCoverage);
+  // Minimise / restore the left side panel
+  on('btnSidebarMin','click',()=>{
+    document.querySelector('.sidebar')?.classList.add('collapsed');
+    document.getElementById('btnSidebarExpand')?.classList.add('show');
+  });
+  on('btnSidebarExpand','click',()=>{
+    document.querySelector('.sidebar')?.classList.remove('collapsed');
+    document.getElementById('btnSidebarExpand')?.classList.remove('show');
+  });
+  // Minimise / restore the terrain profile chart
+  on('btnChartMin','click',function(){
+    const panel = document.querySelector('.chart-panel');
+    const collapsed = panel?.classList.toggle('collapsed');
+    this.textContent = collapsed ? '▴' : '–';
+    this.title = collapsed ? 'Restore terrain profile' : 'Minimise terrain profile';
+  });
   // Map + debug panel
   on('btnLocate','click',goToMyLocation);
   on('btnDebugCopy','click',copyDebug);

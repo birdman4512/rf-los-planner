@@ -45,7 +45,7 @@ header h1 em{color:var(--accent);font-style:normal}
 .btn.share:hover{background:#9b59b6;color:#fff}
 
 /* ── BODY ── */
-.body-row{flex:1;display:flex;min-height:0;overflow:hidden}
+.body-row{flex:1;display:flex;min-height:0;overflow:hidden;position:relative}
 
 /* ── SIDEBAR ── */
 .sidebar{width:300px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
@@ -168,7 +168,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .btn.primary:disabled:hover{opacity:.4}
 
 /* ── ANALYSE BUTTON ── */
-.analyse-wrap{padding:7px 9px;border-top:1px solid var(--border);flex-shrink:0}
+.analyse-wrap{padding:7px 9px;border-top:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:6px}
 .analyse-wrap .btn{width:100%;font-size:13px;padding:9px}
 
 /* ── DEBUG LOG PANEL ── */
@@ -216,6 +216,19 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .chart-tab{font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;letter-spacing:1px;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}
 .chart-tab.active{border-color:var(--accent);color:var(--accent)}
 #profileCanvas{display:block;width:100%}
+.chart-min{font-family:'Share Tech Mono',monospace;font-size:13px;line-height:1;flex-shrink:0;width:22px;height:20px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+.chart-min:hover{border-color:var(--accent);color:var(--accent)}
+.chart-panel.collapsed{height:auto}
+.chart-panel.collapsed #profileCanvas{display:none}
+
+/* ── SIDEBAR / CHART MINIMISE ── */
+.sb-min{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--muted);background:transparent;border:none;border-bottom:1px solid var(--border);cursor:pointer;text-align:left;padding:5px 11px;flex-shrink:0}
+.sb-min:hover{color:var(--accent)}
+.sidebar.collapsed{width:0;border-right:none}
+.sidebar.collapsed > *{display:none}
+.sb-expand{position:absolute;top:8px;left:8px;z-index:600;width:30px;height:30px;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer;font-size:16px;line-height:1;display:none;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.sb-expand:hover{border-color:var(--accent);color:var(--accent)}
+.sb-expand.show{display:flex}
 
 /* ── FLOATING BUTTONS ── */
 .fab-group{position:absolute;bottom:210px;right:10px;z-index:600;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
@@ -517,12 +530,14 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260613-7">BUILD 20260613-7</span>
+      <span class="hdr-tag" title="Build 20260613-8">BUILD 20260613-8</span>
     </div>
   </header>
 
   <div class="body-row">
     <div class="sidebar">
+
+      <button class="sb-min" id="btnSidebarMin" title="Minimise side panel">« MINIMISE</button>
 
       <!-- Compact summary bar (open SETTINGS for RF + coverage controls) -->
       <div class="sb-section" style="padding:8px 11px">
@@ -578,9 +593,13 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <!-- Anchored at the very bottom of the sidebar -->
       <div class="analyse-wrap">
         <button class="btn primary" id="btnAnalyse">▶ ANALYSE ALL LINKS</button>
+        <button class="btn primary" id="btnComputeAllCov" title="Compute terrain-aware coverage for every coverage-enabled node">▣ COMPUTE ALL COVERAGE</button>
       </div>
 
     </div><!-- /sidebar -->
+
+    <!-- Shown only when the sidebar is minimised -->
+    <button class="sb-expand" id="btnSidebarExpand" title="Show side panel">»</button>
 
     <!-- MAP + CHART -->
     <div class="map-col">
@@ -608,6 +627,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <div class="chart-header">
           <div class="chart-title" id="chartTitle">TERRAIN PROFILE</div>
           <div class="chart-tabs" id="chartTabs"></div>
+          <button class="chart-min" id="btnChartMin" title="Minimise terrain profile">–</button>
         </div>
         <canvas id="profileCanvas"></canvas>
       </div>
@@ -616,7 +636,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="share-codec.js?v=20260613-7"></script>
-<script src="app.js?v=20260613-7"></script>
+<script src="share-codec.js?v=20260613-8"></script>
+<script src="app.js?v=20260613-8"></script>
 </body>
 </html>
