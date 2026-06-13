@@ -261,6 +261,8 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .modal h2{font-size:14px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#fff;margin-bottom:12px}
 .modal-url{font-family:'Share Tech Mono',monospace;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--accent);padding:8px;word-break:break-all;margin-bottom:10px;line-height:1.5}
 .modal-actions{display:flex;gap:8px;justify-content:flex-end}
+.modal-hint{font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.4}
+.modal-input{width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px;margin-bottom:10px;resize:vertical;word-break:break-all}
 
 /* ── CONTEXT MENU ── */
 #ctxMenu{position:fixed;z-index:9999;background:#111824;border:1px solid #1e2d42;border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.6);min-width:220px;padding:5px;display:none;user-select:none}
@@ -363,8 +365,16 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
   <div class="modal">
     <h2>📡 Share This Map</h2>
     <div class="modal-url" id="shareUrl"></div>
-    <div class="modal-actions">
+    <div class="modal-actions" style="margin-bottom:18px">
+      <button class="btn" id="btnShareNative" hidden>SHARE…</button>
       <button class="btn" id="btnShareCopy">COPY LINK</button>
+    </div>
+    <h2 style="margin-top:4px">📥 Load a Shared Map</h2>
+    <p class="modal-hint">Paste a ClearPath link someone sent you. Loading replaces the current map.</p>
+    <textarea class="modal-input" id="shareLoadInput" rows="2" placeholder="Paste share link here…" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+    <div class="modal-actions">
+      <button class="btn" id="btnSharePaste">PASTE</button>
+      <button class="btn" id="btnShareLoad">LOAD</button>
       <button class="btn primary" id="btnShareClose">CLOSE</button>
     </div>
   </div>
@@ -544,7 +554,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260614-04">BUILD 20260614-04</span>
+      <span class="hdr-tag" title="Build 20260614-05">BUILD 20260614-05</span>
     </div>
   </header>
 
@@ -650,7 +660,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="share-codec.js?v=20260614-04"></script>
-<script src="app.js?v=20260614-04"></script>
+<script src="share-codec.js?v=20260614-05"></script>
+<script src="app.js?v=20260614-05"></script>
 </body>
 </html>

@@ -3185,6 +3185,8 @@ function buildShareHash(){
 function openShare(){
   const url=window.location.href.split('#')[0]+'#'+buildShareHash();
   document.getElementById('shareUrl').textContent=url;
+  const nativeBtn=document.getElementById('btnShareNative');
+  if(nativeBtn) nativeBtn.hidden=!navigator.share;
   document.getElementById('shareModal').classList.add('open');
 }
 
@@ -3228,6 +3230,47 @@ function refreshSettingsSummary(){
 function copyShareUrl(){
   const url=document.getElementById('shareUrl').textContent;
   navigator.clipboard.writeText(url).then(()=>{toast('Link copied!',2000);closeShare();}).catch(()=>{toast('Copy failed — select & copy manually.',3000);});
+}
+
+// Native share sheet (Messages / Mail / etc.) — the natural way to send a link
+// from an installed PWA where there's no address bar. Feature-detected.
+function shareNative(){
+  const url=document.getElementById('shareUrl').textContent;
+  if(!navigator.share){ copyShareUrl(); return; }
+  navigator.share({title:'ClearPath map',url}).then(()=>closeShare()).catch(()=>{});
+}
+
+// Accept either a full share URL or a bare hash payload, returning the part
+// after the '#'. Tolerates leading/trailing whitespace from a paste.
+function extractShareHash(text){
+  const t=(text||'').trim();
+  if(!t) return '';
+  const i=t.indexOf('#');
+  return (i>=0 ? t.slice(i+1) : t).trim();
+}
+
+// PWA install has no address bar, so a link someone sends can't be opened in the
+// app directly — paste it here instead. Replaces the current map.
+function loadPastedLink(){
+  const field=document.getElementById('shareLoadInput');
+  const hash=extractShareHash(field.value);
+  if(!hash){ toast('Paste a share link first.',2500); return; }
+  // Validate before clearAll() so a bad paste never wipes the current map.
+  try{ parseSharedHash(hash); }
+  catch(err){ toast('That doesn’t look like a valid ClearPath link.',3500); return; }
+  clearAll();
+  try{ history.replaceState(null,'',window.location.pathname+window.location.search+'#'+hash); }catch{}
+  loadFromHash(hash);          // re-parses and shows its own success toast
+  field.value='';
+  closeShare();
+}
+
+// One-tap fill of the paste field from the clipboard (iOS shows a Paste prompt).
+function pasteShareLink(){
+  if(!navigator.clipboard?.readText){ document.getElementById('shareLoadInput').focus(); return; }
+  navigator.clipboard.readText()
+    .then(t=>{ document.getElementById('shareLoadInput').value=t; loadPastedLink(); })
+    .catch(()=>{ toast('Couldn’t read clipboard — paste manually.',2500); document.getElementById('shareLoadInput').focus(); });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3436,8 +3479,8 @@ function parseSharedHash(hash) {
   return normaliseLegacyHash(JSON.parse(decodeURIComponent(atob(hash))));
 }
 
-function loadFromHash(){
-  const hash=window.location.hash.slice(1);
+function loadFromHash(hashStr){
+  const hash=(hashStr!=null?hashStr:window.location.hash.slice(1));
   if(!hash) return;
   try{
     const data=parseSharedHash(hash);
@@ -3580,6 +3623,9 @@ function initStaticHandlers(){
   // Modals
   on('btnHelpClose','click',closeHelp);
   on('btnShareCopy','click',copyShareUrl);
+  on('btnShareNative','click',shareNative);
+  on('btnSharePaste','click',pasteShareLink);
+  on('btnShareLoad','click',loadPastedLink);
   on('btnShareClose','click',closeShare);
   on('btnPathCancel','click',closePathModal);
   on('pbSaveBtn','click',savePathModal);
