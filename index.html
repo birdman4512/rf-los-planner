@@ -168,7 +168,10 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .btn.primary:disabled:hover{opacity:.4}
 
 /* ── ANALYSE BUTTON ── */
-.analyse-wrap{padding:7px 9px;border-top:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:6px}
+.analyse-wrap{padding:7px 9px;border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:6px}
+.analyse-wrap .btn{flex:1;min-width:0;font-size:10px;letter-spacing:.5px;padding:6px 6px;white-space:normal;line-height:1.15;text-align:center}
+#btnComputeAllCov{background:var(--green);border-color:var(--green)}
+#btnComputeAllCov:hover{opacity:.85}
 .analyse-wrap .btn{width:100%;font-size:13px;padding:9px}
 
 /* ── DEBUG LOG PANEL ── */
@@ -226,7 +229,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .sb-min:hover{color:var(--accent)}
 .sidebar.collapsed{width:0;border-right:none}
 .sidebar.collapsed > *{display:none}
-.sb-expand{position:absolute;top:8px;left:8px;z-index:600;width:30px;height:30px;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer;font-size:16px;line-height:1;display:none;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.sb-expand{position:absolute;top:50%;left:0;transform:translateY(-50%);z-index:600;width:22px;height:54px;border:1px solid var(--border);border-left:none;border-radius:0 6px 6px 0;background:var(--panel);color:var(--text);cursor:pointer;font-size:14px;line-height:1;display:none;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.5)}
 .sb-expand:hover{border-color:var(--accent);color:var(--accent)}
 .sb-expand.show{display:flex}
 
@@ -530,7 +533,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260613-8">BUILD 20260613-8</span>
+      <span class="hdr-tag" title="Build 20260613-9">BUILD 20260613-9</span>
     </div>
   </header>
 
@@ -636,7 +639,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="share-codec.js?v=20260613-8"></script>
-<script src="app.js?v=20260613-8"></script>
+<script src="share-codec.js?v=20260613-9"></script>
+<script src="app.js?v=20260613-9"></script>
 </body>
 </html>
