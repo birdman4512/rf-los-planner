@@ -2460,7 +2460,7 @@ async function runAnalysis(){
       // tree cover (Fresnel zone within the tallest possible canopy) we replace
       // the flat value with the measured Meta/WRI canopy height at just those
       // points — accurate where it can change the result, cheap everywhere else.
-      let clutterH=null, clutterImpact=null;
+      let clutterH=null, clutterClass=null, clutterImpact=null;
       if(clutterOn){
         const pad=0.005;
         const wc=await buildWorldCoverGrid(
@@ -2475,9 +2475,14 @@ async function runAnalysis(){
             Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad, Math.max(20, dist/N));
           if(canopySrc) dlog(`  Canopy: titiler grid loaded over ${canopySrc.tiles} source tile(s)`,'ok');
           clutterImpact=makeClutterImpactStats();
+          // Parallel land-cover class per sample (0 where excluded/none) so the
+          // profile can colour the clutter band by type — see drawClutterBand.
+          clutterClass=new Array(dists.length).fill(0);
           clutterH=dists.map((d,s)=>{
             if(d<clutterExcludeM || (dist-d)<clutterExcludeM) return 0;
             const [lat,lng]=llAt(s);
+            const cls=wc.classAt(lat,lng);
+            clutterClass[s]=cls;
             let h = wc.heightAt(lat,lng);
             if(canopySrc){ const c = canopySrc.heightAt(lat,lng); if(isFinite(c) && c>0) h=c; }
             addClutterImpact(clutterImpact, h, d, [lat,lng], null);
@@ -2515,7 +2520,7 @@ async function runAnalysis(){
       // Fresnel-clear path, ~6 dB at grazing, rising as terrain intrudes.
       const diffLossDb=knifeEdgeLossDb(maxNu) + clutterLossDb;
       e.result={dist,minLosClear,minFzClear,minScaledFzClear,fresnelPct,status,diffLossDb};
-      e.profile={elevs,dists,dist,aH,bH,a,b,freq,K,N};
+      e.profile={elevs,dists,dist,aH,bH,a,b,freq,K,N,clutterH,clutterClass};
       const lvl = status==='clear'?'ok':status==='blocked'?'err':'warn';
       let clutterNote='';
       if(clutterH){
@@ -2650,12 +2655,12 @@ function showEdgeProfile(edgeId){
   const e=S.edges.find(x=>x.id===edgeId);
   if(!e?.profile) return;
   S.redrawProfile=()=>showEdgeProfile(edgeId);
-  const{elevs,dists,dist,aH,bH,a,b,freq,K,N}=e.profile;
+  const{elevs,dists,dist,aH,bH,a,b,freq,K,N,clutterH,clutterClass}=e.profile;
   const r=e.result;
   const diffTxt=(r&&r.diffLossDb!=null)?`  |  Diff: ${r.diffLossDb.toFixed(1)} dB`:'';
   const title=`${a.name} ↔ ${b.name}  |  ${(dist/1000).toFixed(2)} km  |  GND+ANT: ${aH.toFixed(1)}m → ${bH.toFixed(1)}m${diffTxt}`;
   document.getElementById('chartTitle').textContent=title;
-  drawProfile({elevs,dists,dist,aH,bH,freq,K,N,result:r,labels:[a.name,b.name]});
+  drawProfile({elevs,dists,dist,aH,bH,freq,K,N,clutterH,clutterClass,result:r,labels:[a.name,b.name]});
   highlightActiveMapView();
 }
 
@@ -2710,7 +2715,7 @@ function setupCanvas(){
   return{ctx,W:canvas.offsetWidth,H:availH};
 }
 
-function drawProfile({elevs,dists,dist,aH,bH,freq,K,N,result,labels}){
+function drawProfile({elevs,dists,dist,aH,bH,freq,K,N,clutterH,clutterClass,result,labels}){
   const{ctx,W,H}=setupCanvas();
   initProfileHover();
   const PAD={l:46,r:12,t:14,b:22};
@@ -2729,6 +2734,8 @@ function drawProfile({elevs,dists,dist,aH,bH,freq,K,N,result,labels}){
   // with a little headroom (-5 m below, +15 m above) so nothing clips the panel.
   const allVals=[...eff,aH,bH];
   for(let s=1;s<N;s++) allVals.push(losH(s)+fz1(s));
+  // Tall canopy/buildings can sit above the Fresnel ceiling — fit to them too.
+  if(clutterH) for(let s=0;s<=N;s++) allVals.push(eff[s]+(clutterH[s]||0));
   const minV=Math.min(...allVals)-5,maxV=Math.max(...allVals)+15,rng=maxV-minV||1;
   // Sample index → x pixel; elevation value → y pixel (canvas y grows downward).
   const xp=s=>PAD.l+(s/N)*pw, yp=v=>PAD.t+ph-((v-minV)/rng)*ph;
@@ -2737,11 +2744,20 @@ function drawProfile({elevs,dists,dist,aH,bH,freq,K,N,result,labels}){
   drawGrid(ctx,PAD,pw,ph,W,H,minV,rng);
   drawFresnel(ctx,N,xp,yp,losH,fz1,'#00c8f0');
   drawTerrain(ctx,N,xp,yp,eff,H);
+  // Surface clutter band sits on the terrain, beneath the bare-LOS blocked tint.
+  let clutterClassesPresent=null;
+  if(clutterH){
+    const pts=[];
+    for(let s=0;s<=N;s++) pts.push({x:xp(s),ground:eff[s],top:eff[s]+(clutterH[s]||0),
+      cls:clutterClass?clutterClass[s]:0,los:losH(s),fz:fz1(s)});
+    clutterClassesPresent=drawClutterBand(ctx,pts,yp);
+  }
   drawBlockedAreas(ctx,N,xp,yp,eff,losH);
   const losCol=result?(result.status==='clear'?'#2ecc71':result.status==='marginal'?'#f39c12':'#e74c3c'):'#00c8f0';
   drawLosLine(ctx,xp,yp,0,N,aH,bH,losCol);
   drawEndpoints(ctx,xp,yp,0,N,aH,bH,losCol,labels[0],labels[1]);
   drawXAxis(ctx,PAD,pw,H,dist);
+  drawClutterLegend(ctx,PAD,clutterClassesPresent);
 }
 
 function drawPathProfile(hops,names){
@@ -2756,23 +2772,27 @@ function drawPathProfile(hops,names){
   const hoverSegments=[];
   let cumDist=0;
   hops.forEach((h,hi)=>{
-    const{elevs,dists,dist,aH,bH,K,N}=h.e.profile;
+    const{elevs,dists,dist,aH,bH,freq,K,N,clutterH,clutterClass}=h.e.profile;
     hoverSegments.push({start:cumDist,dist,a:h.flip?h.e.profile.b:h.e.profile.a,b:h.flip?h.e.profile.a:h.e.profile.b});
     const eArr=h.flip?[...elevs].reverse():elevs;
     const dArr=h.flip?dists.map(d=>dist-d).reverse():dists;
+    const cH=clutterH?(h.flip?[...clutterH].reverse():clutterH):null;
+    const cC=clutterClass?(h.flip?[...clutterClass].reverse():clutterClass):null;
     const hAstart=h.flip?bH:aH, hAend=h.flip?aH:bH;
     for(let s=0;s<=N;s++){
       if(hi>0&&s===0) continue;
       const d1=dArr[s],d2=dist-d1;
       const eff=(s===0||s===N)?eArr[s]:eArr[s]+bulge(Math.abs(d1),Math.abs(d2),K);
       const los=hAstart+(hAend-hAstart)*(s/N);
-      samples.push({cumDist:cumDist+dArr[s],elev:eArr[s],eff,los,hopIdx:hi});
+      const fz=(s===0||s===N)?0:fresnel1(Math.abs(d1),Math.abs(d2),freq);
+      samples.push({cumDist:cumDist+dArr[s],elev:eArr[s],eff,los,fz,hopIdx:hi,
+        clutterH:cH?(cH[s]||0):0, clutterClass:cC?(cC[s]||0):0, hasClutter:!!cH});
     }
     cumDist+=dist;
   });
   S.profileHover={PAD,totalDist,segments:hoverSegments};
 
-  const allVals=samples.flatMap(s=>[s.eff,s.los]);
+  const allVals=samples.flatMap(s=>[s.eff,s.los,s.eff+s.clutterH]);
   const minV=Math.min(...allVals)-5,maxV=Math.max(...allVals)+15,rng=maxV-minV||1;
   const xp=d=>PAD.l+(d/totalDist)*pw, yp=v=>PAD.t+ph-((v-minV)/rng)*ph;
 
@@ -2813,6 +2833,15 @@ function drawPathProfile(hops,names){
   ctx.beginPath();ctx.moveTo(xp(samples[0].cumDist),yp(samples[0].eff));
   samples.forEach(s=>ctx.lineTo(xp(s.cumDist),yp(s.eff)));
   ctx.strokeStyle='rgba(120,160,190,.8)';ctx.lineWidth=1.5;ctx.stroke();
+
+  // Surface clutter band per hop (heights captured at analyse time; hops with
+  // clutter off contribute zero-height samples and are skipped by the drawer).
+  let pathClutterClasses=null;
+  if(samples.some(s=>s.hasClutter)){
+    const pts=samples.map(s=>({x:xp(s.cumDist),ground:s.eff,top:s.eff+s.clutterH,
+      cls:s.clutterClass,los:s.los,fz:s.fz}));
+    pathClutterClasses=drawClutterBand(ctx,pts,yp);
+  }
 
   // Blocked highlights
   samples.forEach((s,i)=>{
@@ -2862,6 +2891,7 @@ function drawPathProfile(hops,names){
   });
 
   drawXAxis(ctx,PAD,pw,H,totalDist);
+  drawClutterLegend(ctx,PAD,pathClutterClasses);
 }
 
 // ── Drawing helpers ──────────────────────────────────────
@@ -2919,6 +2949,81 @@ function drawXAxis(ctx,PAD,pw,H,totalDist){
   [0,.25,.5,.75,1].forEach(t=>{ctx.textAlign='center';ctx.fillText(((totalDist/1000)*t).toFixed(1)+'km',PAD.l+pw*t,H-5);});
 }
 function hexAlpha(hex,alpha){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return `rgba(${r},${g},${b},${alpha})`;}
+
+// ── Surface clutter on the profile ─────────────────────────────────────────
+// ESA WorldCover class → band colour: vegetation greens, built-up slate, crops
+// tan, wetland teal; anything else a muted green. Returned as [r,g,b].
+function clutterClassColor(cls){
+  switch(cls){
+    case 10: case 95: return [46,160,90];    // tree cover / mangrove
+    case 20:          return [120,165,75];   // shrubland
+    case 50:          return [150,162,180];  // built-up
+    case 40:          return [185,170,95];   // cropland
+    case 90:          return [80,150,150];   // herbaceous wetland
+    default:          return [110,140,110];  // other vegetated
+  }
+}
+function clutterClassLabel(cls){
+  return {10:'Tree',20:'Shrub',40:'Crop',50:'Built-up',90:'Wetland',95:'Mangrove'}[cls]||'Clutter';
+}
+
+// Draw the clutter band on a profile (A + D) with Fresnel/LOS intrusion
+// highlighted (C). `pts` are ordered samples {x(px), ground, top, cls, los, fz}
+// in metres. The hard LOS gate stays on bare terrain (drawBlockedAreas); here a
+// clutter top inside the Fresnel zone is amber, above the LOS line red.
+// Returns the Set of land-cover classes actually drawn, for the legend.
+function drawClutterBand(ctx,pts,yp){
+  const present=new Set();
+  const has=(a,b)=>(a.top-a.ground)>0||(b.top-b.ground)>0;
+  // Per-segment band quads so each segment can carry its own land-cover colour.
+  for(let i=1;i<pts.length;i++){
+    const a=pts[i-1],b=pts[i];
+    if(!has(a,b)) continue;
+    const cls=b.cls||a.cls||0;
+    present.add(cls);
+    const [r,g,bl]=clutterClassColor(cls);
+    ctx.beginPath();
+    ctx.moveTo(a.x,yp(a.ground));ctx.lineTo(b.x,yp(b.ground));
+    ctx.lineTo(b.x,yp(b.top));ctx.lineTo(a.x,yp(a.top));ctx.closePath();
+    ctx.fillStyle=`rgba(${r},${g},${bl},.45)`;ctx.fill();
+  }
+  // Clutter-top line + intrusion tint over the band.
+  for(let i=1;i<pts.length;i++){
+    const a=pts[i-1],b=pts[i];
+    if(!has(a,b)) continue;
+    const losCross=b.top>b.los||a.top>a.los;
+    const fzIntrude=(b.los-b.top)<b.fz||(a.los-a.top)<a.fz;
+    if(losCross||fzIntrude){
+      ctx.beginPath();
+      ctx.moveTo(a.x,yp(a.ground));ctx.lineTo(b.x,yp(b.ground));
+      ctx.lineTo(b.x,yp(b.top));ctx.lineTo(a.x,yp(a.top));ctx.closePath();
+      ctx.fillStyle=losCross?'rgba(231,76,60,.25)':'rgba(243,156,18,.22)';ctx.fill();
+    }
+    ctx.beginPath();ctx.moveTo(a.x,yp(a.top));ctx.lineTo(b.x,yp(b.top));
+    ctx.strokeStyle=losCross?'rgba(231,76,60,.95)':fzIntrude?'rgba(243,156,18,.9)':'rgba(190,210,180,.7)';
+    ctx.lineWidth=1.5;ctx.stroke();
+  }
+  return present;
+}
+
+// Compact legend of the clutter classes present, drawn inside the plot.
+function drawClutterLegend(ctx,PAD,classes){
+  if(!classes) return;
+  const items=[...classes].filter(c=>c>0).map(c=>[c,clutterClassLabel(c)]);
+  if(!items.length) return;
+  ctx.save();
+  ctx.font='8px "Share Tech Mono"';ctx.textAlign='left';ctx.textBaseline='middle';
+  let x=PAD.l+6;const y=PAD.t+7;
+  for(const [cls,label] of items){
+    const [r,g,b]=clutterClassColor(cls);
+    ctx.fillStyle=`rgba(${r},${g},${b},.85)`;ctx.fillRect(x,y-4,8,8);
+    ctx.fillStyle='#aeb9c4';ctx.fillText(label,x+11,y);
+    x+=11+ctx.measureText(label).width+10;
+  }
+  ctx.fillStyle='rgba(243,156,18,.95)';ctx.fillText('▮ Fresnel',x,y);x+=ctx.measureText('▮ Fresnel').width+8;
+  ctx.fillStyle='rgba(231,76,60,.95)';ctx.fillText('▮ LOS',x,y);
+  ctx.restore();
+}
 
 function interpLatLng(a,b,t){
   return [a.lat+(b.lat-a.lat)*t,a.lng+(b.lng-a.lng)*t];
