@@ -6,10 +6,11 @@ services:
     volumes:
       - ./cogs:/cogs:ro
     environment:
-      CPL_VSIL_CURL_ALLOWED_EXTENSIONS: ".tif"
+      # titiler only ever opens local /cogs/<quadkey>.cog.tif (the nginx proxy
+      # rewrites to url=/cogs/… and 404s anything missing), so no /vsicurl/
+      # remote-read tuning is needed — just local block-cache + no dir scans.
       GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR"
       GDAL_CACHEMAX: "256"
-      VSI_CACHE: "TRUE"
 
   canopy-proxy:
     image: nginx:1.27-alpine

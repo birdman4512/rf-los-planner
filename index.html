@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>ClearPath — RF Line of Sight Planner</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com https://clearpath-clutter.nbird.com.au https://tracker.quirkyit.com.au; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self'; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com/elevation-tiles-prod/ https://services.terrascope.be https://titiler.terrascope.be https://tracker.quirkyit.com.au https://tiles.globalforestwatch.org; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com https://tracker.quirkyit.com.au; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self'; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com/elevation-tiles-prod/ https://services.terrascope.be https://titiler.terrascope.be https://tracker.quirkyit.com.au; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
 <meta name="referrer" content="no-referrer">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous"/>
@@ -466,8 +466,8 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       </div>
       <div class="field-row" style="margin-top:8px;margin-bottom:8px">
         <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
-          <input type="checkbox" id="inpCanopyOn" title="Coverage sweeps: add measured Meta/WRI canopy heights at grazing tree points instead of the flat Forest(m) value (slower — downloads canopy tiles). Links always refine measured canopy at grazing points automatically.">
-          Measured canopy in coverage (slow)
+          <input type="checkbox" id="inpCanopyOn" title="Coverage sweeps: use measured Meta/WRI canopy heights (via the self-hosted titiler) instead of the flat Forest(m) value. Falls back to flat Forest(m) when the titiler is unavailable. Links always use measured canopy automatically.">
+          Measured canopy in coverage
         </label>
       </div>
       <div class="field-row" style="margin-bottom:6px">
@@ -517,7 +517,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260613-4">BUILD 20260613-4</span>
+      <span class="hdr-tag" title="Build 20260613-6">BUILD 20260613-6</span>
     </div>
   </header>
 
@@ -616,7 +616,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="share-codec.js?v=20260613-4"></script>
-<script src="app.js?v=20260613-5"></script>
+<script src="share-codec.js?v=20260613-6"></script>
+<script src="app.js?v=20260613-6"></script>
 </body>
 </html>
