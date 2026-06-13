@@ -243,7 +243,9 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .sb-expand.show{display:flex}
 
 /* ── FLOATING BUTTONS ── */
-.fab-group{position:absolute;bottom:210px;right:10px;z-index:600;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.fab-group{position:absolute;bottom:210px;right:10px;z-index:600;display:flex;flex-direction:column;gap:6px;align-items:flex-end;transition:bottom .15s}
+/* Follow the chart panel down when it is minimised to just its header. */
+.map-col.chart-collapsed .fab-group{bottom:40px}
 .fab{width:40px;height:40px;border-radius:50%;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 2px 8px rgba(0,0,0,.5);transition:all .15s}
 .fab:hover{border-color:var(--accent);color:var(--accent);background:#0b0f17}
 .fab.loc{font-size:14px}
@@ -542,7 +544,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260614-03">BUILD 20260614-03</span>
+      <span class="hdr-tag" title="Build 20260614-04">BUILD 20260614-04</span>
     </div>
   </header>
 
@@ -648,7 +650,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="share-codec.js?v=20260614-03"></script>
-<script src="app.js?v=20260614-03"></script>
+<script src="share-codec.js?v=20260614-04"></script>
+<script src="app.js?v=20260614-04"></script>
 </body>
 </html>

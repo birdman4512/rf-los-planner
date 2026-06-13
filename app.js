@@ -3630,6 +3630,8 @@ function initStaticHandlers(){
   on('btnChartMin','click',function(){
     const panel = document.querySelector('.chart-panel');
     const collapsed = panel?.classList.toggle('collapsed');
+    // Drop the floating buttons down with the now-short chart panel.
+    panel?.closest('.map-col')?.classList.toggle('chart-collapsed', collapsed);
     this.textContent = collapsed ? '▴' : '–';
     this.title = collapsed ? 'Restore terrain profile' : 'Minimise terrain profile';
   });
