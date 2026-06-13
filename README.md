@@ -17,6 +17,9 @@ Meshtastic, amateur radio, and point-to-point Wi-Fi links.
 - Multi-hop path profile views
 - Per-band RF presets for Meshtastic, VHF/UHF, and Wi-Fi
 - Terrain-aware radial coverage estimates
+- Optional surface clutter: ESA WorldCover land cover plus measured Meta/WRI
+  canopy height (via a self-hosted titiler) for foliage/building obstruction
+  and diffraction loss — see [docs/canopy-titiler.md](docs/canopy-titiler.md)
 - Shareable URLs that preserve nodes, links, paths, and RF settings
 
 ## Link Status
@@ -36,12 +39,18 @@ This is a first-order **line-of-sight** planner. It is frequency-aware — both 
 Fresnel zone radius and free-space path loss scale correctly with frequency — so
 it is well suited to comparing bands for clear point-to-point links.
 
+Bare-earth terrain (~30 m DEM) is always the hard LOS gate. **Optional surface
+clutter** adds foliage/building obstruction on top: ESA WorldCover land-cover
+heights, optionally refined by measured Meta/WRI canopy height served by a
+self-hosted titiler ([docs/canopy-titiler.md](docs/canopy-titiler.md)). Clutter
+is treated as soft loss (extra Fresnel/diffraction intrusion plus a capped
+per-metre attenuation), never as new hard terrain.
+
 It does **not** model non-line-of-sight propagation (diffraction-dominated paths,
-tropospheric or ground-wave), clutter/foliage/building loss (terrain is bare-earth
-~30 m DEM), rain or atmospheric attenuation, multipath, or antenna patterns. The
-diffraction figure is a single knife-edge estimate over the dominant obstruction.
-For full NLOS coverage prediction, use a Longley-Rice/ITWOM tool (SPLAT!, Radio
-Mobile, CloudRF).
+tropospheric or ground-wave), rain or atmospheric attenuation, multipath, or
+antenna patterns. The diffraction figure is a single knife-edge estimate over the
+dominant obstruction. For full NLOS coverage prediction, use a Longley-Rice/ITWOM
+tool (SPLAT!, Radio Mobile, CloudRF).
 
 ## Running Locally
 
@@ -86,11 +95,31 @@ app and the finder.
 
 ## Publishing
 
-This repo is intended to be published with GitHub Pages.
+The site is published to GitHub Pages by the **CI & Deploy** GitHub Action
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), not by serving the repo
+root directly. On every push to `main` the workflow runs the JS syntax check and
+Playwright smoke tests (`verify`), and only if those pass does the gated `deploy`
+job assemble a clean `_site/` and publish it. Failed tests leave the previous
+good deploy live.
 
 Expected URL:
 
 `https://dea.nbird.com.au/rf-los-planner/`
 
-Enable Pages in the repository settings using the `main` branch and the repository
-root as the source.
+### First-time setup
+
+1. In the repository settings, set **Settings → Pages → Build and deployment →
+   Source** to **GitHub Actions** (not "Deploy from a branch"). The branch/root
+   option would serve the raw repo and bypass the test gate.
+2. Push to `main` (or run the workflow via *Actions → CI & Deploy → Run
+   workflow*). The `deploy` job publishes the assembled site.
+
+The `deploy` job's **Assemble static site** step copies an explicit allow-list of
+files into `_site/` (the app, `share-codec.js`, the repeater pages, fonts, and
+`data/repeaters-au.json`) — dev tooling (`scripts/`, `tests/`, `package.json`,
+workflows, `docs/`) is deliberately kept off the public URL. **Any new static
+asset must be added to that step or it will 404 on the live site.**
+
+The optional canopy/titiler stack is a separate self-hosted service and is **not**
+part of this Pages deploy — see [docs/canopy-titiler.md](docs/canopy-titiler.md)
+for that.

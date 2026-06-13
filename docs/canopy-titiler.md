@@ -125,6 +125,34 @@ If the tile isn't built, ClearPath uses the flat WorldCover Forest(m) value for
 that area instead. It checks the manifest first, so it never probes missing
 local files (no user-visible 500s).
 
+## Render Tuning
+
+The proxy's `rewrite` in `nginx.conf` fixes how each tile is rendered:
+
+```txt
+rescale=0,40&colormap_name=gray&return_mask=true&resampling=rms
+```
+
+- **`rescale=0,40`** — gray 0–255 maps to 0–40 m. **This ceiling MUST equal
+  `CANOPY_HMAX` in `app.js`** (currently `40`). They are the encode/decode ends of
+  the same 8-bit value; changing one without the other misreads every canopy
+  height by the ratio of the two. The `<img>`/canvas decode is 8-bit, so a lower
+  ceiling is the only browser-side precision lever — keep it just above the local
+  maximum canopy height.
+- **`resampling=rms`** — downsamples each output cell toward its tall pixels
+  (`rms >= mean`), so peaks aren't averaged away. Only the decimation set is valid
+  here (`nearest`/`bilinear`/`cubic`/`cubic_spline`/`lanczos`/`average`/`mode`/
+  `gauss`/`rms`); `max`/`min`/`med`/`q1`/`q3` are **warp-only** and return **422**.
+  Fall back to `bilinear` if `rms` ever 422s.
+
+These render parameters apply at read time — **no COG rebuild is needed**. After
+editing `nginx.conf`, reload the proxy:
+
+```sh
+cd ~/titiler
+docker compose exec canopy-proxy nginx -s reload
+```
+
 ## Verify
 
 Host-local health check:
