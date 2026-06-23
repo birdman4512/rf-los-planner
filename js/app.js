@@ -171,6 +171,12 @@ function initMap() {
   S.map.createPane('profileHoverPane');
   S.map.getPane('profileHoverPane').style.zIndex=750;
   S.map.getPane('profileHoverPane').style.pointerEvents='none';
+  // Coverage polygons render on a dedicated CANVAS renderer in a low pane (below
+  // the overlay paths/markers). Canvas avoids the SVG renderer repainting every
+  // polygon on each pan/zoom frame, which made coverage flicker.
+  S.map.createPane('coveragePane');
+  S.map.getPane('coveragePane').style.zIndex=350;
+  S._covRenderer = L.canvas({ pane:'coveragePane', padding:0.5 });
   const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors', maxZoom: 19, crossOrigin: true
   }).addTo(S.map);
@@ -2245,7 +2251,7 @@ function renderCoveragePolygon(node){
     // Wedge bounded by the midline to the previous ray (left) and next ray (right).
     const addWedge = (i0, i1, level) => {
       group.addLayer(L.polygon([ mid(prev,cur,i0), mid(cur,next,i0), mid(cur,next,i1), mid(prev,cur,i1) ], {
-        color: col, weight: 0, opacity: 0, fillColor: col, fillOpacity: coverageLevelOpacity(level), interactive: false
+        renderer: S._covRenderer, color: col, weight: 0, opacity: 0, fillColor: col, fillOpacity: coverageLevelOpacity(level), interactive: false
       }));
     };
     let runStart = -1, runLevel = 0;
@@ -2261,12 +2267,11 @@ function renderCoveragePolygon(node){
     const outline = node.coverageRays.map(r=>r.latlng);
     outline.push(node.coverageRays[0].latlng);
     group.addLayer(L.polyline(outline, {
-      color: col, weight: 1.5, opacity: 0.85, interactive: false
+      renderer: S._covRenderer, color: col, weight: 1.5, opacity: 0.85, interactive: false
     }));
   }
   node.coverageLayer = group;
   if(node.coverageOn) node.coverageLayer.addTo(S.map);
-  node.coverageLayer.eachLayer?.(layer=>layer.bringToBack?.());
 }
 
 // ── Coverage overlap highlight ──────────────────────────────
