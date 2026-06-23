@@ -3062,6 +3062,9 @@ async function computeHorizon(node){
     const heights = clutterHeightTable();
     try { canopyGrid = await buildCanopyGrid(node.lat-dLat, node.lng-dLng, node.lat+dLat, node.lng+dLng, 30); } catch {}
     try { wcGrid = await buildWorldCoverGrid(node.lat-dLat, node.lng-dLng, node.lat+dLat, node.lng+dLng, 30, heights); } catch {}
+    dlog(canopyGrid
+      ? `Sun view: measured canopy (titiler) loaded over ${canopyGrid.tiles} tile(s) — used where available, WorldCover elsewhere`
+      : 'Sun view: no titiler canopy here — using WorldCover land cover', canopyGrid ? 'ok' : 'warn');
   }
   const clutterAt = (lat,lng) => {
     if(canopyGrid){ const c = canopyGrid.heightAt(lat,lng); if(Number.isFinite(c)) return { h:c, cls:10 }; }
@@ -3161,22 +3164,31 @@ function niRenderLinks(node){
     const brg = bearingTo(node.lat, node.lng, other.lat, other.lng);
     const km = haversine(node.lat, node.lng, other.lat, other.lng) / 1000;
     const isActive = S.activeView?.type === 'edge' && S.activeView.id === e.id;
+    const analysed = !!e.profile;
     const btn = document.createElement('button');
     btn.className = 'ni-link' + (isActive ? ' active' : '');
-    btn.title = 'Show this link in the terrain profile';
+    btn.title = analysed ? 'Show this link in the terrain profile' : 'Analyse, then show this link in the terrain profile';
     const nm = document.createElement('span'); nm.className = 'ni-link-name'; nm.textContent = '→ ' + other.name;
     const meta = document.createElement('span'); meta.className = 'ni-link-meta';
     meta.textContent = `${String(Math.round(brg)).padStart(3,'0')}° · ${km.toFixed(2)} km`;
     btn.appendChild(nm); btn.appendChild(meta);
-    // Show the analysed link status (clear / marginal / blocked) when available.
+    // Show the analysed link status (clear / marginal / blocked); a muted hint
+    // until the link has been analysed (clicking will run the analysis).
+    const tag = document.createElement('span'); tag.className = 'ni-link-status';
     const st = e.result?.status;
     if(st){
-      const col = st==='clear' ? '#2ecc71' : st==='marginal' ? '#f39c12' : '#e74c3c';
-      const tag = document.createElement('span'); tag.className = 'ni-link-status';
-      tag.style.color = col; tag.textContent = (st==='error' ? 'ERROR' : st).toUpperCase();
-      btn.appendChild(tag);
+      tag.style.color = st==='clear' ? '#2ecc71' : st==='marginal' ? '#f39c12' : '#e74c3c';
+      tag.textContent = (st==='error' ? 'ERROR' : st).toUpperCase();
+    }else{
+      tag.style.color = 'var(--muted)'; tag.textContent = 'ANALYSE';
     }
-    btn.addEventListener('click', () => { selectEdgeView(e.id, { force:true }); niRenderLinks(node); });
+    btn.appendChild(tag);
+    btn.addEventListener('click', async () => {
+      // The terrain profile + status only exist after analysis — run it on demand.
+      if(!e.profile && S.edges.length && !S._analysing) await runAnalysis();
+      selectEdgeView(e.id, { force:true });
+      if(NI.node === node) niRenderLinks(node);
+    });
     box.appendChild(btn);
   });
 }
