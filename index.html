@@ -213,6 +213,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .ni-link.active{border-color:var(--accent);background:rgba(0,200,240,.08)}
 .ni-link-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ni-link-meta{font-family:'Share Tech Mono',monospace;color:var(--accent);flex-shrink:0}
+.ni-link-status{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;flex-shrink:0}
 .ni-views{display:flex;gap:8px;align-items:stretch}
 .ni-pano-wrap{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;background:#070b12;border:1px solid var(--border);border-radius:4px}
 .ni-pano-wrap::-webkit-scrollbar{height:6px}
@@ -588,7 +589,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260624-01">BUILD 20260624-01</span>
+      <span class="hdr-tag" title="Build 20260624-02">BUILD 20260624-02</span>
     </div>
   </header>
 
@@ -695,7 +696,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
           <div class="ni-controls">
             <label class="ni-ctl"><span>Date</span><input type="date" id="niDate"></label>
             <label class="ni-ctl"><span>Eye m</span><input type="number" id="niEye" value="2" min="0" step="0.5" style="width:48px" title="Eye height above ground (defaults to the antenna height; lower it to ~2 m to check a person/solar panel)"></label>
-            <label class="ni-ctl"><input type="checkbox" id="niClutter" checked><span>Clutter</span></label>
+            <label class="ni-ctl"><input type="checkbox" id="niClutter"><span>Clutter</span></label>
             <label class="ni-ctl ni-time"><span id="niTimeLabel">12:00</span><input type="range" id="niTime" min="0" max="1439" step="5" value="720"></label>
           </div>
         </div>
@@ -719,7 +720,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="js/share-codec.js?v=20260624-01"></script>
-<script src="js/app.js?v=20260624-01"></script>
+<script src="js/share-codec.js?v=20260624-02"></script>
+<script src="js/app.js?v=20260624-02"></script>
 </body>
 </html>

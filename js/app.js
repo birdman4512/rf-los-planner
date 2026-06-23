@@ -2989,10 +2989,9 @@ const NI_CLUTTER_RANGE = 5000;     // m: how far to sample surface clutter (far 
 const NI_MAX_ELEV_ANGLE = 90;      // deg: full sky (zenith at the top / centre)
 const NI_EARTH_R = 6371000;        // m: geometric earth radius (sunlight is straight)
 
-// Panorama vertical scale: a sqrt compression so low-angle features (distant
-// mountains only a few degrees up) get real vertical space, while the high
-// midday sun still fits. Returns 0 at the horizon (bottom) … 1 at the zenith.
-function niElevFrac(a){ return Math.sqrt(Math.max(0, Math.min(90, a)) / 90); }
+// Panorama vertical axis is LINEAR (uniform grading) so the sun traces a smooth,
+// even curve with no warp. The maximum angle is framed per-day in niDrawPanorama
+// to fit the full sun arc + the skyline, which keeps distant hills visible.
 
 function niEl(id){ return document.getElementById(id); }
 
@@ -3044,7 +3043,7 @@ function niClassAt(arr, azDeg){
 async function computeHorizon(node){
   const useClutter = niEl('niClutter').checked;
   const eyeAbove = Math.max(0, parseFloat(niEl('niEye').value) || 0);
-  const key = `${node.lat.toFixed(5)},${node.lng.toFixed(5)},${eyeAbove},${useClutter},${canopyEnabled()}`;
+  const key = `${node.lat.toFixed(5)},${node.lng.toFixed(5)},${eyeAbove},${useClutter}`;
   if(node._horizonKey === key && node._horizon) return node._horizon;
 
   const groundElev = node.elev != null ? node.elev : await tileElevAt(node.lat, node.lng);
@@ -3053,14 +3052,16 @@ async function computeHorizon(node){
 
   // Surface-clutter samplers over a (near) bbox around the node — clutter only
   // bites the skyline close in, so this stays small even though terrain scans far.
+  // Use the most accurate source available: the self-hosted measured canopy
+  // (titiler) where it's built, falling back to ESA WorldCover land cover where it
+  // isn't. The popup always tries titiler — it doesn't wait on the global
+  // "measured canopy" setting, which only governs the link/coverage analysis.
   let wcGrid = null, canopyGrid = null;
   if(useClutter){
     const { dLat, dLng } = metresToDegrees(node.lat, NI_CLUTTER_RANGE);
     const heights = clutterHeightTable();
+    try { canopyGrid = await buildCanopyGrid(node.lat-dLat, node.lng-dLng, node.lat+dLat, node.lng+dLng, 30); } catch {}
     try { wcGrid = await buildWorldCoverGrid(node.lat-dLat, node.lng-dLng, node.lat+dLat, node.lng+dLng, 30, heights); } catch {}
-    if(canopyEnabled()){
-      try { canopyGrid = await buildCanopyGrid(node.lat-dLat, node.lng-dLng, node.lat+dLat, node.lng+dLng, 30); } catch {}
-    }
   }
   const clutterAt = (lat,lng) => {
     if(canopyGrid){ const c = canopyGrid.heightAt(lat,lng); if(Number.isFinite(c)) return { h:c, cls:10 }; }
@@ -3167,6 +3168,14 @@ function niRenderLinks(node){
     const meta = document.createElement('span'); meta.className = 'ni-link-meta';
     meta.textContent = `${String(Math.round(brg)).padStart(3,'0')}° · ${km.toFixed(2)} km`;
     btn.appendChild(nm); btn.appendChild(meta);
+    // Show the analysed link status (clear / marginal / blocked) when available.
+    const st = e.result?.status;
+    if(st){
+      const col = st==='clear' ? '#2ecc71' : st==='marginal' ? '#f39c12' : '#e74c3c';
+      const tag = document.createElement('span'); tag.className = 'ni-link-status';
+      tag.style.color = col; tag.textContent = (st==='error' ? 'ERROR' : st).toUpperCase();
+      btn.appendChild(tag);
+    }
     btn.addEventListener('click', () => { selectEdgeView(e.id, { force:true }); niRenderLinks(node); });
     box.appendChild(btn);
   });
@@ -3262,16 +3271,25 @@ function niRender(){
 
 function niDrawPanorama(node, h, sun, dateVal){
   const { ctx, w, h:H } = niSetupCanvas(niEl('niPanorama'));
-  const y = a => H * (1 - niElevFrac(a));   // sqrt scale: low angles get more room
+
+  // Frame the LINEAR vertical axis to fit the day's full sun arc plus the skyline
+  // (with a little headroom). Uniform grading → the sun path is a smooth, even
+  // curve; framing tight keeps distant hills visible rather than lost at 90°.
+  let maxSun = 0;
+  for(let m=0; m<=1439; m+=15){ const e = solarPosition(niWhen(dateVal, m), node.lat, node.lng).elevation; if(e > maxSun) maxSun = e; }
+  const maxSky = h.top.reduce((m,v) => Math.max(m,v), 0);
+  const maxAngle = Math.min(90, Math.max(30, maxSun + 6, maxSky + 6));
+  const y = a => H * (1 - Math.max(0, Math.min(maxAngle, a)) / maxAngle);
 
   const sky = ctx.createLinearGradient(0,0,0,H);
   sky.addColorStop(0,'#0a1830'); sky.addColorStop(1,'#244a72');
   ctx.fillStyle = sky; ctx.fillRect(0,0,w,H);
 
-  // elevation gridlines (spaced to suit the sqrt scale — denser low down)
+  // elevation gridlines (even spacing — uniform scale)
+  const gstep = maxAngle <= 30 ? 5 : maxAngle <= 60 ? 10 : 15;
   ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.fillStyle = 'rgba(200,218,234,.5)';
   ctx.font = '9px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-  for(const a of [2, 5, 10, 20, 45]){
+  for(let a = gstep; a < maxAngle; a += gstep){
     ctx.beginPath(); ctx.moveTo(0,y(a)); ctx.lineTo(w,y(a)); ctx.stroke();
     ctx.fillText(`${a}°`, 2, y(a)-1);
   }
@@ -3311,6 +3329,36 @@ function niDrawPanorama(node, h, sun, dateVal){
       ctx.beginPath(); ctx.moveTo(prevX, prevY); ctx.lineTo(X, Y); ctx.stroke();
     }
     prevX = X; prevY = Y;
+  }
+
+  // Hour ticks along the path — make the sun's direction of travel and speed
+  // readable (facing north, the sun runs E→W, i.e. right→left here). Labelled
+  // every 3rd hour in 24h local time.
+  ctx.textAlign = 'center';
+  for(let hr=0; hr<=24; hr++){
+    const s = solarPosition(niWhen(dateVal, hr*60), node.lat, node.lng);
+    if(s.elevation <= 0) continue;
+    const X = niAzToX(s.azimuth, w), Y = y(s.elevation);
+    ctx.beginPath(); ctx.arc(X, Y, hr%3===0 ? 2.4 : 1.4, 0, 7);
+    ctx.fillStyle = 'rgba(255,225,140,.95)'; ctx.fill();
+    if(hr%3===0){
+      ctx.fillStyle = 'rgba(255,225,140,.85)'; ctx.font = '8px monospace'; ctx.textBaseline = 'bottom';
+      ctx.fillText(`${String(hr).padStart(2,'0')}h`, X, Y-4);
+    }
+  }
+  // Sunrise / sunset markers at the path ends (first & last minute the sun is up).
+  let riseM = null, setM = null;
+  for(let m=0; m<=1439; m+=2){
+    if(solarPosition(niWhen(dateVal, m), node.lat, node.lng).elevation > 0){ if(riseM==null) riseM=m; setM=m; }
+  }
+  for(const [m,lab] of [[riseM,'rise'],[setM,'set']]){
+    if(m==null) continue;
+    const s = solarPosition(niWhen(dateVal, m), node.lat, node.lng);
+    const X = niAzToX(s.azimuth, w), Y = y(Math.max(0,s.elevation));
+    ctx.beginPath(); ctx.arc(X, Y, 3.5, 0, 7);
+    ctx.fillStyle = '#ffd23f'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#000'; ctx.stroke();
+    ctx.fillStyle = 'rgba(255,210,63,.95)'; ctx.font = '8px monospace'; ctx.textBaseline = 'top';
+    ctx.fillText(`${lab} ${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`, X, Y+4);
   }
 
   // current sun disc
