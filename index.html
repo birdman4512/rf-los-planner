@@ -195,6 +195,40 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .debug-body .dl-warn{color:var(--orange)}
 .debug-body .dl-err{color:var(--red)}
 
+/* ── NODE INFO / SUN EXPOSURE PANEL ── */
+/* Sits above the elevation-profile panel (200px) like the FABs; drops down with it when the chart is collapsed. */
+.ni-panel{position:fixed;right:12px;bottom:210px;width:640px;max-width:calc(100vw - 24px);max-height:calc(100vh - 230px);overflow-y:auto;background:rgba(11,15,23,.97);border:1px solid var(--border);border-radius:6px;display:none;flex-direction:column;z-index:3500;box-shadow:0 10px 34px rgba(0,0,0,.55);transition:bottom .15s}
+.map-col.chart-collapsed .ni-panel{bottom:40px;max-height:calc(100vh - 60px)}
+.ni-panel.open{display:flex}
+.ni-head{display:flex;align-items:center;gap:5px;padding:6px 8px;border-bottom:1px solid var(--border)}
+.ni-title{flex:1;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--accent);letter-spacing:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ni-head .btn{font-size:9px;padding:3px 7px;min-height:0}
+.ni-body{padding:8px 10px;display:flex;flex-direction:column;gap:8px}
+.ni-facts{font-size:11px;color:var(--text);line-height:1.45;display:grid;grid-template-columns:auto 1fr;gap:1px 10px}
+.ni-facts b{color:var(--muted);font-weight:400}
+.ni-links{display:flex;flex-direction:column;gap:3px}
+.ni-links-title{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:1px}
+.ni-link{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:4px 8px;cursor:pointer}
+.ni-link:hover{border-color:var(--accent)}
+.ni-link.active{border-color:var(--accent);background:rgba(0,200,240,.08)}
+.ni-link-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ni-link-meta{font-family:'Share Tech Mono',monospace;color:var(--accent);flex-shrink:0}
+.ni-views{display:flex;gap:8px;align-items:stretch}
+.ni-pano-wrap{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;background:#070b12;border:1px solid var(--border);border-radius:4px}
+.ni-pano-wrap::-webkit-scrollbar{height:6px}
+.ni-pano-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+#niPanorama{display:block;width:1080px;height:120px}
+#niPolar{width:130px;height:130px;background:#070b12;border:1px solid var(--border);border-radius:4px;flex-shrink:0;align-self:center}
+.ni-status{font-size:11px;color:var(--text);line-height:1.5;min-height:32px}
+.ni-status .sun-on{color:#ffd23f}
+.ni-status .sun-off{color:var(--muted)}
+.ni-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.ni-ctl{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)}
+.ni-ctl input[type=date]{font-size:10px;padding:2px 4px}
+.ni-time{flex:1;min-width:170px}
+.ni-time input[type=range]{flex:1;width:100%}
+.ni-time>span{font-family:'Share Tech Mono',monospace;color:var(--accent);min-width:38px}
+
 /* ── RESULTS ── */
 .results-area{border-top:1px solid var(--border);border-bottom:2px solid rgba(0,200,240,.12);overflow-y:auto}
 .results-area::-webkit-scrollbar{width:3px}
@@ -554,7 +588,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260614-05">BUILD 20260614-05</span>
+      <span class="hdr-tag" title="Build 20260624-01">BUILD 20260624-01</span>
     </div>
   </header>
 
@@ -642,6 +676,31 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <div class="debug-body" id="debugBody"></div>
       </div>
 
+      <!-- Node info / sun-exposure panel -->
+      <div class="ni-panel" id="nodeInfoPanel">
+        <div class="ni-head">
+          <span class="ni-title" id="niTitle">NODE INFO</span>
+          <button class="btn" id="niClose" title="Close">✕</button>
+        </div>
+        <div class="ni-body">
+          <div class="ni-facts" id="niFacts"></div>
+          <div class="ni-links" id="niLinks"></div>
+          <div class="ni-views">
+            <div class="ni-pano-wrap" id="niPanoWrap">
+              <canvas id="niPanorama" title="Skyline from this node — terrain (dark) + surface clutter (coloured). Gold line is the sun's path today. Scroll sideways to pan the full 360°."></canvas>
+            </div>
+            <canvas id="niPolar" title="Sky dome looking up: green = blocked sky, dark = open sky, dot = sun (centre = overhead)."></canvas>
+          </div>
+          <div class="ni-status" id="niStatus"></div>
+          <div class="ni-controls">
+            <label class="ni-ctl"><span>Date</span><input type="date" id="niDate"></label>
+            <label class="ni-ctl"><span>Eye m</span><input type="number" id="niEye" value="2" min="0" step="0.5" style="width:48px" title="Eye height above ground (defaults to the antenna height; lower it to ~2 m to check a person/solar panel)"></label>
+            <label class="ni-ctl"><input type="checkbox" id="niClutter" checked><span>Clutter</span></label>
+            <label class="ni-ctl ni-time"><span id="niTimeLabel">12:00</span><input type="range" id="niTime" min="0" max="1439" step="5" value="720"></label>
+          </div>
+        </div>
+      </div>
+
       <!-- Floating buttons -->
       <div class="fab-group">
         <button class="fab loc" id="btnLocate" title="Go to my location">◎</button>
@@ -660,7 +719,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="share-codec.js?v=20260614-05"></script>
-<script src="app.js?v=20260614-05"></script>
+<script src="js/share-codec.js?v=20260624-01"></script>
+<script src="js/app.js?v=20260624-01"></script>
 </body>
 </html>

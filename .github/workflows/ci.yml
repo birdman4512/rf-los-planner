@@ -70,7 +70,8 @@ jobs:
       - name: Assemble static site
         run: |
           mkdir -p _site/data
-          cp index.html app.js share-codec.js repeaters.html repeaters.js favicon.svg manifest.webmanifest _site/
+          cp index.html repeaters.html favicon.svg manifest.webmanifest _site/
+          cp -r js _site/js
           cp data/repeaters-au.json _site/data/
           cp -r fonts _site/fonts
           cp -r icons _site/icons

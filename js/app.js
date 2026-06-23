@@ -137,6 +137,11 @@ function optionNum(v, allowed, fallback) {
   const n = Number(v);
   return allowed.includes(n) ? n : fallback;
 }
+// Distance in metres → lat/lng degree deltas at a given latitude (the cos guard
+// keeps longitude finite near the poles). Used to build sample/scan bboxes.
+function metresToDegrees(lat, m) {
+  return { dLat: m / 111320, dLng: m / (111320 * Math.max(0.05, Math.cos(lat * Math.PI / 180))) };
+}
 function validLatLng(lat, lng) {
   if (lat == null || lng == null) return false;
   if (String(lat).trim() === '' || String(lng).trim() === '') return false;
@@ -221,6 +226,8 @@ function makeMarker(node) {
     invalidateNodeCoverage(node, true);
     syncShareUrl();
     refreshOverlap();
+    // Re-scan the sun/skyline view if this node's info panel is open (it moved).
+    if (NI.node?.id === node.id){ node._horizon = null; niRenderLinks(node); niRescan(); }
     // Re-analyse all links whenever a node is dragged
     if (S.edges.length > 0) runAnalysis();
   });
@@ -291,6 +298,7 @@ function removeNode(id) {
   if(S.activeView?.type==='edge'&&!S.edges.some(e=>e.id===S.activeView.id)) S.activeView=null;
   if(S.activeView?.type==='path'&&!S.paths.some(p=>p.id===S.activeView.id)) S.activeView=null;
   if(S.activeView?.type==='node'&&S.activeView.id===id) S.activeView=null;
+  if(NI.node?.id===id) closeNodeInfo();
   refreshAllIcons();
   renderNodeList();
   renderEdgesPanel();
@@ -311,6 +319,7 @@ function clearAll() {
   S.edges.forEach(removeEdgeLayers);
   S.nodes = []; S.edges = []; S.paths = [];
   S.activeView = null;
+  closeNodeInfo();
   S.nextId = 1;
   updateCovCount();
   renderNodeList(); renderEdgesPanel(); renderPathsPanel();
@@ -589,6 +598,7 @@ function setDisplayVisibility(kind, visible) {
 
 function selectNodeView(id, opts={}){
   if(!S.nodes.some(n=>n.id===id)) return;
+  if(NI.node&&NI.node.id!==id) closeNodeInfo();   // selecting a different node drops the open info panel
   if(!opts.force&&S.activeView?.type==='node'&&S.activeView.id===id){clearActiveView();return;}
   S.activeView={type:'node',id};
   clearCanvas();
@@ -646,6 +656,7 @@ function selectPathView(id, opts={}){
 
 function clearActiveView(){
   S.activeView=null;
+  closeNodeInfo();
   clearCanvas();
   highlightActiveMapView();
   renderNodeList();
@@ -1185,6 +1196,7 @@ function showNodeCtx(cx,cy,node){
   }));
   const items=[
     {icon:'✎',label:'Rename…',action:()=>{const nm=prompt('Node name:',node.name);if(nm?.trim()){renameNode(node.id,nm.trim());renderNodeList();}}},
+    {icon:'ⓘ',label:'More info…',action:()=>openNodeInfo(node)},
     'sep',
     ...connectItems,
     'sep',
@@ -1296,11 +1308,11 @@ function goToMyLocation(){
     S.map.setView([lat,lng],14);
     hideToast();
     // Add a temporary pulse circle
-    const circle=L.circle([lat,lng],{radius:50,color:var_accent(),fillColor:var_accent(),fillOpacity:.2,weight:2}).addTo(S.map);
+    const circle=L.circle([lat,lng],{radius:50,color:accentColor(),fillColor:accentColor(),fillOpacity:.2,weight:2}).addTo(S.map);
     setTimeout(()=>S.map.removeLayer(circle),4000);
   },err=>{hideToast();toast('Could not get location: '+err.message,3000);});
 }
-function var_accent(){return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#00c8f0';}
+function accentColor(){return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#00c8f0';}
 
 // ═══════════════════════════════════════════════════════════
 //  ELEVATION — AWS Open Terrain Tiles (Terrarium PNG encoding)
@@ -1626,8 +1638,7 @@ function tileLonLatBounds(x, y, z){
 async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, heights){
   if(_clutterUnavailable){ dlog('Clutter: skipped (data unavailable earlier this session)','warn'); return null; }
   const midLat = (minLat + maxLat) / 2;
-  const dLat = stepM / 111320;
-  const dLng = stepM / (111320 * Math.max(0.05, Math.cos(midLat * Math.PI/180)));
+  const { dLat, dLng } = metresToDegrees(midLat, stepM);
   const cols = Math.min(2048, Math.max(2, Math.ceil((maxLng - minLng) / dLng) + 1));
   const rows = Math.min(2048, Math.max(2, Math.ceil((maxLat - minLat) / dLat) + 1));
   for(const src of WORLDCOVER_WMS_SOURCES){
@@ -1698,8 +1709,7 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
   const manifest = await loadCanopyManifest(_canopyLocalCogMisses.size > 0);
   if(_titilerUnavailable) return null;
   const midLat = (minLat + maxLat) / 2;
-  const dLat = stepM / 111320;
-  const dLng = stepM / (111320 * Math.max(0.05, Math.cos(midLat * Math.PI/180)));
+  const { dLat, dLng } = metresToDegrees(midLat, stepM);
   const tl = lonLatToTile(minLng, maxLat, CANOPY_TILE_Z);   // top-left source tile
   const br = lonLatToTile(maxLng, minLat, CANOPY_TILE_Z);   // bottom-right source tile
   const images = [];
@@ -2086,8 +2096,7 @@ async function _computeNodeCoverageImpl(node){
   // additionally reads measured Meta/WRI canopy at grazing tree points.
   let clutter = null;
   if(g.clutterOn){
-    const dLat = maxRange / 111320;
-    const dLng = maxRange / (111320 * Math.max(0.05, Math.cos(node.lat * Math.PI/180)));
+    const { dLat, dLng } = metresToDegrees(node.lat, maxRange);
     dlog(`  Clutter ON: forest ${g.clutterHeights[10]}m, urban ${g.clutterHeights[50]}m, clear-radius ${g.clutterExcludeM}m, atten ${clutterAttenDbPerM(g.freq, g.clutterAttenRef).toFixed(3)}dB/m — loading…`);
     toast(`${node.name}: loading land cover…`);
     const wc = await buildWorldCoverGrid(node.lat - dLat, node.lng - dLng,
@@ -2293,8 +2302,7 @@ function renderCoverageOverlap(){
   // Combined bounds across every node's reach.
   let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
   for(const n of nodes){
-    const dLat = n.coverageMaxRange / 111320;
-    const dLng = n.coverageMaxRange / (111320 * Math.max(0.05, Math.cos(n.lat * Math.PI/180)));
+    const { dLat, dLng } = metresToDegrees(n.lat, n.coverageMaxRange);
     minLat = Math.min(minLat, n.lat - dLat); maxLat = Math.max(maxLat, n.lat + dLat);
     minLng = Math.min(minLng, n.lng - dLng); maxLng = Math.max(maxLng, n.lng + dLng);
   }
@@ -2965,6 +2973,397 @@ function clutterClassColor(cls){
 }
 function clutterClassLabel(cls){
   return {10:'Tree',20:'Shrub',40:'Crop',50:'Built-up',90:'Wetland',95:'Mangrove'}[cls]||'Clutter';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  NODE INFO + SUN EXPOSURE
+//  A bottom-right panel showing node facts plus a sky view of the surrounding
+//  skyline (terrain + surface clutter) with the sun's daily arc across it, so
+//  you can see when direct sun is blocked by hills, canopy or buildings.
+// ═══════════════════════════════════════════════════════════
+const NI = { node:null, horizon:null, wired:false };
+const NI_AZ_STEP = 2;              // degrees between skyline samples (180 rays)
+const NI_MIN_RANGE = 2;            // m: start scanning close so overhead canopy bites
+const NI_TERRAIN_RANGE = 30000;    // m: how far to scan terrain for the skyline (catches distant mountains)
+const NI_CLUTTER_RANGE = 5000;     // m: how far to sample surface clutter (far clutter is angularly negligible)
+const NI_MAX_ELEV_ANGLE = 90;      // deg: full sky (zenith at the top / centre)
+const NI_EARTH_R = 6371000;        // m: geometric earth radius (sunlight is straight)
+
+// Panorama vertical scale: a sqrt compression so low-angle features (distant
+// mountains only a few degrees up) get real vertical space, while the high
+// midday sun still fits. Returns 0 at the horizon (bottom) … 1 at the zenith.
+function niElevFrac(a){ return Math.sqrt(Math.max(0, Math.min(90, a)) / 90); }
+
+function niEl(id){ return document.getElementById(id); }
+
+// Low-precision solar position (NOAA), good to ~0.01°. `date` is a JS Date in
+// local time; lng is east-positive. Returns degrees: elevation above horizon
+// and azimuth measured clockwise from true north.
+function solarPosition(date, lat, lng){
+  const rad = Math.PI/180, deg = 180/Math.PI;
+  const jd = date.getTime()/86400000 + 2440587.5;   // Julian day from epoch ms
+  const n  = jd - 2451545.0;                          // days since J2000.0
+  let L = (280.460 + 0.9856474*n) % 360; if(L<0) L+=360;   // mean longitude
+  let g = (357.528 + 0.9856003*n) % 360; if(g<0) g+=360;   // mean anomaly
+  const lambda  = L + 1.915*Math.sin(g*rad) + 0.020*Math.sin(2*g*rad); // ecliptic long
+  const epsilon = 23.439 - 0.0000004*n;                    // obliquity
+  const alpha = Math.atan2(Math.cos(epsilon*rad)*Math.sin(lambda*rad), Math.cos(lambda*rad))*deg;
+  const delta = Math.asin(Math.sin(epsilon*rad)*Math.sin(lambda*rad))*deg;     // declination
+  let GMST = (280.46061837 + 360.98564736629*n) % 360; if(GMST<0) GMST+=360;
+  let H = ((GMST + lng - alpha) % 360 + 540) % 360 - 180;  // hour angle, -180..180
+  const latR=lat*rad, decR=delta*rad, hR=H*rad;
+  const alt = Math.asin(Math.sin(latR)*Math.sin(decR) + Math.cos(latR)*Math.cos(decR)*Math.cos(hR));
+  let az = Math.atan2(-Math.sin(hR), Math.tan(decR)*Math.cos(latR) - Math.sin(latR)*Math.cos(hR));
+  return { elevation: alt*deg, azimuth: (az*deg + 360) % 360 };
+}
+
+// Build a Date from the panel's date input (YYYY-MM-DD) + minutes-of-day.
+function niWhen(dateVal, mins){
+  const [Y,M,D] = (dateVal||'').split('-').map(Number);
+  const base = (Y && M && D) ? new Date(Y, M-1, D) : new Date();
+  return new Date(base.getFullYear(), base.getMonth(), base.getDate(), Math.floor(mins/60), mins%60, 0);
+}
+
+// Interpolate a per-azimuth skyline array (indexed every NI_AZ_STEP degrees).
+function niHorizonAt(arr, azDeg){
+  const n = arr.length;
+  const f = (((azDeg % 360) + 360) % 360) / NI_AZ_STEP;
+  const i0 = Math.floor(f) % n, i1 = (i0+1) % n, fr = f - Math.floor(f);
+  return arr[i0]*(1-fr) + arr[i1]*fr;
+}
+function niClassAt(arr, azDeg){
+  return arr[Math.round((((azDeg % 360) + 360) % 360) / NI_AZ_STEP) % arr.length];
+}
+
+// March a ring of azimuths out to NI_TERRAIN_RANGE, sampling terrain (and, within
+// NI_CLUTTER_RANGE, surface clutter). For each bearing record the highest
+// obstruction angle seen: terrain-only and terrain+clutter. The long terrain
+// reach catches distant mountains; scanning from NI_MIN_RANGE means a node that
+// sits *inside* tall canopy reads a near-vertical obstruction in every direction,
+// which is exactly the "you're under the trees" badness we want to show.
+async function computeHorizon(node){
+  const useClutter = niEl('niClutter').checked;
+  const eyeAbove = Math.max(0, parseFloat(niEl('niEye').value) || 0);
+  const key = `${node.lat.toFixed(5)},${node.lng.toFixed(5)},${eyeAbove},${useClutter},${canopyEnabled()}`;
+  if(node._horizonKey === key && node._horizon) return node._horizon;
+
+  const groundElev = node.elev != null ? node.elev : await tileElevAt(node.lat, node.lng);
+  const eye = groundElev + eyeAbove;
+  const cosLat = Math.max(0.05, Math.cos(node.lat * Math.PI/180));
+
+  // Surface-clutter samplers over a (near) bbox around the node — clutter only
+  // bites the skyline close in, so this stays small even though terrain scans far.
+  let wcGrid = null, canopyGrid = null;
+  if(useClutter){
+    const { dLat, dLng } = metresToDegrees(node.lat, NI_CLUTTER_RANGE);
+    const heights = clutterHeightTable();
+    try { wcGrid = await buildWorldCoverGrid(node.lat-dLat, node.lng-dLng, node.lat+dLat, node.lng+dLng, 30, heights); } catch {}
+    if(canopyEnabled()){
+      try { canopyGrid = await buildCanopyGrid(node.lat-dLat, node.lng-dLng, node.lat+dLat, node.lng+dLng, 30); } catch {}
+    }
+  }
+  const clutterAt = (lat,lng) => {
+    if(canopyGrid){ const c = canopyGrid.heightAt(lat,lng); if(Number.isFinite(c)) return { h:c, cls:10 }; }
+    if(wcGrid){ const cls = wcGrid.classAt(lat,lng); return { h: wcGrid.heightAt(lat,lng), cls }; }
+    return { h:0, cls:0 };
+  };
+
+  // Distance steps along every ray (denser near the node, where small obstructions
+  // set the skyline; coarser far out). Shared across all bearings.
+  const steps = [];
+  for(let d = NI_MIN_RANGE; d <= NI_TERRAIN_RANGE; d += Math.max(15, d*0.03)) steps.push(d);
+
+  const az=[], terr=[], top=[], cls=[];
+  for(let a=0; a<360; a+=NI_AZ_STEP){
+    const ar = a*Math.PI/180, sin=Math.sin(ar), cos=Math.cos(ar);
+    const pts = steps.map(d => [node.lat + (d*cos)/111320, node.lng + (d*sin)/(111320*cosLat)]);
+    // Fetch this ray's terrain in parallel; duplicate tile requests de-dupe in cache.
+    const gs = await Promise.all(pts.map(([la,ln]) => tileElevAt(la, ln)));
+    let maxT=-90, maxTop=-90, topCls=0;
+    for(let k=0; k<steps.length; k++){
+      const d = steps[k], g = gs[k];
+      const drop = d*d/(2*NI_EARTH_R);                 // earth curvature drop
+      const tAng = Math.atan2(g - eye - drop, d) * 180/Math.PI;
+      if(tAng > maxT) maxT = tAng;
+      if(tAng > maxTop) maxTop = tAng;   // bare terrain feeds the top skyline at every range
+      if(useClutter && d <= NI_CLUTTER_RANGE){
+        const cl = clutterAt(pts[k][0], pts[k][1]);
+        const topAng = Math.atan2(g + cl.h - eye - drop, d) * 180/Math.PI;
+        if(topAng > maxTop){ maxTop = topAng; topCls = cl.cls; }
+      }
+    }
+    az.push(a); terr.push(Math.max(0,maxT)); top.push(Math.max(0,maxTop)); cls.push(topCls);
+  }
+
+  const nodeClutter = useClutter ? clutterAt(node.lat, node.lng) : { h:0, cls:0 };
+  const h = { az, terr, top, cls, eye, groundElev, eyeAbove,
+              nodeClutter: nodeClutter.h, nodeClutterCls: nodeClutter.cls,
+              underCanopy: nodeClutter.h > eyeAbove };
+  node._horizon = h; node._horizonKey = key;
+  return h;
+}
+
+function openNodeInfo(node){
+  closeCtx();
+  selectNodeView(node.id, { force:true });
+  S.map.panTo([node.lat, node.lng], { animate:true });
+  NI.node = node;
+  niWire();
+  niEl('nodeInfoPanel').classList.add('open');
+  if(!niEl('niDate').value){
+    const d = new Date();
+    niEl('niDate').value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  // Eye sits at the antenna tip by default (the app models the radio at
+  // ground + antH); drop it to ~2 m to check sun/shade for a person or panel.
+  niEl('niEye').value = node.antH ?? 2;
+  niEl('niTitle').textContent = `NODE INFO · ${node.name}`;
+  niRenderFacts();
+  niRenderLinks(node);
+  niEl('niStatus').textContent = 'Scanning skyline…';
+  // Centre the (wider-than-viewport) panorama on North, where the sun's arc sits.
+  requestAnimationFrame(() => { const wrap = niEl('niPanoWrap'); if(wrap) wrap.scrollLeft = (wrap.scrollWidth - wrap.clientWidth) / 2; });
+  niRescan();
+}
+
+function niRescan(){
+  const node = NI.node;
+  if(!node) return;
+  niEl('niStatus').textContent = 'Scanning skyline…';
+  computeHorizon(node).then(h => {
+    if(NI.node !== node) return;        // panel changed/closed mid-scan
+    NI.horizon = h;
+    niRenderFacts();
+    niRender();
+  }).catch(e => { if(NI.node===node) niEl('niStatus').textContent = 'Skyline scan failed: ' + (e.message||e); });
+}
+
+function closeNodeInfo(){
+  niEl('nodeInfoPanel').classList.remove('open');
+  NI.node = null; NI.horizon = null;
+}
+
+// List the links touching this node with their bearing + distance. Clicking a
+// row selects that link, which highlights it on the map and draws its terrain
+// cross-section in the profile panel below — the popup stays open throughout.
+function niRenderLinks(node){
+  const box = niEl('niLinks'); box.innerHTML = '';
+  const edges = S.edges.filter(e => e.aId === node.id || e.bId === node.id);
+  if(!edges.length){ box.style.display = 'none'; return; }
+  box.style.display = '';
+  const title = document.createElement('div');
+  title.className = 'ni-links-title'; title.textContent = 'LINKS';
+  box.appendChild(title);
+  edges.forEach(e => {
+    const other = S.nodes.find(n => n.id === (e.aId === node.id ? e.bId : e.aId));
+    if(!other) return;
+    const brg = bearingTo(node.lat, node.lng, other.lat, other.lng);
+    const km = haversine(node.lat, node.lng, other.lat, other.lng) / 1000;
+    const isActive = S.activeView?.type === 'edge' && S.activeView.id === e.id;
+    const btn = document.createElement('button');
+    btn.className = 'ni-link' + (isActive ? ' active' : '');
+    btn.title = 'Show this link in the terrain profile';
+    const nm = document.createElement('span'); nm.className = 'ni-link-name'; nm.textContent = '→ ' + other.name;
+    const meta = document.createElement('span'); meta.className = 'ni-link-meta';
+    meta.textContent = `${String(Math.round(brg)).padStart(3,'0')}° · ${km.toFixed(2)} km`;
+    btn.appendChild(nm); btn.appendChild(meta);
+    btn.addEventListener('click', () => { selectEdgeView(e.id, { force:true }); niRenderLinks(node); });
+    box.appendChild(btn);
+  });
+}
+
+function niWire(){
+  if(NI.wired) return; NI.wired = true;
+  niEl('niClose').addEventListener('click', closeNodeInfo);
+  niEl('niTime').addEventListener('input', niRender);
+  niEl('niDate').addEventListener('change', niRender);
+  niEl('niEye').addEventListener('change', niRescan);
+  niEl('niClutter').addEventListener('change', () => { if(NI.node) niRescan(); });
+}
+
+function niFmtHM(mins){
+  const m = Math.round(mins);
+  return `${Math.floor(m/60)}h ${String(m%60).padStart(2,'0')}m`;
+}
+
+function niRenderFacts(){
+  const node = NI.node; if(!node) return;
+  const h = NI.horizon;
+  const rows = [
+    ['Name', node.name],
+    ['Lat, Lng', `${node.lat.toFixed(5)}, ${node.lng.toFixed(5)}`],
+    ['Ground elev', node.elev != null ? `${node.elev.toFixed(0)} m` : '…'],
+    ['Antenna h', `${node.antH} m`],
+  ];
+  if(h){
+    rows.push(['Eye height', `${h.eyeAbove} m above ground`]);
+    if(h.nodeClutter > 0){
+      const label = clutterClassLabel(h.nodeClutterCls);
+      rows.push(['Clutter @ node', `${h.nodeClutter.toFixed(0)} m ${label}${h.underCanopy ? ' — under it ⚠' : ''}`]);
+    }
+  }
+  const f = niEl('niFacts'); f.innerHTML = '';
+  for(const [k,v] of rows){
+    const b = document.createElement('b'); b.textContent = k;
+    const s = document.createElement('span'); s.textContent = v;
+    f.appendChild(b); f.appendChild(s);
+  }
+}
+
+function niSetupCanvas(cv){
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, hh = cv.clientHeight;
+  cv.width = Math.round(w*dpr); cv.height = Math.round(hh*dpr);
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h: hh };
+}
+
+// Map compass azimuth → panorama x. North is centred, west on the left, east on
+// the right, south at both edges — natural when facing north (true for the
+// southern-hemisphere sun, which tracks across the northern sky).
+function niAzToX(az, w){ return (((az + 180) % 360) / 360) * w; }
+
+function niRender(){
+  const node = NI.node, h = NI.horizon;
+  if(!node || !h) return;
+  const dateVal = niEl('niDate').value;
+  const mins = +niEl('niTime').value;
+  niEl('niTimeLabel').textContent = `${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
+  const when = niWhen(dateVal, mins);
+  const sun = solarPosition(when, node.lat, node.lng);
+  const skyAtSun = niHorizonAt(h.top, sun.azimuth);
+  const terrAtSun = niHorizonAt(h.terr, sun.azimuth);
+  const exposed = sun.elevation > 0 && sun.elevation > skyAtSun;
+
+  // Daily totals: step through the chosen day counting daylight vs direct-sun.
+  let daylight = 0, sunlit = 0;
+  for(let m=0; m<=1439; m+=5){
+    const s = solarPosition(niWhen(dateVal, m), node.lat, node.lng);
+    if(s.elevation > 0){ daylight += 5; if(s.elevation > niHorizonAt(h.top, s.azimuth)) sunlit += 5; }
+  }
+
+  let cur;
+  if(sun.elevation <= 0){
+    cur = '<span class="sun-off">Sun below horizon (night)</span>';
+  }else if(exposed){
+    cur = `<span class="sun-on">☀ Direct sun</span> — alt ${sun.elevation.toFixed(0)}°, az ${sun.azimuth.toFixed(0)}°`;
+  }else{
+    const by = sun.elevation <= terrAtSun ? 'terrain' : 'canopy/clutter';
+    cur = `<span class="sun-off">⛅ Sun blocked</span> by ${by} — alt ${sun.elevation.toFixed(0)}°, az ${sun.azimuth.toFixed(0)}°`;
+  }
+  const daily = daylight ? `Direct sun ${niFmtHM(sunlit)} of ${niFmtHM(daylight)} daylight (${Math.round(sunlit/daylight*100)}%)`
+                         : 'No daylight on this date';
+  niEl('niStatus').innerHTML = cur + '<br>' + daily + (h.underCanopy ? ' · <span class="sun-off">⚠ under canopy</span>' : '');
+
+  niDrawPanorama(node, h, sun, dateVal);
+  niDrawPolar(node, h, sun);
+}
+
+function niDrawPanorama(node, h, sun, dateVal){
+  const { ctx, w, h:H } = niSetupCanvas(niEl('niPanorama'));
+  const y = a => H * (1 - niElevFrac(a));   // sqrt scale: low angles get more room
+
+  const sky = ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#0a1830'); sky.addColorStop(1,'#244a72');
+  ctx.fillStyle = sky; ctx.fillRect(0,0,w,H);
+
+  // elevation gridlines (spaced to suit the sqrt scale — denser low down)
+  ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.fillStyle = 'rgba(200,218,234,.5)';
+  ctx.font = '9px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+  for(const a of [2, 5, 10, 20, 45]){
+    ctx.beginPath(); ctx.moveTo(0,y(a)); ctx.lineTo(w,y(a)); ctx.stroke();
+    ctx.fillText(`${a}°`, 2, y(a)-1);
+  }
+
+  // terrain (solid) + clutter (translucent class colour, drawn a distinct way)
+  for(let px=0; px<w; px++){
+    const az = ((px/w)*360 - 180 + 360) % 360;
+    const tA = niHorizonAt(h.terr, az);
+    const cA = niHorizonAt(h.top, az);
+    ctx.fillStyle = '#0e1d2b';
+    ctx.fillRect(px, y(tA), 1, H - y(tA));
+    if(cA > tA + 0.05){
+      const [r,g,b] = clutterClassColor(niClassAt(h.cls, az) || 10);
+      ctx.fillStyle = `rgba(${r},${g},${b},.78)`;
+      ctx.fillRect(px, y(cA), 1, y(tA) - y(cA));
+    }
+  }
+  // crisp terrain ridge line
+  ctx.strokeStyle = '#3a5a72'; ctx.beginPath();
+  for(let px=0; px<w; px++){
+    const az = ((px/w)*360 - 180 + 360) % 360;
+    const yy = y(niHorizonAt(h.terr, az));
+    px ? ctx.lineTo(px,yy) : ctx.moveTo(px,yy);
+  }
+  ctx.stroke();
+
+  // sun's daily arc
+  let prevX = null, prevY = null;
+  ctx.lineWidth = 1;
+  for(let m=0; m<=1439; m+=8){
+    const s = solarPosition(niWhen(dateVal, m), node.lat, node.lng);
+    if(s.elevation < -1){ prevX = null; continue; }
+    const X = niAzToX(s.azimuth, w), Y = y(s.elevation);
+    const lit = s.elevation > 0 && s.elevation > niHorizonAt(h.top, s.azimuth);
+    if(prevX != null && Math.abs(X - prevX) < w*0.5){
+      ctx.strokeStyle = lit ? 'rgba(255,210,63,.9)' : 'rgba(150,165,185,.6)';
+      ctx.beginPath(); ctx.moveTo(prevX, prevY); ctx.lineTo(X, Y); ctx.stroke();
+    }
+    prevX = X; prevY = Y;
+  }
+
+  // current sun disc
+  if(sun.elevation > -1){
+    const X = niAzToX(sun.azimuth, w), Y = y(sun.elevation);
+    const lit = sun.elevation > 0 && sun.elevation > niHorizonAt(h.top, sun.azimuth);
+    ctx.beginPath(); ctx.arc(X, Y, 6, 0, 7);
+    ctx.fillStyle = lit ? '#ffd23f' : '#7a8aa0';
+    ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#000'; ctx.stroke();
+  }
+
+  // compass labels (N centred, W left, E right, S edges)
+  ctx.fillStyle = 'rgba(200,218,234,.85)'; ctx.font = '10px monospace';
+  ctx.textBaseline = 'top';
+  for(const [az,lab] of [[0,'N'],[90,'E'],[180,'S'],[270,'W']]){
+    ctx.textAlign = 'center';
+    ctx.fillText(lab, niAzToX(az, w), 2);
+  }
+}
+
+function niDrawPolar(node, h, sun){
+  const { ctx, w, h:H } = niSetupCanvas(niEl('niPolar'));
+  const cx = w/2, cy = H/2, R = Math.min(w,H)/2 - 12;
+  const P = Math.PI/180;
+  const pt = (az, r) => [cx + r*Math.sin(az*P), cy - r*Math.cos(az*P)];
+
+  // whole sky disc = obstructed, then carve out the open sky polygon
+  ctx.fillStyle = 'rgba(70,100,70,.5)';
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.fill();
+  ctx.beginPath();
+  for(let i=0; i<h.az.length; i++){
+    const open = R * (1 - Math.min(1, h.top[i]/NI_MAX_ELEV_ANGLE));
+    const [x,yy] = pt(h.az[i], open);
+    i ? ctx.lineTo(x,yy) : ctx.moveTo(x,yy);
+  }
+  ctx.closePath(); ctx.fillStyle = '#0a1f38'; ctx.fill();
+
+  // rings + N marker
+  ctx.strokeStyle = 'rgba(255,255,255,.12)';
+  for(const rr of [R, R*0.66, R*0.33]){ ctx.beginPath(); ctx.arc(cx,cy,rr,0,7); ctx.stroke(); }
+  ctx.fillStyle = 'rgba(200,218,234,.8)'; ctx.font = '9px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('N', cx, cy - R - 5);
+
+  // sun: zenith at centre, horizon at rim
+  if(sun.elevation > -1){
+    const r = R * (1 - Math.max(0, sun.elevation)/90);
+    const [x,yy] = pt(sun.azimuth, r);
+    const lit = sun.elevation > 0 && sun.elevation > niHorizonAt(h.top, sun.azimuth);
+    ctx.beginPath(); ctx.arc(x, yy, 4, 0, 7);
+    ctx.fillStyle = lit ? '#ffd23f' : '#7a8aa0';
+    ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#000'; ctx.stroke();
+  }
 }
 
 // Draw the clutter band on a profile (A + D) with Fresnel/LOS intrusion

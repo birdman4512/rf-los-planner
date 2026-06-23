@@ -70,7 +70,7 @@ The tool loads Leaflet, LZString, map tiles, and terrain tiles from public
 CDNs/services, so an internet connection is needed for the full experience.
 Fonts are self-hosted from `fonts/`.
 
-The app itself is `index.html` (markup + styles) plus `app.js` (all logic).
+The app itself is `index.html` (markup + styles) plus `js/app.js` (all logic).
 There is deliberately no inline JavaScript: the Content-Security-Policy omits
 `'unsafe-inline'` from `script-src`.
 
@@ -115,7 +115,7 @@ Expected URL:
    workflow*). The `deploy` job publishes the assembled site.
 
 The `deploy` job's **Assemble static site** step copies an explicit allow-list of
-files into `_site/` (the app, `share-codec.js`, the repeater pages, fonts, and
+files into `_site/` (the HTML pages, the `js/` folder, fonts, icons, and
 `data/repeaters-au.json`) — dev tooling (`scripts/`, `tests/`, `package.json`,
 workflows, `docs/`) is deliberately kept off the public URL. **Any new static
 asset must be added to that step or it will 404 on the live site.**

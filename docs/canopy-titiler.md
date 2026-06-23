@@ -134,7 +134,7 @@ rescale=0,40&colormap_name=gray&return_mask=true&resampling=rms
 ```
 
 - **`rescale=0,40`** — gray 0–255 maps to 0–40 m. **This ceiling MUST equal
-  `CANOPY_HMAX` in `app.js`** (currently `40`). They are the encode/decode ends of
+  `CANOPY_HMAX` in `js/app.js`** (currently `40`). They are the encode/decode ends of
   the same 8-bit value; changing one without the other misreads every canopy
   height by the ratio of the two. The `<img>`/canvas decode is 8-bit, so a lower
   ceiling is the only browser-side precision lever — keep it just above the local
