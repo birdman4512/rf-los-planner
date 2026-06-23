@@ -2988,6 +2988,7 @@ const NI_TERRAIN_RANGE = 30000;    // m: how far to scan terrain for the skyline
 const NI_CLUTTER_RANGE = 5000;     // m: how far to sample surface clutter (far clutter is angularly negligible)
 const NI_MAX_ELEV_ANGLE = 90;      // deg: full sky (zenith at the top / centre)
 const NI_EARTH_R = 6371000;        // m: geometric earth radius (sunlight is straight)
+const NI_PANO_COPIES = 3;          // identical 360° copies tiled across the canvas for seamless wrap-around scroll
 
 // Panorama vertical axis is LINEAR (uniform grading) so the sun traces a smooth,
 // even curve with no warp. The maximum angle is framed per-day in niDrawPanorama
@@ -3100,7 +3101,8 @@ async function computeHorizon(node){
   }
 
   const nodeClutter = useClutter ? clutterAt(node.lat, node.lng) : { h:0, cls:0 };
-  const h = { az, terr, top, cls, eye, groundElev, eyeAbove,
+  const h = { az, terr, top, cls, eye, groundElev, eyeAbove, useClutter,
+              clutterSource: canopyGrid ? 'titiler' : (wcGrid ? 'WorldCover' : null),
               nodeClutter: nodeClutter.h, nodeClutterCls: nodeClutter.cls,
               underCanopy: nodeClutter.h > eyeAbove };
   node._horizon = h; node._horizonKey = key;
@@ -3200,6 +3202,15 @@ function niWire(){
   niEl('niDate').addEventListener('change', niRender);
   niEl('niEye').addEventListener('change', niRescan);
   niEl('niClutter').addEventListener('change', () => { if(NI.node) niRescan(); });
+  // Seamless wrap-around: the panorama is NI_PANO_COPIES identical copies; when a
+  // scroll crosses into the first or last copy, snap back by one copy so panning
+  // around the compass never hits an edge.
+  const wrap = niEl('niPanoWrap');
+  wrap.addEventListener('scroll', () => {
+    const one = wrap.scrollWidth / NI_PANO_COPIES;
+    if(wrap.scrollLeft < one) wrap.scrollLeft += one;
+    else if(wrap.scrollLeft >= 2 * one) wrap.scrollLeft -= one;
+  });
 }
 
 function niFmtHM(mins){
@@ -3218,10 +3229,18 @@ function niRenderFacts(){
   ];
   if(h){
     rows.push(['Eye height', `${h.eyeAbove} m above ground`]);
-    if(h.nodeClutter > 0){
+    // Always show the clutter-at-node row, with its current state.
+    let clutterVal;
+    if(!h.useClutter){
+      clutterVal = 'not applied (clutter off)';
+    }else if(h.nodeClutter > 0){
       const label = clutterClassLabel(h.nodeClutterCls);
-      rows.push(['Clutter @ node', `${h.nodeClutter.toFixed(0)} m ${label}${h.underCanopy ? ' — under it ⚠' : ''}`]);
+      const src = h.clutterSource ? ` · ${h.clutterSource}` : '';
+      clutterVal = `${h.nodeClutter.toFixed(0)} m ${label}${h.underCanopy ? ' — under it ⚠' : ''}${src}`;
+    }else{
+      clutterVal = `none here${h.clutterSource ? ` · ${h.clutterSource}` : ''}`;
     }
+    rows.push(['Clutter @ node', clutterVal]);
   }
   const f = niEl('niFacts'); f.innerHTML = '';
   for(const [k,v] of rows){
@@ -3283,6 +3302,10 @@ function niRender(){
 
 function niDrawPanorama(node, h, sun, dateVal){
   const { ctx, w, h:H } = niSetupCanvas(niEl('niPanorama'));
+  // The canvas holds NI_PANO_COPIES identical 360° copies side by side; the
+  // scroll wrapper snaps back by one copy at the edges (see niWire) so panning
+  // around the compass is seamless and endless. ONE = width of a single copy.
+  const ONE = w / NI_PANO_COPIES;
 
   // Frame the LINEAR vertical axis to fit the day's full sun arc plus the skyline
   // (with a little headroom). Uniform grading → the sun path is a smooth, even
@@ -3306,9 +3329,11 @@ function niDrawPanorama(node, h, sun, dateVal){
     ctx.fillText(`${a}°`, 2, y(a)-1);
   }
 
-  // terrain (solid) + clutter (translucent class colour, drawn a distinct way)
+  // terrain (solid) + clutter (translucent class colour) — tiled: each pixel maps
+  // to its azimuth within the copy it falls in, so the bands repeat seamlessly.
+  const azAtPx = px => ((((px % ONE) / ONE) * 360) - 180 + 360) % 360;
   for(let px=0; px<w; px++){
-    const az = ((px/w)*360 - 180 + 360) % 360;
+    const az = azAtPx(px);
     const tA = niHorizonAt(h.terr, az);
     const cA = niHorizonAt(h.top, az);
     ctx.fillStyle = '#0e1d2b';
@@ -3319,76 +3344,75 @@ function niDrawPanorama(node, h, sun, dateVal){
       ctx.fillRect(px, y(cA), 1, y(tA) - y(cA));
     }
   }
-  // crisp terrain ridge line
+  // crisp terrain ridge line (copy boundaries meet at S=180°, so it stays continuous)
   ctx.strokeStyle = '#3a5a72'; ctx.beginPath();
   for(let px=0; px<w; px++){
-    const az = ((px/w)*360 - 180 + 360) % 360;
-    const yy = y(niHorizonAt(h.terr, az));
+    const yy = y(niHorizonAt(h.terr, azAtPx(px)));
     px ? ctx.lineTo(px,yy) : ctx.moveTo(px,yy);
   }
   ctx.stroke();
 
-  // sun's daily arc
-  let prevX = null, prevY = null;
-  ctx.lineWidth = 1;
-  for(let m=0; m<=1439; m+=8){
-    const s = solarPosition(niWhen(dateVal, m), node.lat, node.lng);
-    if(s.elevation < -1){ prevX = null; continue; }
-    const X = niAzToX(s.azimuth, w), Y = y(s.elevation);
-    const lit = s.elevation > 0 && s.elevation > niHorizonAt(h.top, s.azimuth);
-    if(prevX != null && Math.abs(X - prevX) < w*0.5){
-      ctx.strokeStyle = lit ? 'rgba(255,210,63,.9)' : 'rgba(150,165,185,.6)';
-      ctx.beginPath(); ctx.moveTo(prevX, prevY); ctx.lineTo(X, Y); ctx.stroke();
-    }
-    prevX = X; prevY = Y;
-  }
-
-  // Hour ticks along the path — make the sun's direction of travel and speed
-  // readable (facing north, the sun runs E→W, i.e. right→left here). Labelled
-  // every 3rd hour in 24h local time.
-  ctx.textAlign = 'center';
-  for(let hr=0; hr<=24; hr++){
-    const s = solarPosition(niWhen(dateVal, hr*60), node.lat, node.lng);
-    if(s.elevation <= 0) continue;
-    const X = niAzToX(s.azimuth, w), Y = y(s.elevation);
-    ctx.beginPath(); ctx.arc(X, Y, hr%3===0 ? 2.4 : 1.4, 0, 7);
-    ctx.fillStyle = 'rgba(255,225,140,.95)'; ctx.fill();
-    if(hr%3===0){
-      ctx.fillStyle = 'rgba(255,225,140,.85)'; ctx.font = '8px monospace'; ctx.textBaseline = 'bottom';
-      ctx.fillText(`${String(hr).padStart(2,'0')}h`, X, Y-4);
-    }
-  }
-  // Sunrise / sunset markers at the path ends (first & last minute the sun is up).
+  // Sunrise / sunset minutes (first & last the sun is up) — computed once.
   let riseM = null, setM = null;
   for(let m=0; m<=1439; m+=2){
     if(solarPosition(niWhen(dateVal, m), node.lat, node.lng).elevation > 0){ if(riseM==null) riseM=m; setM=m; }
   }
-  for(const [m,lab] of [[riseM,'rise'],[setM,'set']]){
-    if(m==null) continue;
-    const s = solarPosition(niWhen(dateVal, m), node.lat, node.lng);
-    const X = niAzToX(s.azimuth, w), Y = y(Math.max(0,s.elevation));
-    ctx.beginPath(); ctx.arc(X, Y, 3.5, 0, 7);
-    ctx.fillStyle = '#ffd23f'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#000'; ctx.stroke();
-    ctx.fillStyle = 'rgba(255,210,63,.95)'; ctx.font = '8px monospace'; ctx.textBaseline = 'top';
-    ctx.fillText(`${lab} ${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`, X, Y+4);
-  }
 
-  // current sun disc
-  if(sun.elevation > -1){
-    const X = niAzToX(sun.azimuth, w), Y = y(sun.elevation);
-    const lit = sun.elevation > 0 && sun.elevation > niHorizonAt(h.top, sun.azimuth);
-    ctx.beginPath(); ctx.arc(X, Y, 6, 0, 7);
-    ctx.fillStyle = lit ? '#ffd23f' : '#7a8aa0';
-    ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#000'; ctx.stroke();
-  }
-
-  // compass labels (N centred, W left, E right, S edges)
-  ctx.fillStyle = 'rgba(200,218,234,.85)'; ctx.font = '10px monospace';
-  ctx.textBaseline = 'top';
-  for(const [az,lab] of [[0,'N'],[90,'E'],[180,'S'],[270,'W']]){
+  // Draw the sun overlays (arc, hour ticks, rise/set, current disc, compass) into
+  // one copy offset by x0; called once per copy so they repeat with the terrain.
+  const drawOverlays = x0 => {
+    // sun's daily arc
+    let prevX = null, prevY = null;
+    ctx.lineWidth = 1;
+    for(let m=0; m<=1439; m+=8){
+      const s = solarPosition(niWhen(dateVal, m), node.lat, node.lng);
+      if(s.elevation < -1){ prevX = null; continue; }
+      const X = x0 + niAzToX(s.azimuth, ONE), Y = y(s.elevation);
+      const lit = s.elevation > 0 && s.elevation > niHorizonAt(h.top, s.azimuth);
+      if(prevX != null && Math.abs(X - prevX) < ONE*0.5){
+        ctx.strokeStyle = lit ? 'rgba(255,210,63,.9)' : 'rgba(150,165,185,.6)';
+        ctx.beginPath(); ctx.moveTo(prevX, prevY); ctx.lineTo(X, Y); ctx.stroke();
+      }
+      prevX = X; prevY = Y;
+    }
+    // hour ticks (labelled every 3rd hour, 24h local time)
     ctx.textAlign = 'center';
-    ctx.fillText(lab, niAzToX(az, w), 2);
-  }
+    for(let hr=0; hr<=24; hr++){
+      const s = solarPosition(niWhen(dateVal, hr*60), node.lat, node.lng);
+      if(s.elevation <= 0) continue;
+      const X = x0 + niAzToX(s.azimuth, ONE), Y = y(s.elevation);
+      ctx.beginPath(); ctx.arc(X, Y, hr%3===0 ? 2.4 : 1.4, 0, 7);
+      ctx.fillStyle = 'rgba(255,225,140,.95)'; ctx.fill();
+      if(hr%3===0){
+        ctx.fillStyle = 'rgba(255,225,140,.85)'; ctx.font = '8px monospace'; ctx.textBaseline = 'bottom';
+        ctx.fillText(`${String(hr).padStart(2,'0')}h`, X, Y-4);
+      }
+    }
+    // sunrise / sunset markers
+    for(const [m,lab] of [[riseM,'rise'],[setM,'set']]){
+      if(m==null) continue;
+      const s = solarPosition(niWhen(dateVal, m), node.lat, node.lng);
+      const X = x0 + niAzToX(s.azimuth, ONE), Y = y(Math.max(0,s.elevation));
+      ctx.beginPath(); ctx.arc(X, Y, 3.5, 0, 7);
+      ctx.fillStyle = '#ffd23f'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#000'; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,210,63,.95)'; ctx.font = '8px monospace'; ctx.textBaseline = 'top';
+      ctx.fillText(`${lab} ${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`, X, Y+4);
+    }
+    // current sun disc
+    if(sun.elevation > -1){
+      const X = x0 + niAzToX(sun.azimuth, ONE), Y = y(sun.elevation);
+      const lit = sun.elevation > 0 && sun.elevation > niHorizonAt(h.top, sun.azimuth);
+      ctx.beginPath(); ctx.arc(X, Y, 6, 0, 7);
+      ctx.fillStyle = lit ? '#ffd23f' : '#7a8aa0';
+      ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#000'; ctx.stroke();
+    }
+    // compass labels (N centred, W left, E right, S edges)
+    ctx.fillStyle = 'rgba(200,218,234,.85)'; ctx.font = '10px monospace'; ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+    for(const [az,lab] of [[0,'N'],[90,'E'],[180,'S'],[270,'W']]){
+      ctx.fillText(lab, x0 + niAzToX(az, ONE), 2);
+    }
+  };
+  for(let c=0; c<NI_PANO_COPIES; c++) drawOverlays(c * ONE);
 }
 
 function niDrawPolar(node, h, sun){
