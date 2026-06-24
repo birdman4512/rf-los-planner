@@ -1459,15 +1459,22 @@ async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
 //  back to bare terrain.
 // ═══════════════════════════════════════════════════════════
 const _clutterImgCache = new Map(); // url → Promise<{data,w,h}>
-let _clutterUnavailable = false;    // sticky: once load fails, stop retrying this session
-let _titilerUnavailable = false;    // sticky: titiler VM is part-time — fall back after first failure
+let _clutterFailedAt = 0;           // when all WMS clutter sources last failed (0 = healthy); gates a short retry cooldown, not a session-long give-up
+let _titilerFailedAt = 0;           // when the titiler VM was last unreachable (it's part-time); also a cooldown, not sticky
 const _canopyLocalCogMisses = new Set(); // qk values that failed this session; cleared when a newer manifest generation appears (i.e. a COG was built)
 let _canopyManifestPromise = null;       // in-flight manifest fetch, shared by concurrent callers
 let _canopyManifest = null;              // last resolved manifest
 let _canopyManifestFetchedAt = 0;        // Date.now() of last successful fetch (TTL gate)
 let _canopyManifestGenerated = '';       // 'generated' stamp last seen; a change means a COG was (re)built → drop stale misses
 const CANOPY_MANIFEST_TTL_MS = 60000;    // re-poll at most this often so COGs built mid-session appear without a page reload
-const CLUTTER_IMG_TIMEOUT_MS = 20000; // fail a hung tile fast instead of waiting ~90s for the browser
+const CLUTTER_RETRY_COOLDOWN_MS = 90000; // after a fetch failure, skip the source for this long, then retry — one timeout no longer disables clutter for the whole session
+const CLUTTER_IMG_TIMEOUT_MS = 20000; // base per-tile timeout; scaled up for larger tiles by clutterTimeoutForPixels()
+const WMS_MAX_TILE_PX = 512;          // split big WorldCover GetMap requests into chunks ≤ this per side so one large image can't hang/abort the whole fetch
+
+function clutterInCooldown(){ return _clutterFailedAt > 0 && (Date.now() - _clutterFailedAt) < CLUTTER_RETRY_COOLDOWN_MS; }
+function titilerInCooldown(){ return _titilerFailedAt > 0 && (Date.now() - _titilerFailedAt) < CLUTTER_RETRY_COOLDOWN_MS; }
+// Bigger tiles legitimately take longer; give ~15s extra per megapixel over the base, capped at 60s.
+function clutterTimeoutForPixels(px){ return Math.min(60000, CLUTTER_IMG_TIMEOUT_MS + Math.round(px / 1e6 * 15000)); }
 
 function worldCoverClassFromRgb(r,g,b,a){
   if(a === 0) return 0;
@@ -1480,7 +1487,7 @@ function worldCoverClassFromRgb(r,g,b,a){
   return bestD <= 900 ? best : 0;
 }
 
-function loadClutterImage(url, w, h){
+function loadClutterImage(url, w, h, timeoutMs = CLUTTER_IMG_TIMEOUT_MS){
   if(_clutterImgCache.has(url)) return _clutterImgCache.get(url);
   const p = new Promise((resolve, reject)=>{
     const img = new Image();
@@ -1491,7 +1498,7 @@ function loadClutterImage(url, w, h){
       done = true;
       img.src = '';   // abort the in-flight request
       reject(new Error('image request timed out'));
-    }, CLUTTER_IMG_TIMEOUT_MS);
+    }, timeoutMs);
     img.onload = () => {
       if(done) return; done = true; clearTimeout(timer);
       try{
@@ -1513,7 +1520,7 @@ function loadClutterImage(url, w, h){
 }
 
 async function loadCanopyManifest(force){
-  if(_titilerUnavailable) return null;
+  if(titilerInCooldown()) return null;
   if(!force && _canopyManifest && (Date.now() - _canopyManifestFetchedAt) < CANOPY_MANIFEST_TTL_MS){
     return _canopyManifest; // fresh enough — skip the network round-trip
   }
@@ -1537,7 +1544,7 @@ async function loadCanopyManifest(force){
     })
     .catch(e => {
       _canopyManifestPromise = null;
-      _titilerUnavailable = true;
+      _titilerFailedAt = Date.now();
       dlog(`Canopy: manifest unavailable — ${e.message||e}`,'warn');
       return null;
     });
@@ -1642,41 +1649,67 @@ function tileLonLatBounds(x, y, z){
 // at ~stepM resolution. `heights` maps WorldCover class → metres. Returns a
 // sampler {heightAt(lat,lng)} or null if no data could be loaded (→ bare earth).
 async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, heights){
-  if(_clutterUnavailable){ dlog('Clutter: skipped (data unavailable earlier this session)','warn'); return null; }
+  if(clutterInCooldown()){ dlog('Clutter: skipped (source failed recently — will retry shortly)','warn'); return null; }
   const midLat = (minLat + maxLat) / 2;
   const { dLat, dLng } = metresToDegrees(midLat, stepM);
   const cols = Math.min(2048, Math.max(2, Math.ceil((maxLng - minLng) / dLng) + 1));
   const rows = Math.min(2048, Math.max(2, Math.ceil((maxLat - minLat) / dLat) + 1));
+  // Split the request into ≤ WMS_MAX_TILE_PX chunks: a single 1200²-ish GetMap is
+  // what hangs/aborts (HTTP2_PROTOCOL_ERROR) under load — small tiles fetch reliably.
+  const chunkCols = Math.ceil(cols / WMS_MAX_TILE_PX);
+  const chunkRows = Math.ceil(rows / WMS_MAX_TILE_PX);
+  const totalChunks = chunkCols * chunkRows;
   for(const src of WORLDCOVER_WMS_SOURCES){
-    const qs = new URLSearchParams({
-      SERVICE:'WMS',
-      VERSION:'1.3.0',
-      REQUEST:'GetMap',
-      LAYERS:src.layer,
-      STYLES:'',
-      CRS:'EPSG:4326',
-      BBOX:`${minLat},${minLng},${maxLat},${maxLng}`,
-      WIDTH:String(cols),
-      HEIGHT:String(rows),
-      FORMAT:'image/png',
-      TRANSPARENT:'true'
-    });
-    if(src.time) qs.set('TIME', src.time);
-    const url = `${src.url}?${qs.toString()}`;
-    dlog(`WorldCover ${src.name}: fetching ${cols}×${rows} WMS image …`);
-    let img;
-    try{
-      img = await loadClutterImage(url, cols, rows);
-    }catch(e){
-      dlog(`Clutter source status: ${src.name} FAILED — ${e.message||e}`,'err');
-      continue;
-    }
+    dlog(`WorldCover ${src.name}: fetching ${cols}×${rows} WMS image${totalChunks > 1 ? ` in ${totalChunks} tiles` : ''} …`);
     const classes = new Uint8Array(cols * rows);
     let filled = 0;
-    for(let i=0,j=0;i<img.data.length;i+=4,j++){
-      const cls = worldCoverClassFromRgb(img.data[i],img.data[i+1],img.data[i+2],img.data[i+3]);
-      classes[j] = cls;
-      if(cls) filled++;
+    let failedTile = '';
+    for(let cy = 0; cy < chunkRows && !failedTile; cy++){
+      for(let cx = 0; cx < chunkCols && !failedTile; cx++){
+        const c0 = cx * WMS_MAX_TILE_PX, c1 = Math.min(cols, c0 + WMS_MAX_TILE_PX);
+        const r0 = cy * WMS_MAX_TILE_PX, r1 = Math.min(rows, r0 + WMS_MAX_TILE_PX);
+        const cw = c1 - c0, ch = r1 - r0;
+        // Sub-bbox for this pixel block (row 0 = north). Edges share coords with
+        // neighbours, so the assembled grid lines up with the full classAt() mapping.
+        const w = minLng + (c0 / cols) * (maxLng - minLng);
+        const e = minLng + (c1 / cols) * (maxLng - minLng);
+        const n = maxLat - (r0 / rows) * (maxLat - minLat);
+        const s = maxLat - (r1 / rows) * (maxLat - minLat);
+        const qs = new URLSearchParams({
+          SERVICE:'WMS',
+          VERSION:'1.3.0',
+          REQUEST:'GetMap',
+          LAYERS:src.layer,
+          STYLES:'',
+          CRS:'EPSG:4326',
+          BBOX:`${s},${w},${n},${e}`,
+          WIDTH:String(cw),
+          HEIGHT:String(ch),
+          FORMAT:'image/png',
+          TRANSPARENT:'true'
+        });
+        if(src.time) qs.set('TIME', src.time);
+        const url = `${src.url}?${qs.toString()}`;
+        let img;
+        try{
+          img = await loadClutterImage(url, cw, ch, clutterTimeoutForPixels(cw * ch));
+        }catch(err){
+          failedTile = err.message || String(err);
+          break;
+        }
+        for(let yy = 0; yy < ch; yy++){
+          for(let xx = 0; xx < cw; xx++){
+            const i = (yy * cw + xx) * 4;
+            const cls = worldCoverClassFromRgb(img.data[i], img.data[i+1], img.data[i+2], img.data[i+3]);
+            classes[(r0 + yy) * cols + (c0 + xx)] = cls;
+            if(cls) filled++;
+          }
+        }
+      }
+    }
+    if(failedTile){
+      dlog(`Clutter source status: ${src.name} FAILED — ${failedTile}`,'err');
+      continue;
     }
     if(!filled){
       dlog('Clutter: Terrascope returned no class pixels (left as bare terrain)','warn');
@@ -1697,7 +1730,7 @@ async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, height
     };
   }
   dlog('Clutter: all Terrascope WMS sources failed (left as bare terrain)','err');
-  _clutterUnavailable = true;
+  _clutterFailedAt = Date.now();
   return null;
 }
 
@@ -1708,12 +1741,12 @@ async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, height
 // Returns {heightAt(lat,lng)→metres or NaN, tiles} or null if titiler is
 // unreachable (caller then falls back to WorldCover's flat Forest(m)).
 async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
-  if(_titilerUnavailable) return null;
+  if(titilerInCooldown()) return null;
   // If we gave up on any tiles earlier this session, force a fresh manifest read:
   // a COG built since then bumps the manifest's 'generated' stamp, which clears
   // those misses so the newly built tile is picked up without a page reload.
   const manifest = await loadCanopyManifest(_canopyLocalCogMisses.size > 0);
-  if(_titilerUnavailable) return null;
+  if(titilerInCooldown()) return null;
   const midLat = (minLat + maxLat) / 2;
   const { dLat, dLng } = metresToDegrees(midLat, stepM);
   const tl = lonLatToTile(minLng, maxLat, CANOPY_TILE_Z);   // top-left source tile
@@ -1756,7 +1789,7 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
   }
   if(failed || !images.length){
     if(attempted && !images.length && failed > missing){
-      _titilerUnavailable = true;
+      _titilerFailedAt = Date.now();
       dlog('Canopy: titiler unreachable — using flat Forest(m)','warn');
     }else if(failed){
       dlog(`Canopy: titiler loaded ${images.length}/${attempted} source tile(s); using flat Forest(m) to avoid partial canopy data`,'warn');
