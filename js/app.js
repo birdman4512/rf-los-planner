@@ -3216,6 +3216,29 @@ function niWire(){
     if(wrap.scrollLeft < one) wrap.scrollLeft += one;
     else if(wrap.scrollLeft >= 2 * one) wrap.scrollLeft -= one;
   });
+  // Click-and-drag to pan horizontally (mouse only — touch already pans natively).
+  // Incremental deltas so it stays seamless across the wrap-around snap.
+  let dragging = false, lastX = 0;
+  wrap.addEventListener('pointerdown', e => {
+    if(e.pointerType !== 'mouse') return;
+    dragging = true; lastX = e.clientX;
+    wrap.classList.add('dragging');
+    wrap.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  wrap.addEventListener('pointermove', e => {
+    if(!dragging) return;
+    wrap.scrollLeft -= (e.clientX - lastX);
+    lastX = e.clientX;
+  });
+  const endDrag = e => {
+    if(!dragging) return;
+    dragging = false;
+    wrap.classList.remove('dragging');
+    try { wrap.releasePointerCapture(e.pointerId); } catch {}
+  };
+  wrap.addEventListener('pointerup', endDrag);
+  wrap.addEventListener('pointercancel', endDrag);
 }
 
 function niFmtHM(mins){
