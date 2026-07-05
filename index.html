@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>ClearPath — RF Line of Sight Planner</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com https://tracker.quirkyit.com.au; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self'; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tile.openstreetmap.org https://server.arcgisonline.com https://s3.amazonaws.com/elevation-tiles-prod/ https://services.terrascope.be https://titiler.terrascope.be https://tracker.quirkyit.com.au; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com https://tracker.quirkyit.com.au; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self'; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://s3.amazonaws.com/elevation-tiles-prod/ https://services.terrascope.be https://titiler.terrascope.be https://tracker.quirkyit.com.au; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
 <meta name="referrer" content="no-referrer">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <!-- PWA / iOS home-screen install. iOS uses the apple-* tags + PNG touch icon
@@ -387,6 +387,19 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
     <p style="font-size:12px;color:var(--muted);line-height:1.5">
       Bare terrain misses trees and buildings. Tick <em>Surface clutter</em> in Settings to add canopy/land-cover obstruction: measured tree heights (Meta/WRI via Global Forest Watch) over forest, plus ESA WorldCover land cover (Terrascope). Clutter doesn't hard-block like terrain — it adds frequency-scaled diffraction loss (set by <em>Atten @915</em>, dB/m) as the path grazes through it. The <em>Clear&nbsp;&lt;</em> radius keeps clutter from blocking your own mast. First compute is slower while the data loads.
     </p>
+    <h3 style="font-size:13px;color:var(--accent);margin:14px 0 4px;letter-spacing:1px">SUN &amp; SHADE (SOLAR EXPOSURE)</h3>
+    <p style="font-size:12px;color:var(--muted);line-height:1.5">
+      Right-click a node → <em>ⓘ More info…</em> to open the node panel. Alongside the facts and link list it scans the <strong>skyline in every direction</strong> (terrain out to 30 km, surface clutter out to 5 km) and traces the <strong>sun's daily arc</strong> across it — handy for siting a solar panel or checking when a mast clears the trees.
+    </p>
+    <ul style="font-size:12px;color:var(--muted);line-height:1.55;padding-left:20px;margin:6px 0 0">
+      <li><strong>Panorama</strong> — the horizon as seen from the node: dark = terrain, coloured = canopy/buildings, the gold curve is the sun's path for the chosen date (hour ticks + sunrise/sunset marked). Drag sideways to pan the full 360°.</li>
+      <li><strong>Sky dome</strong> — looking straight up: centre = overhead, rim = horizon. Green is sky blocked by the skyline, dark is open sky, the dot is the sun.</li>
+      <li><strong>Status line</strong> — whether the node is in <span style="color:#ffd23f">direct sun</span> or shaded right now (and whether terrain or canopy is the culprit), plus the day's total: <em>direct sun X of Y daylight (NN %)</em>. An <em>under canopy</em> warning shows if the eye point sits below the tree layer.</li>
+      <li><strong>Controls</strong> — <em>Date</em> picks the day; the <em>time</em> slider scrubs minute-by-minute; <em>Clutter</em> toggles whether canopy/buildings count toward shading; <em>Eye m</em> is the observer height above ground (defaults to the antenna height — drop it to ~2 m to check a person or a roof panel).</li>
+    </ul>
+    <p style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5">
+      Solar position uses the NOAA low-precision model (~0.01° accuracy); sunlight is treated as a straight ray (no atmospheric refraction), so times near the horizon are approximate.
+    </p>
     <p style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.5">
       Tips: terrain is AWS Open Terrain Tiles (~30 m, no key, cached in memory). Open <strong>🐛 LOG</strong> to see exactly what each calculation used — link budgets, clutter loading, and per-link results. Use <strong>⇪ SHARE</strong> to copy a URL containing your full setup. Modelling is first-order (single knife-edge diffraction, 4/3-earth) — for engineered links verify with a full Longley-Rice/ITWOM tool.
     </p>
@@ -554,7 +567,10 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <div class="field-row" style="margin-bottom:6px">
         <label>Atten @915</label>
         <input type="number" id="inpClutterAtten" value="0.10" step="0.01" min="0" max="1" style="width:62px" title="Reference clutter attenuation in dB per metre at 915 MHz. The app scales this by frequency.">
-        <span style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted)">dB/m, frequency-scaled</span>
+        <span style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted)">dB/m, freq-scaled</span>
+        <label>Cap</label>
+        <input type="number" id="inpClutterCap" value="45" step="5" min="0" max="200" style="width:52px" title="Maximum total clutter attenuation per path (dB). Caps how heavily dense canopy/buildings can penalise a link, so clutter never acts as an infinite wall. Default 45.">
+        <span style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted)">dB max</span>
       </div>
       <div class="cov-btn-row" style="margin-top:10px">
         <button class="btn" id="btnCovAllOn">ALL ON</button>
@@ -590,7 +606,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260625-01">BUILD 20260625-01</span>
+      <span class="hdr-tag" title="Build 20260705-01">BUILD 20260705-01</span>
     </div>
   </header>
 
@@ -721,7 +737,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="js/share-codec.js?v=20260624-06"></script>
-<script src="js/app.js?v=20260625-01"></script>
+<script src="js/share-codec.js?v=20260705-01"></script>
+<script src="js/app.js?v=20260705-01"></script>
 </body>
 </html>

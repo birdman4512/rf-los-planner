@@ -177,8 +177,8 @@ function initMap() {
   S.map.createPane('coveragePane');
   S.map.getPane('coveragePane').style.zIndex=350;
   S._covRenderer = L.canvas({ pane:'coveragePane', padding:0.5 });
-  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors', maxZoom: 19, crossOrigin: true
+  const osm = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 19, crossOrigin: true, subdomains: 'abcd'
   }).addTo(S.map);
   const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
     attribution: '© Esri', maxZoom: 19
@@ -1596,9 +1596,10 @@ function clutterAttenDbPerM(freqMHz, refDbPerM = CLUTTER_ATTEN_DB_PER_M_915){
   return ref * Math.sqrt(f / 915);
 }
 
-function clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, startIdx, endIdx, freqMHz, refDbPerM){
+function clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, startIdx, endIdx, freqMHz, refDbPerM, capDb = CLUTTER_ATTEN_CAP_DB){
   if(!clutterH) return 0;
   const dbPerM = clutterAttenDbPerM(freqMHz, refDbPerM);
+  const cap = clampNum(capDb, 0, 200, CLUTTER_ATTEN_CAP_DB);
   let loss = 0;
   for(let j = startIdx; j < endIdx; j++){
     const h = clutterH[j] || 0;
@@ -1610,9 +1611,9 @@ function clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, startIdx, endId
     const frac = Math.max(0.15, Math.min(1, (bareEff + h - los) / h));
     const segM = j > 0 ? Math.max(0, dists[j] - dists[j-1]) : 0;
     loss += segM * dbPerM * frac;
-    if(loss >= CLUTTER_ATTEN_CAP_DB) return CLUTTER_ATTEN_CAP_DB;
+    if(loss >= cap) return cap;
   }
-  return Math.min(CLUTTER_ATTEN_CAP_DB, loss);
+  return Math.min(cap, loss);
 }
 
 function lonLatToTile(lng, lat, z){
@@ -1914,13 +1915,13 @@ function friisRangeMeters(txDbm, gainTx, gainRx, rxSensDbm, fMHz, marginDb){
 // margin absorbs. Requiring the full 60% here would double-count that margin.
 // Wi-Fi presets use Fresnel=60% + 10 dB margin (sustained-link engineering).
 const PRESET_RF = {
-  '915':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10},
-  '868':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10},
-  '433':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10},
-  '146':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10},
-  '438':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:30, clutterAtten:0.10},
-  '2400': {tx:20, gain:2, rx:-85,  margin:10, fresnel:'0.6', maxKm:5,  clutterAtten:0.10},
-  '5800': {tx:20, gain:3, rx:-80,  margin:10, fresnel:'0.6', maxKm:5,  clutterAtten:0.10}
+  '915':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10, clutterCap:45},
+  '868':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10, clutterCap:45},
+  '433':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10, clutterCap:45},
+  '146':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10, clutterCap:45},
+  '438':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:30, clutterAtten:0.10, clutterCap:45},
+  '2400': {tx:20, gain:2, rx:-85,  margin:10, fresnel:'0.6', maxKm:5,  clutterAtten:0.10, clutterCap:45},
+  '5800': {tx:20, gain:3, rx:-80,  margin:10, fresnel:'0.6', maxKm:5,  clutterAtten:0.10, clutterCap:45}
 };
 
 function globalRf(){
@@ -1939,6 +1940,7 @@ function globalRf(){
     clutterOn: clutterEnabled(),
     clutterExcludeM: clampNum(document.getElementById('inpClutterExclude')?.value, 0, 5000, 100),
     clutterAttenRef: clampNum(document.getElementById('inpClutterAtten')?.value, 0, 1, CLUTTER_ATTEN_DB_PER_M_915),
+    clutterCapDb: clampNum(document.getElementById('inpClutterCap')?.value, 0, 200, CLUTTER_ATTEN_CAP_DB),
     clutterHeights: clutterHeightTable()
   };
 }
@@ -1980,6 +1982,7 @@ function applyPresetRf(presetVal){
   if(rf.fresnel  != null) document.getElementById('inpCovFresnel').value = rf.fresnel;
   if(rf.maxKm    != null) document.getElementById('inpCovMaxKm').value   = rf.maxKm;
   if(rf.clutterAtten != null) document.getElementById('inpClutterAtten').value = rf.clutterAtten;
+  if(rf.clutterCap   != null) document.getElementById('inpClutterCap').value   = rf.clutterCap;
   // Preset change touches freq + RF + coverage modelling — invalidate every node.
   S.nodes.forEach(n => invalidateNodeCoverage(n, true));
   renderNodeList();
@@ -2223,7 +2226,7 @@ async function _computeNodeCoverageImpl(node){
         if(nu > maxNu) maxNu = nu;
       }
       if(clutterIntrudes) clutterImpact.blockedByClutter++;
-      const clutterLossDb = clutterH && !blocked ? clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, 1, s, g.freq, g.clutterAttenRef) : 0;
+      const clutterLossDb = clutterH && !blocked ? clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, 1, s, g.freq, g.clutterAttenRef, g.clutterCapDb) : 0;
       if(clutterLossDb > clutterImpact.maxLossDb) clutterImpact.maxLossDb = clutterLossDb;
       // Below the LOS line: free-space loss plus the (≤6 dB) grazing diffraction
       // loss from the dominant near-LOS obstruction.
@@ -2249,7 +2252,7 @@ async function _computeNodeCoverageImpl(node){
   node.coverageDirty = false;
   const reachedRays = reach.filter(r=>r.dist>0).length;
   if(clutter){
-    dlog(`  Clutter impact: ${clutterImpactSummary(clutterImpact)}; ${clutterImpact.blockedByClutter} candidate samples had clutter above LOS; max attenuation ${clutterImpact.maxLossDb.toFixed(1)}dB (cap ${CLUTTER_ATTEN_CAP_DB}dB)`,'warn');
+    dlog(`  Clutter impact: ${clutterImpactSummary(clutterImpact)}; ${clutterImpact.blockedByClutter} candidate samples had clutter above LOS; max attenuation ${clutterImpact.maxLossDb.toFixed(1)}dB (cap ${g.clutterCapDb}dB)`,'warn');
   }
   dlog(`  ✓ "${node.name}" done: farthest reach ${(node.coverageReachMax/1000).toFixed(2)}km · ${reachedRays}/${rays} rays have coverage`,'ok');
   const limitText = limitedByBudget
@@ -2456,6 +2459,7 @@ async function runAnalysis(){
   const clutterHeights=clutterHeightTable();
   const clutterExcludeM=clampNum(document.getElementById('inpClutterExclude')?.value, 0, 5000, 100);
   const clutterAttenRef=clampNum(document.getElementById('inpClutterAtten')?.value, 0, 1, CLUTTER_ATTEN_DB_PER_M_915);
+  const clutterCapDb=clampNum(document.getElementById('inpClutterCap')?.value, 0, 200, CLUTTER_ATTEN_CAP_DB);
   const N=80;
   const MAX_TERRAIN_ERRORS=2;
   let terrainErrors=0;
@@ -2559,7 +2563,7 @@ async function runAnalysis(){
         if(nu>maxNu) maxNu=nu;
       }
       const status=minBareLosClear<=0?'blocked':minScaledFzClear<=0?'marginal':'clear';
-      const clutterLossDb = clutterH ? clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, 1, N, freq, clutterAttenRef) : 0;
+      const clutterLossDb = clutterH ? clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, 1, N, freq, clutterAttenRef, clutterCapDb) : 0;
       if(clutterImpact && clutterLossDb > clutterImpact.maxLossDb) clutterImpact.maxLossDb = clutterLossDb;
       // First-order excess loss beyond free space: single knife-edge diffraction
       // over the dominant obstruction (Deygout principal edge). ≈0 dB on a fully
@@ -3715,7 +3719,7 @@ function buildShareHash(){
       cr:inpVal('inpCovRays'), cs:inpVal('inpCovSamples'), cf:inpVal('inpCovFresnel'),
       cm:inpVal('inpCovMaxKm'), co:clutterEnabled()?1:0, cy:canopyEnabled()?1:0,
       fh:inpVal('inpClutterForest'), uh:inpVal('inpClutterUrban'),
-      xe:inpVal('inpClutterExclude'), ca:inpVal('inpClutterAtten')
+      xe:inpVal('inpClutterExclude'), ca:inpVal('inpClutterAtten'), cc:inpVal('inpClutterCap')
     },
     nodes:S.nodes.map(n=>({
       lat:n.lat, lng:n.lng, antH:n.antH, name:n.name, rfOverride:n.rfOverride,
@@ -3929,6 +3933,7 @@ function normaliseV3Hash(raw) {
     clutterUrban: clampNum(raw.uh, 0, 200, 8),
     clutterExclude: clampNum(raw.xe, 0, 5000, 100),
     clutterAtten: clampNum(raw.ca, 0, 1, presetRf?.clutterAtten ?? CLUTTER_ATTEN_DB_PER_M_915),
+    clutterCap: clampNum(raw.cc, 0, 200, presetRf?.clutterCap ?? CLUTTER_ATTEN_CAP_DB),
     nodes,
     edges,
     paths,
@@ -4003,6 +4008,7 @@ function normaliseLegacyHash(raw) {
     clutterUrban: clampNum(raw.clutterUrban, 0, 200, 8),
     clutterExclude: clampNum(raw.clutterExclude, 0, 5000, 100),
     clutterAtten: clampNum(raw.clutterAtten, 0, 1, CLUTTER_ATTEN_DB_PER_M_915),
+    clutterCap: clampNum(raw.clutterCap, 0, 200, CLUTTER_ATTEN_CAP_DB),
     nodes,
     edges,
     paths,
@@ -4043,6 +4049,7 @@ function loadFromHash(hashStr){
     setInputValue('inpClutterUrban',data.clutterUrban);
     setInputValue('inpClutterExclude',data.clutterExclude);
     setInputValue('inpClutterAtten',data.clutterAtten);
+    setInputValue('inpClutterCap',data.clutterCap);
     const clutterCb=document.getElementById('inpClutterOn');
     if(clutterCb) clutterCb.checked=!!data.clutterOn;
     const canopyCb=document.getElementById('inpCanopyOn');
@@ -4187,7 +4194,7 @@ function initStaticHandlers(){
   on('inpFreq','input',syncPresetFromFreq);
   ['inpTx','inpGain','inpRx','inpMargin'].forEach(id=>on(id,'change',onGlobalRfChanged));
   ['inpFreq','inpK','inpRxAntH','inpCovMaxKm','inpCovRays','inpCovSamples','inpCovFresnel',
-   'inpClutterOn','inpCanopyOn','inpClutterForest','inpClutterUrban','inpClutterExclude','inpClutterAtten']
+   'inpClutterOn','inpCanopyOn','inpClutterForest','inpClutterUrban','inpClutterExclude','inpClutterAtten','inpClutterCap']
     .forEach(id=>on(id,'change',onCoverageParamChanged));
   on('inpShowLinks','change',function(){ setDisplayVisibility('links', this.checked); });
   on('inpShowPaths','change',function(){ setDisplayVisibility('paths', this.checked); });

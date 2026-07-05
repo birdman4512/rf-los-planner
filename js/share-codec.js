@@ -14,7 +14,7 @@
 
   // Transform a semantic state object into the compact v4 payload.
   // state = {
-  //   rf: { f,k,tx,gn,rx,mg,ra,cr,cs,cf,cm,co,cy,fh,uh,xe,ca },
+  //   rf: { f,k,tx,gn,rx,mg,ra,cr,cs,cf,cm,co,cy,fh,uh,xe,ca,cc },
   //   nodes: [{ lat,lng,antH,name, rfOverride?,txDbm?,gainDbi?,rxDbm?,coverageOn?,color? }],
   //   edges: [{ a,b,hidden? }],   // a,b are node indices
   //   paths: [{ name,hidden?,nodeIdx:[...] }]
@@ -29,7 +29,7 @@
       f: +rf.f, k: rf.k, tx: +rf.tx, gn: +rf.gn, rx: +rf.rx, mg: +rf.mg,
       ra: +rf.ra, cr: +rf.cr, cs: +rf.cs, cf: +rf.cf, cm: +rf.cm, co: rf.co ? 1 : 0,
       cy: rf.cy ? 1 : 0,
-      fh: +rf.fh, uh: +rf.uh, xe: +rf.xe, ca: +rf.ca,
+      fh: +rf.fh, uh: +rf.uh, xe: +rf.xe, ca: +rf.ca, cc: +rf.cc,
       // node: [lat, lng, antH, name, rfOverride?, tx?, gain?, rx?, coverageOn?, color?]
       n: nodes.map(nd => {
         const base = [+(+nd.lat).toFixed(6), +(+nd.lng).toFixed(6), nd.antH, nd.name];
