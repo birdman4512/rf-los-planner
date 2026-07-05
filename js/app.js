@@ -282,12 +282,19 @@ function addNode(lat, lng) {
 function makeMarker(node) {
   const el = document.createElement('div');
   el.className = 'node-marker-icon';
-  el.innerHTML = nodeIconSvg(node);
-  node._iconHtml = el.innerHTML;
+  // Nested wrapper carries position:relative for the tooltip's positioning
+  // context — must NOT be on `el` itself, since MapLibre needs `el` to keep
+  // its own position:absolute (from its maplibregl-marker class) for its
+  // transform-based placement; overriding that breaks positioning entirely.
+  const inner = document.createElement('div');
+  inner.className = 'node-marker-inner';
+  inner.innerHTML = nodeIconSvg(node);
+  node._iconHtml = inner.innerHTML;
+  el.appendChild(inner);
   const tip = document.createElement('div');
   tip.className = 'node-tooltip';
   tip.textContent = node.name;
-  el.appendChild(tip);
+  inner.appendChild(tip);
 
   const marker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
     .setLngLat([node.lng, node.lat])
@@ -352,10 +359,10 @@ function refreshAllIcons() {
     if (!n.marker) return;
     const svg = nodeIconSvg(n);
     if (n._iconHtml !== svg) {
-      const el = n.marker.getElement();
-      const tip = el.querySelector('.node-tooltip');
-      el.innerHTML = svg;
-      if (tip) el.appendChild(tip);
+      const inner = n.marker.getElement().querySelector('.node-marker-inner');
+      const tip = inner.querySelector('.node-tooltip');
+      inner.innerHTML = svg;
+      if (tip) inner.appendChild(tip);
       n._iconHtml = svg;
     }
   });
