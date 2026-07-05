@@ -79,11 +79,18 @@ test.describe('RF LOS Planner — smoke', () => {
     const pageErrors = trackErrors(page);
     await page.goto('/index.html', { waitUntil: 'load' });
 
-    const visibility = await page.evaluate(() => {
+    const visibility = await page.evaluate(async () => {
+      const St = window.S || S;
+      // MapLibre's vector style loads asynchronously, unlike Leaflet's
+      // near-instant raster init — wait for it before reading the edges-src
+      // GeoJSON source below, or getSource() returns undefined.
+      await new Promise(resolve => {
+        const check = () => St._mapLayersReady ? resolve() : setTimeout(check, 20);
+        check();
+      });
       const a = addNode(-37.81, 144.96);
       const b = addNode(-37.79, 144.99);
       addEdge(a.id, b.id);
-      const St = window.S || S;
       const autoPath = St.paths[0];
       St.paths.push({ id: St.nextId++, name: 'Shared link path', hidden: false, nodeIds: [a.id, b.id] });
 

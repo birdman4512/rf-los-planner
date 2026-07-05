@@ -210,7 +210,11 @@ function initMapLayers(){
     filter: ['==', ['get','nodeId'], '__none__'],
     paint: {
       'fill-color': ['get','color'],
-      'fill-opacity': ['case', ['get','dirty'], ['*', ['get','fillOpacity'], 0.3], ['get','fillOpacity']]
+      'fill-opacity': ['case', ['get','dirty'], ['*', ['get','fillOpacity'], 0.3], ['get','fillOpacity']],
+      // MapLibre draws an implicit outline on 'fill' layers at full intensity
+      // regardless of fill-opacity unless overridden — without this, every
+      // adjacent wedge polygon shows a hard seam where they tile together.
+      'fill-outline-color': 'rgba(0,0,0,0)'
     } });
   S.map.addLayer({ id:'coverage-outline', type:'line', source:'coverage-src',
     filter: ['==', ['get','nodeId'], '__none__'],
@@ -221,15 +225,24 @@ function initMapLayers(){
     paint: { 'line-color':'#ff2fd0', 'line-width':2, 'line-opacity':0.95 } });
 
   S.map.addSource('edges-src', { type:'geojson', data: emptyFC() });
-  S.map.addLayer({ id:'edges-line', type:'line', source:'edges-src',
-    paint: {
-      'line-color': ['match', ['get','status'],
-        'clear','#2ecc71', 'marginal','#f39c12', 'blocked','#e74c3c', 'error','#e74c3c',
-        /* unanalysed */ '#4a6278'],
-      'line-width': ['case', ['get','selected'], 6, ['get','analysed'], 3, 2],
-      'line-opacity': ['case', ['get','hidden'], 0, ['get','analysed'], 0.9, 0.7],
-      'line-dasharray': ['case', ['get','analysed'], ['literal',[1,0]], ['literal',[5,4]]]
-    } });
+  // line-dasharray cannot be a data-driven (per-feature) expression in
+  // MapLibre (addLayer silently rejects the whole layer if it is — this bit
+  // us once already: edges rendered invisibly with no thrown JS error, just a
+  // console validation error) — so the dashed/solid distinction is split into
+  // two filtered layers over the same source instead of one data-driven one.
+  const edgeLinePaint = {
+    'line-color': ['match', ['get','status'],
+      'clear','#2ecc71', 'marginal','#f39c12', 'blocked','#e74c3c', 'error','#e74c3c',
+      /* unanalysed */ '#4a6278'],
+    'line-width': ['case', ['get','selected'], 6, ['get','analysed'], 3, 2],
+    'line-opacity': ['case', ['get','hidden'], 0, ['get','analysed'], 0.9, 0.7]
+  };
+  S.map.addLayer({ id:'edges-line-unanalysed', type:'line', source:'edges-src',
+    filter: ['!', ['get','analysed']],
+    paint: { ...edgeLinePaint, 'line-dasharray': [5,4] } });
+  S.map.addLayer({ id:'edges-line-analysed', type:'line', source:'edges-src',
+    filter: ['get','analysed'],
+    paint: edgeLinePaint });
   S.map.addLayer({ id:'edges-hit', type:'line', source:'edges-src',
     paint: { 'line-color':'#ffffff', 'line-width':24, 'line-opacity':0 } });
 
@@ -352,6 +365,8 @@ function removeNode(id) {
   const idx = S.nodes.findIndex(n => n.id === id);
   if (idx < 0) return;
   removeNodeCoverageFeatures(id);
+  S._coverageOnIds.delete(id);
+  setCoverageLayerFilters();
   S.nodes[idx].marker.remove();
   S.nodes.splice(idx, 1);
   // Remove all edges involving this node
@@ -2397,12 +2412,16 @@ function setCoverageLayerFilters(){
   if(S.map.getLayer('coverage-outline')) S.map.setFilter('coverage-outline', filter);
 }
 
+// Clears this node's wedge/outline geometry from the shared source. Does NOT
+// touch S._coverageOnIds — this is also called at the start of every
+// recompute (renderCoveragePolygon), and clearing the on/off toggle there
+// would silently turn coverage back off on every recompute even though the
+// checkbox stayed checked. Callers that actually remove the node for good
+// (removeNode/clearAll) clear _coverageOnIds themselves.
 function removeNodeCoverageFeatures(nodeId){
   const before = S._coverageFeatures.length;
   S._coverageFeatures = S._coverageFeatures.filter(f => f.properties.nodeId !== nodeId);
-  S._coverageOnIds.delete(nodeId);
   if(S._coverageFeatures.length !== before) syncCoverageSource();
-  setCoverageLayerFilters();
 }
 
 // ── Coverage overlap highlight ──────────────────────────────
