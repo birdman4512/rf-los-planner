@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 // ═══════════════════════════════════════════════════════════
 const S = {
   map: null,
-  nodes: [],       // {id, name, lat, lng, antH, elev, marker, rfOverride, txDbm, gainDbi, rxDbm, coverageOn, coverageRendered, coverageDirty, coverageComputed}
+  nodes: [],       // {id, name, lat, lng, antH, elev, marker, rfOverride, txDbm, gainDbi, rxDbm, coverageOn, coverageRendered, coverageDirty, coverageComputed, _covCanvas, _covSrcId, _covLayerId}
   edges: [],       // {id, aId, bId, hidden, result, profile}  — geometry lives in the shared edges-src GeoJSON source, not on the edge object
   paths: [],       // {id, name, hidden, nodeIds[]}  — user-defined chains for chart
   nextId: 1,
@@ -32,9 +32,7 @@ const S = {
   _dragId: null,
   showLinks: true,
   showPaths: true,
-  _clickConsumed: false,
-  _coverageFeatures: [],    // GeoJSON Feature[] backing the shared coverage-src (wedges + outlines, all nodes)
-  _coverageOnIds: new Set() // node ids currently toggled visible — drives coverage-fill/outline setFilter
+  _clickConsumed: false
 };
 
 const COLORS = ['#00c8f0','#f39c12','#2ecc71','#e74c3c','#9b59b6','#1abc9c','#e67e22','#3498db','#f1c40f','#e91e63'];
@@ -201,25 +199,12 @@ function whenMapLayersReady(fn){
 }
 
 // Adds every custom source/layer this app draws on top of the base style, in
-// the order that reproduces the old Leaflet pane stack (coverage fills lowest,
-// then the overlap outline, then edges, with node markers — plain DOM
-// elements — implicitly topmost since they sit above the WebGL canvas).
+// the order that reproduces the old Leaflet pane stack (coverage rasters
+// lowest — added per-node, on demand, in renderCoveragePolygon(), always
+// inserted just below 'overlap-outline' — then the overlap outline, then
+// edges, with node markers — plain DOM elements — implicitly topmost since
+// they sit above the WebGL canvas).
 function initMapLayers(){
-  S.map.addSource('coverage-src', { type:'geojson', data: emptyFC() });
-  S.map.addLayer({ id:'coverage-fill', type:'fill', source:'coverage-src',
-    filter: ['==', ['get','nodeId'], '__none__'],
-    paint: {
-      'fill-color': ['get','color'],
-      'fill-opacity': ['case', ['get','dirty'], ['*', ['get','fillOpacity'], 0.3], ['get','fillOpacity']],
-      // MapLibre draws an implicit outline on 'fill' layers at full intensity
-      // regardless of fill-opacity unless overridden — without this, every
-      // adjacent wedge polygon shows a hard seam where they tile together.
-      'fill-outline-color': 'rgba(0,0,0,0)'
-    } });
-  S.map.addLayer({ id:'coverage-outline', type:'line', source:'coverage-src',
-    filter: ['==', ['get','nodeId'], '__none__'],
-    paint: { 'line-color': ['get','color'], 'line-width':1.5, 'line-opacity':0.85 } });
-
   S.map.addSource('overlap-src', { type:'geojson', data: emptyFC() });
   S.map.addLayer({ id:'overlap-outline', type:'line', source:'overlap-src',
     paint: { 'line-color':'#ff2fd0', 'line-width':2, 'line-opacity':0.95 } });
@@ -371,9 +356,7 @@ function refreshAllIcons() {
 function removeNode(id) {
   const idx = S.nodes.findIndex(n => n.id === id);
   if (idx < 0) return;
-  removeNodeCoverageFeatures(id);
-  S._coverageOnIds.delete(id);
-  setCoverageLayerFilters();
+  removeNodeCoverageLayer(id);
   S.nodes[idx].marker.remove();
   S.nodes.splice(idx, 1);
   // Remove all edges involving this node
@@ -399,11 +382,7 @@ function removeNode(id) {
 }
 
 function clearAll() {
-  S.nodes.forEach(n => { if (n.marker) n.marker.remove(); });
-  S._coverageFeatures = [];
-  S._coverageOnIds.clear();
-  syncCoverageSource();
-  setCoverageLayerFilters();
+  S.nodes.forEach(n => { if (n.marker) n.marker.remove(); removeNodeCoverageLayer(n.id); });
   S.nodes = []; S.edges = []; S.paths = [];
   syncEdgesSource();
   S.activeView = null;
@@ -2105,14 +2084,13 @@ function invalidateNodeCoverage(node, redraw){
   updateCovBtn(node);
 }
 
-// Flags/unflags this node's already-rendered wedge+outline features as
-// "recompute in progress" — dims them via the 'dirty' paint expression in
-// initMapLayers() instead of restyling each shape individually (which is what
-// Leaflet's per-child styleCoverageLayer() workaround existed for).
+// Dims this node's rendered coverage raster while a recompute is in
+// progress, via the canvas layer's own raster-opacity paint property.
 function setNodeCoverageDirtyFlag(nodeId, dirty){
-  let changed = false;
-  (S._coverageFeatures||[]).forEach(f => { if(f.properties.nodeId === nodeId){ f.properties.dirty = dirty; changed = true; } });
-  if(changed) syncCoverageSource();
+  const node = S.nodes.find(n => n.id === nodeId);
+  if(node?._covLayerId && S.map.getLayer(node._covLayerId)){
+    S.map.setPaintProperty(node._covLayerId, 'raster-opacity', dirty ? 0.3 : 1);
+  }
 }
 
 function updateCovBtn(node){
@@ -2137,8 +2115,7 @@ function coverageStatusText(node){
 function setNodeCoverageOn(id, on){
   const node = S.nodes.find(n => n.id === id); if(!node) return;
   node.coverageOn = on;
-  if(on) S._coverageOnIds.add(id); else S._coverageOnIds.delete(id);
-  setCoverageLayerFilters();
+  if(node._covLayerId && S.map.getLayer(node._covLayerId)) S.map.setLayoutProperty(node._covLayerId, 'visibility', on ? 'visible' : 'none');
   updateCovCount();
   refreshOverlap();
 }
@@ -2146,10 +2123,9 @@ function setNodeCoverageOn(id, on){
 function setAllCoverage(on){
   S.nodes.forEach(n => {
     n.coverageOn = on;
-    if(on) S._coverageOnIds.add(n.id); else S._coverageOnIds.delete(n.id);
+    if(n._covLayerId && S.map.getLayer(n._covLayerId)) S.map.setLayoutProperty(n._covLayerId, 'visibility', on ? 'visible' : 'none');
     const cb = document.getElementById(`cov_${n.id}`); if(cb) cb.checked = on;
   });
-  setCoverageLayerFilters();
   updateCovCount();
   refreshOverlap();
 }
@@ -2354,16 +2330,40 @@ async function _computeNodeCoverageImpl(node){
   updateCovBtn(node);
 }
 
-// Rebuilds this node's wedge + outline features in the shared coverage-src
-// GeoJSON source (all nodes' coverage geometry lives in one source; MapLibre
-// GeoJSON sources only support whole-collection replacement via setData, so
-// every coverage change funnels through syncCoverageSource()).
+// Renders this node's coverage as a rasterised <canvas> registered with
+// MapLibre as a CanvasSource + raster layer, rather than many individual
+// GeoJSON wedge polygons on a shared GL fill layer. This mirrors the original
+// Leaflet build's own design choice — its code comment explains it switched
+// coverage rendering to a dedicated Canvas renderer specifically because
+// many adjacent semi-transparent polygons flickered/seamed under the SVG
+// renderer on pan/zoom. MapLibre's WebGL fill layer hits the same class of
+// artifact (visible seams between wedges, z-fighting/flicker on thin
+// overlapping shapes) since it's still compositing many separate vector
+// draws — rasterising once, like the original Canvas renderer, avoids it
+// entirely: adjacent wedges are pixels on the same bitmap, not separately
+// anti-aliased GPU primitives.
 function renderCoveragePolygon(node){
-  removeNodeCoverageFeatures(node.id);
+  removeNodeCoverageLayer(node.id);
   if(!node.coverageHeatRays || node.coverageHeatRays.length < 2){ node.coverageRendered = false; return; }
   const col = nodeColorFor(node);
   const rays = node.coverageHeatRays;
   const R = rays.length;
+  const maxR = node.coverageMaxRange || 1000;
+  const { dLat, dLng } = metresToDegrees(node.lat, maxR * 1.05);
+  const bbox = { north: node.lat+dLat, south: node.lat-dLat, east: node.lng+dLng, west: node.lng-dLng };
+  // Size the raster to the actual coverage radius (~30m/pixel) rather than a
+  // fixed resolution, so smaller/typical coverage areas stay sharp when
+  // zoomed in instead of blurring — capped so a huge search radius doesn't
+  // blow up canvas memory/upload cost.
+  const W = Math.round(clampNum((maxR * 2.1) / 30, 512, 2200));
+  const H = W;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const toPx = (lat,lng) => [
+    (lng - bbox.west) / (bbox.east - bbox.west) * W,
+    (bbox.north - lat) / (bbox.north - bbox.south) * H
+  ];
   // Render each ray as its OWN wedge, spanning the half-angle to each neighbour
   // (so adjacent wedges tile seamlessly), and fill it to that ray's own reach.
   // Colouring by each ray independently — rather than the min of two neighbours —
@@ -2373,8 +2373,7 @@ function renderCoveragePolygon(node){
   // ray collapses to a few bands (plus any disconnected far patches). Strength is
   // shown by fill opacity; blank (no-coverage) stretches are skipped.
   const mid = (P, Q, s) => [ (P[s].latlng[0]+Q[s].latlng[0])/2, (P[s].latlng[1]+Q[s].latlng[1])/2 ]; // [lat,lng]
-  const toLngLat = p => [p[1], p[0]]; // GeoJSON coordinate order
-  const features = [];
+  ctx.fillStyle = col;
   for(let r=0;r<R;r++){
     const cur = rays[r].samples;
     const prev = rays[(r-1+R)%R].samples;
@@ -2382,11 +2381,13 @@ function renderCoveragePolygon(node){
     const n = Math.min(cur.length, prev.length, next.length);
     // Wedge bounded by the midline to the previous ray (left) and next ray (right).
     const addWedge = (i0, i1, level) => {
-      const ring = [ mid(prev,cur,i0), mid(cur,next,i0), mid(cur,next,i1), mid(prev,cur,i1) ].map(toLngLat);
-      ring.push(ring[0]);
-      features.push({ type:'Feature',
-        properties: { nodeId: node.id, color: col, fillOpacity: coverageLevelOpacity(level), dirty: false },
-        geometry: { type:'Polygon', coordinates: [ring] } });
+      const pts = [ mid(prev,cur,i0), mid(cur,next,i0), mid(cur,next,i1), mid(prev,cur,i1) ].map(p=>toPx(p[0],p[1]));
+      ctx.globalAlpha = coverageLevelOpacity(level);
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for(let k=1;k<pts.length;k++) ctx.lineTo(pts[k][0], pts[k][1]);
+      ctx.closePath();
+      ctx.fill();
     };
     let runStart = -1, runLevel = 0;
     const flush = endIdx => { if(runStart > 0 && runLevel > 0) addWedge(runStart-1, endIdx, runLevel); runStart = -1; runLevel = 0; };
@@ -2398,37 +2399,52 @@ function renderCoveragePolygon(node){
   }
   // Outline the coverage edge — the farthest covered point per ray.
   if(node.coverageRays?.length){
-    const outline = node.coverageRays.map(r=>toLngLat(r.latlng));
-    outline.push(outline[0]);
-    features.push({ type:'Feature', properties: { nodeId: node.id, color: col, dirty: false },
-      geometry: { type:'LineString', coordinates: outline } });
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    node.coverageRays.forEach((ray,i) => {
+      const [x,y] = toPx(ray.latlng[0], ray.latlng[1]);
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.closePath();
+    ctx.stroke();
   }
-  S._coverageFeatures.push(...features);
+
+  const srcId = `cov-src-${node.id}`, layerId = `cov-layer-${node.id}`;
+  node._covCanvas = canvas;
+  node._covSrcId = srcId;
+  node._covLayerId = layerId;
   node.coverageRendered = true;
-  syncCoverageSource();
+  // addSource/addLayer throw (not silently no-op) if the style hasn't
+  // finished loading yet — queue via whenMapLayersReady like syncEdgesSource.
+  // Uses an ImageSource (canvas.toDataURL PNG), not a CanvasSource: MapLibre's
+  // CanvasSource is built for opaque continuously-sampled content (e.g.
+  // video) and does not composite per-pixel alpha correctly — transparent
+  // canvas pixels rendered solid black instead of see-through. ImageSource is
+  // the georeferenced-overlay primitive and handles a transparent PNG
+  // (a one-shot snapshot, which is exactly what this is) correctly.
+  whenMapLayersReady(() => {
+    S.map.addSource(srcId, {
+      type: 'image', url: canvas.toDataURL(),
+      coordinates: [ [bbox.west,bbox.north], [bbox.east,bbox.north], [bbox.east,bbox.south], [bbox.west,bbox.south] ]
+    });
+    S.map.addLayer({ id: layerId, type:'raster', source: srcId,
+      layout: { visibility: node.coverageOn ? 'visible' : 'none' },
+      paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 } }, 'overlap-outline');
+  });
 }
 
-function syncCoverageSource(){
-  S.map.getSource('coverage-src')?.setData({ type:'FeatureCollection', features: S._coverageFeatures });
-}
-
-function setCoverageLayerFilters(){
-  const ids = [...S._coverageOnIds];
-  const filter = ids.length ? ['in', ['get','nodeId'], ['literal', ids]] : ['==', ['get','nodeId'], '__none__'];
-  if(S.map.getLayer('coverage-fill')) S.map.setFilter('coverage-fill', filter);
-  if(S.map.getLayer('coverage-outline')) S.map.setFilter('coverage-outline', filter);
-}
-
-// Clears this node's wedge/outline geometry from the shared source. Does NOT
-// touch S._coverageOnIds — this is also called at the start of every
-// recompute (renderCoveragePolygon), and clearing the on/off toggle there
-// would silently turn coverage back off on every recompute even though the
-// checkbox stayed checked. Callers that actually remove the node for good
-// (removeNode/clearAll) clear _coverageOnIds themselves.
-function removeNodeCoverageFeatures(nodeId){
-  const before = S._coverageFeatures.length;
-  S._coverageFeatures = S._coverageFeatures.filter(f => f.properties.nodeId !== nodeId);
-  if(S._coverageFeatures.length !== before) syncCoverageSource();
+// Removes this node's canvas source/layer (called at the start of every
+// recompute as well as on node deletion — recompute always immediately
+// re-adds a fresh one via renderCoveragePolygon, so this alone never turns
+// coverage off; only removeNode/clearAll actually discard the node).
+function removeNodeCoverageLayer(nodeId){
+  const node = S.nodes.find(n => n.id === nodeId);
+  if(!node) return;
+  if(node._covLayerId && S.map.getLayer(node._covLayerId)) S.map.removeLayer(node._covLayerId);
+  if(node._covSrcId && S.map.getSource(node._covSrcId)) S.map.removeSource(node._covSrcId);
+  node._covLayerId = null; node._covSrcId = null; node._covCanvas = null;
 }
 
 // ── Coverage overlap highlight ──────────────────────────────
