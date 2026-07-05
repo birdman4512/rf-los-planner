@@ -26,7 +26,7 @@ test.describe('RF LOS Planner — smoke', () => {
     await expect(page.locator('#map')).toBeVisible();
     await expect(page.getByRole('button', { name: '+ NEW PATH' })).toBeVisible();
 
-    // App globals + Leaflet map initialised.
+    // App globals + MapLibre map initialised.
     const ready = await page.evaluate(
       () => typeof addNode === 'function' && typeof addEdge === 'function' && !!(window.S || S).map
     );
@@ -119,9 +119,15 @@ test.describe('RF LOS Planner — smoke', () => {
       };
 
       showOnlyEdge(St.edges[0].id);
-      const selectedSingleWeight = St.edges[0].line.options.weight;
+      // Edge styling is data-driven (see syncEdgesSource()/initMapLayers()):
+      // 'selected' only turns on emphasis (line-width 6) when more than one
+      // edge is visible, so with only one edge showing it should read false —
+      // the equivalent of the old Leaflet weight staying at the base value (2).
+      const selectedFeature = St.map.getSource('edges-src')._data.features
+        .find(f => f.properties.id === St.edges[0].id);
+      const selectedSingleEmphasis = selectedFeature.properties.selected;
 
-      return { afterHide, afterPartialLinkHide, afterAllLinkHide, afterHideAll, selectedSingleWeight };
+      return { afterHide, afterPartialLinkHide, afterAllLinkHide, afterHideAll, selectedSingleEmphasis };
     });
 
     expect(visibility.afterHide).toEqual({
@@ -138,7 +144,7 @@ test.describe('RF LOS Planner — smoke', () => {
       edgeHidden: true,
       edgeVisible: false
     });
-    expect(visibility.selectedSingleWeight).toBe(2);
+    expect(visibility.selectedSingleEmphasis).toBe(false);
 
     expect(pageErrors, `Uncaught page errors:\n${pageErrors.join('\n')}`).toEqual([]);
   });

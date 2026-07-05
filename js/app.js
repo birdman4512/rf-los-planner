@@ -14,8 +14,8 @@ if (window.top !== window.self) {
 // ═══════════════════════════════════════════════════════════
 const S = {
   map: null,
-  nodes: [],       // {id, name, lat, lng, antH, elev, marker, rfOverride, txDbm, gainDbi, rxDbm, coverageOn, coverageLayer, coverageDirty, coverageComputed}
-  edges: [],       // {id, aId, bId, hidden, line, result, profile}
+  nodes: [],       // {id, name, lat, lng, antH, elev, marker, rfOverride, txDbm, gainDbi, rxDbm, coverageOn, coverageRendered, coverageDirty, coverageComputed}
+  edges: [],       // {id, aId, bId, hidden, result, profile}  — geometry lives in the shared edges-src GeoJSON source, not on the edge object
   paths: [],       // {id, name, hidden, nodeIds[]}  — user-defined chains for chart
   nextId: 1,
   activeView: null, // {type:'edge'|'path', id}
@@ -31,7 +31,10 @@ const S = {
   profileCursorHideFrame: null,
   _dragId: null,
   showLinks: true,
-  showPaths: true
+  showPaths: true,
+  _clickConsumed: false,
+  _coverageFeatures: [],    // GeoJSON Feature[] backing the shared coverage-src (wedges + outlines, all nodes)
+  _coverageOnIds: new Set() // node ids currently toggled visible — drives coverage-fill/outline setFilter
 };
 
 const COLORS = ['#00c8f0','#f39c12','#2ecc71','#e74c3c','#9b59b6','#1abc9c','#e67e22','#3498db','#f1c40f','#e91e63'];
@@ -152,47 +155,94 @@ function cleanName(name, fallback = 'Site') {
   const s = String(name ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
   return (s || fallback).slice(0, LIMITS.nameChars);
 }
-function textNode(value) {
-  const span = document.createElement('span');
-  span.textContent = String(value ?? '');
-  return span;
-}
-
-function removeEdgeLayers(edge){
-  if(edge.line) S.map.removeLayer(edge.line);
-  if(edge.hitLine) S.map.removeLayer(edge.hitLine);
-}
-
 // ═══════════════════════════════════════════════════════════
 //  MAP INIT
+//  MapLibre GL JS + OpenFreeMap (Liberty vector style). Leaflet's panes
+//  (z-ordered DOM layers) have no MapLibre equivalent — layers instead
+//  paint in add-order, controlled via initMapLayers()'s call order plus
+//  map.moveLayer()/addLayer(def, beforeId) where a specific position matters.
 // ═══════════════════════════════════════════════════════════
 function initMap() {
-  S.map = L.map('map', { center: [-27.6, 153.1], zoom: 10, zoomControl: true });
-  S.map.createPane('profileHoverPane');
-  S.map.getPane('profileHoverPane').style.zIndex=750;
-  S.map.getPane('profileHoverPane').style.pointerEvents='none';
-  // Coverage polygons render on a dedicated CANVAS renderer in a low pane (below
-  // the overlay paths/markers). Canvas avoids the SVG renderer repainting every
-  // polygon on each pan/zoom frame, which made coverage flicker.
-  S.map.createPane('coveragePane');
-  S.map.getPane('coveragePane').style.zIndex=350;
-  S._covRenderer = L.canvas({ pane:'coveragePane', padding:0.5 });
-  const osm = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 19, crossOrigin: true, subdomains: 'abcd'
-  }).addTo(S.map);
-  const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
-    attribution: '© Esri', maxZoom: 19
+  S.map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://tiles.openfreemap.org/styles/liberty',
+    center: [153.1, -27.6],
+    zoom: 10,
+    attributionControl: { compact: true }
   });
-  L.control.layers({'OpenStreetMap': osm, 'Esri Topo': esri}, {}, {position:'topright'}).addTo(S.map);
-  S.map.on('contextmenu', e => { L.DomEvent.preventDefault(e.originalEvent); showMapCtx(e.originalEvent.clientX, e.originalEvent.clientY, e.latlng); });
+  S.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+  S._mapLayersReady = false;
+  S._mapReadyCallbacks = [];
+  S.map.on('load', () => {
+    initMapLayers();
+    S._mapLayersReady = true;
+    S._mapReadyCallbacks.forEach(fn => fn());
+    S._mapReadyCallbacks = [];
+  });
+  S.map.on('contextmenu', e => {
+    e.preventDefault();
+    showMapCtx(e.originalEvent.clientX, e.originalEvent.clientY, { lat: e.lngLat.lat, lng: e.lngLat.lng });
+  });
   S.map.on('mousedown', closeCtx);
   S.map.on('click', () => {
+    if(S._clickConsumed){ S._clickConsumed = false; return; }
     closeCtx();
     if(S.activeView) clearActiveView();
   });
-  setTimeout(() => S.map.invalidateSize(), 150);
-  setTimeout(() => S.map.invalidateSize(), 500);
+  setTimeout(() => S.map.resize(), 150);
+  setTimeout(() => S.map.resize(), 500);
 }
+
+// Run fn now if the style + our custom sources/layers are ready, else queue it
+// for the map's 'load' event — addSource/addLayer/setData all require the
+// style to have finished loading first.
+function whenMapLayersReady(fn){
+  if(S._mapLayersReady) fn(); else S._mapReadyCallbacks.push(fn);
+}
+
+// Adds every custom source/layer this app draws on top of the base style, in
+// the order that reproduces the old Leaflet pane stack (coverage fills lowest,
+// then the overlap outline, then edges, with node markers — plain DOM
+// elements — implicitly topmost since they sit above the WebGL canvas).
+function initMapLayers(){
+  S.map.addSource('coverage-src', { type:'geojson', data: emptyFC() });
+  S.map.addLayer({ id:'coverage-fill', type:'fill', source:'coverage-src',
+    filter: ['==', ['get','nodeId'], '__none__'],
+    paint: {
+      'fill-color': ['get','color'],
+      'fill-opacity': ['case', ['get','dirty'], ['*', ['get','fillOpacity'], 0.3], ['get','fillOpacity']]
+    } });
+  S.map.addLayer({ id:'coverage-outline', type:'line', source:'coverage-src',
+    filter: ['==', ['get','nodeId'], '__none__'],
+    paint: { 'line-color': ['get','color'], 'line-width':1.5, 'line-opacity':0.85 } });
+
+  S.map.addSource('overlap-src', { type:'geojson', data: emptyFC() });
+  S.map.addLayer({ id:'overlap-outline', type:'line', source:'overlap-src',
+    paint: { 'line-color':'#ff2fd0', 'line-width':2, 'line-opacity':0.95 } });
+
+  S.map.addSource('edges-src', { type:'geojson', data: emptyFC() });
+  S.map.addLayer({ id:'edges-line', type:'line', source:'edges-src',
+    paint: {
+      'line-color': ['match', ['get','status'],
+        'clear','#2ecc71', 'marginal','#f39c12', 'blocked','#e74c3c', 'error','#e74c3c',
+        /* unanalysed */ '#4a6278'],
+      'line-width': ['case', ['get','selected'], 6, ['get','analysed'], 3, 2],
+      'line-opacity': ['case', ['get','hidden'], 0, ['get','analysed'], 0.9, 0.7],
+      'line-dasharray': ['case', ['get','analysed'], ['literal',[1,0]], ['literal',[5,4]]]
+    } });
+  S.map.addLayer({ id:'edges-hit', type:'line', source:'edges-src',
+    paint: { 'line-color':'#ffffff', 'line-width':24, 'line-opacity':0 } });
+
+  S.map.addSource('location-pulse-src', { type:'geojson', data: emptyFC() });
+  S.map.addLayer({ id:'location-pulse', type:'circle', source:'location-pulse-src',
+    layout: { visibility:'none' },
+    paint: { 'circle-radius':16, 'circle-color': accentColor(), 'circle-opacity':0.2,
+      'circle-stroke-color': accentColor(), 'circle-stroke-width':2, 'circle-stroke-opacity':1 } });
+
+  attachEdgeLayerHandlers();
+}
+
+function emptyFC(){ return { type:'FeatureCollection', features:[] }; }
 
 // ═══════════════════════════════════════════════════════════
 //  NODES
@@ -206,7 +256,7 @@ function addNode(lat, lng) {
   const node = { id: S.nextId++, name: defaultNodeName(idx), lat, lng, antH: 6, elev: null, marker: null,
     color: null,
     rfOverride: false, txDbm: null, gainDbi: null, rxDbm: null,
-    coverageOn: false, coverageLayer: null, coverageDirty: true, coverageComputed: false };
+    coverageOn: false, coverageRendered: false, coverageDirty: true, coverageComputed: false };
   S.nodes.push(node);
   node.marker = makeMarker(node);
   renderNodeList();
@@ -217,15 +267,27 @@ function addNode(lat, lng) {
 }
 
 function makeMarker(node) {
-  const idx = S.nodes.indexOf(node);
-  const marker = L.marker([node.lat, node.lng], { draggable: true, icon: buildIcon(node) }).addTo(S.map);
-  marker.on('click', e => {
-    L.DomEvent.stopPropagation(e.originalEvent);
+  const el = document.createElement('div');
+  el.className = 'node-marker-icon';
+  el.innerHTML = nodeIconSvg(node);
+  node._iconHtml = el.innerHTML;
+  const tip = document.createElement('div');
+  tip.className = 'node-tooltip';
+  tip.textContent = node.name;
+  el.appendChild(tip);
+
+  const marker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
+    .setLngLat([node.lng, node.lat])
+    .addTo(S.map);
+
+  el.addEventListener('click', e => {
+    e.stopPropagation();
+    S._clickConsumed = true;
     selectNodeView(node.id);
   });
   marker.on('drag', () => {
-    const ll = marker.getLatLng(); node.lat = ll.lat; node.lng = ll.lng;
-    updateNodeFields(node); redrawEdgeLines();
+    const ll = marker.getLngLat(); node.lat = ll.lat; node.lng = ll.lng;
+    updateNodeFields(node); syncEdgesSource();
   });
   marker.on('dragend', () => {
     node.elev = null; invalidateEdgesForNode(node.id); fetchElev(node);
@@ -237,18 +299,18 @@ function makeMarker(node) {
     // Re-analyse all links whenever a node is dragged
     if (S.edges.length > 0) runAnalysis();
   });
-  marker.on('contextmenu', e => { L.DomEvent.preventDefault(e.originalEvent); L.DomEvent.stopPropagation(e.originalEvent); showNodeCtx(e.originalEvent.clientX, e.originalEvent.clientY, node); });
-  bindNodeTooltip(marker, node.name);
+  el.addEventListener('contextmenu', e => {
+    e.preventDefault(); e.stopPropagation();
+    S._clickConsumed = true;
+    showNodeCtx(e.clientX, e.clientY, node);
+  });
   return marker;
-}
-
-function bindNodeTooltip(marker, label) {
-  marker.bindTooltip(textNode(label), { permanent: false, direction: 'top', offset: [0,-14] });
 }
 
 function setNodeTooltip(node, label) {
   if (!node.marker) return;
-  node.marker.setTooltipContent(textNode(label));
+  const tip = node.marker.getElement()?.querySelector('.node-tooltip');
+  if (tip) tip.textContent = label;
 }
 
 // Marker SVG depends on index (number), colour (custom or palette) and selected state.
@@ -267,37 +329,34 @@ function nodeIconSvg(node) {
   </svg>`;
 }
 
-function nodeDivIcon(svg) {
-  return L.divIcon({ html: svg, className: 'lf-marker', iconSize:[28,34], iconAnchor:[14,31], tooltipAnchor:[0,-31] });
-}
-
-function buildIcon(node) {
-  const svg = nodeIconSvg(node);
-  node._iconHtml = svg;
-  return nodeDivIcon(svg);
-}
-
-// Rebuild only the icons whose appearance actually changed. setIcon() swaps the
-// marker's DOM element, which both causes a visible flicker and aborts an
-// in-progress drag — so skipping unchanged markers (every marker, on every
-// analysis/selection) is what keeps dragging smooth and the screen stable.
+// Rebuild only the icons whose appearance actually changed. Unlike Leaflet's
+// setIcon() (which swaps the marker's whole DOM element, causing flicker and
+// aborting an in-progress drag), a MapLibre Marker's element is never
+// recreated — so this just updates the SVG in place, no drag-abort risk.
+// The diff is kept purely as a cheap perf guard against needless re-renders.
 function refreshAllIcons() {
   S.nodes.forEach(n => {
     if (!n.marker) return;
     const svg = nodeIconSvg(n);
-    if (n._iconHtml !== svg) { n.marker.setIcon(nodeDivIcon(svg)); n._iconHtml = svg; }
+    if (n._iconHtml !== svg) {
+      const el = n.marker.getElement();
+      const tip = el.querySelector('.node-tooltip');
+      el.innerHTML = svg;
+      if (tip) el.appendChild(tip);
+      n._iconHtml = svg;
+    }
   });
 }
 
 function removeNode(id) {
   const idx = S.nodes.findIndex(n => n.id === id);
   if (idx < 0) return;
-  if (S.nodes[idx].coverageLayer) S.map.removeLayer(S.nodes[idx].coverageLayer);
-  S.map.removeLayer(S.nodes[idx].marker);
+  removeNodeCoverageFeatures(id);
+  S.nodes[idx].marker.remove();
   S.nodes.splice(idx, 1);
   // Remove all edges involving this node
-  S.edges.filter(e => e.aId === id || e.bId === id).forEach(removeEdgeLayers);
   S.edges = S.edges.filter(e => e.aId !== id && e.bId !== id);
+  syncEdgesSource();
   // Remove this node from all paths, delete paths that become too short
   S.paths.forEach(p => { p.nodeIds = p.nodeIds.filter(nid => nid !== id); });
   S.paths = S.paths.filter(p => p.nodeIds.length >= 2);
@@ -318,12 +377,13 @@ function removeNode(id) {
 }
 
 function clearAll() {
-  S.nodes.forEach(n => {
-    if (n.marker) S.map.removeLayer(n.marker);
-    if (n.coverageLayer) S.map.removeLayer(n.coverageLayer);
-  });
-  S.edges.forEach(removeEdgeLayers);
+  S.nodes.forEach(n => { if (n.marker) n.marker.remove(); });
+  S._coverageFeatures = [];
+  S._coverageOnIds.clear();
+  syncCoverageSource();
+  setCoverageLayerFilters();
   S.nodes = []; S.edges = []; S.paths = [];
+  syncEdgesSource();
   S.activeView = null;
   closeNodeInfo();
   S.nextId = 1;
@@ -351,13 +411,9 @@ function addEdge(aId, bId) {
   // Prevent duplicate edges
   if (S.edges.some(e => (e.aId===aId&&e.bId===bId)||(e.aId===bId&&e.bId===aId))) { toast('Link already exists.',2000); return; }
   if (aId === bId) { toast('Cannot link a node to itself.',2000); return; }
-  const edge = { id: S.nextId++, aId, bId, hidden: false, line: null, hitLine: null, result: null, profile: null };
+  const edge = { id: S.nextId++, aId, bId, hidden: false, result: null, profile: null };
   S.edges.push(edge);
-  const a = S.nodes.find(n=>n.id===aId), b = S.nodes.find(n=>n.id===bId);
-  edge.line = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#4a6278', weight:2, opacity:.7, dashArray:'5 4', interactive:false }).addTo(S.map);
-  edge.hitLine = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#ffffff', weight:24, opacity:0, interactive:true }).addTo(S.map);
-  attachEdgeHandlers(edge);
-  highlightActiveMapView();
+  syncEdgesSource();
   renderEdgesPanel();
   document.getElementById('edgeCount').textContent = S.edges.length;
 
@@ -368,9 +424,8 @@ function addEdge(aId, bId) {
 function removeEdge(id) {
   const idx = S.edges.findIndex(e => e.id === id);
   if (idx < 0) return;
-  const e = S.edges[idx];
-  removeEdgeLayers(e);
   S.edges.splice(idx, 1);
+  syncEdgesSource();
   // Drop any path that relied on the deleted link: a path is only valid if every
   // consecutive node pair still has an edge connecting them.
   S.paths = S.paths.filter(p => {
@@ -391,12 +446,50 @@ function removeEdge(id) {
   document.getElementById('pathCount').textContent = S.paths.length;
 }
 
-function redrawEdgeLines() {
-  const nodesById=nodeByIdMap();
-  S.edges.forEach(e => {
-    const a = nodesById.get(e.aId), b = nodesById.get(e.bId);
-    if (a && b && e.line) e.line.setLatLngs([[a.lat,a.lng],[b.lat,b.lng]]);
-    if (a && b && e.hitLine) e.hitLine.setLatLngs([[a.lat,a.lng],[b.lat,b.lng]]);
+// Rebuilds the shared edges-src GeoJSON source from S.edges/S.nodes — the
+// single place edge geometry AND styling (colour/width/dash, driven by
+// data-driven paint expressions keyed on these properties, see
+// initMapLayers()) get pushed to the map. MapLibre GeoJSON sources only
+// support whole-collection replacement, so every edge change (position,
+// analysis result, selection, visibility) funnels through here rather than
+// mutating individual map layers.
+function syncEdgesSource(){
+  // MapLibre's vector style loads asynchronously (unlike Leaflet's near-instant
+  // raster init), so edges-src may not exist yet if this runs very early —
+  // queue via whenMapLayersReady rather than silently dropping the update; the
+  // queued call re-reads S.edges/S.nodes at run time, so it stays correct even
+  // if this is called several times before the map finishes loading.
+  whenMapLayersReady(()=>{
+    const nodesById = nodeByIdMap();
+    const activePath = S.activeView?.type==='path' ? S.paths.find(p=>p.id===S.activeView.id) : null;
+    const edgesByPair = edgeByNodePairMap();
+    const pathEdgeIds = new Set();
+    if(activePath){
+      for(let i=0;i<activePath.nodeIds.length-1;i++){
+        const edge=edgeBetween(activePath.nodeIds[i],activePath.nodeIds[i+1],edgesByPair);
+        if(edge) pathEdgeIds.add(edge.id);
+      }
+    }
+    const shouldEmphasizeSelected = visibleEdgeCount()>1;
+    const features = S.edges.map(e=>{
+      const a=nodesById.get(e.aId), b=nodesById.get(e.bId);
+      if(!a||!b) return null;
+      const visible = isEdgeVisible(e);
+      const isSelectedEdge = S.activeView?.type==='edge' && S.activeView.id===e.id;
+      const selected = visible && shouldEmphasizeSelected && (isSelectedEdge||pathEdgeIds.has(e.id));
+      return {
+        type:'Feature',
+        properties:{
+          id:e.id,
+          status: !e.result ? 'unanalysed' : e.result.status==='error' ? 'error' : e.result.status,
+          analysed: !!e.result,
+          selected,
+          hidden: !visible
+        },
+        geometry:{ type:'LineString', coordinates:[[a.lng,a.lat],[b.lng,b.lat]] }
+      };
+    }).filter(Boolean);
+    S.map.getSource('edges-src').setData({ type:'FeatureCollection', features });
   });
 }
 
@@ -574,14 +667,6 @@ function hideAllPaths(){
   highlightActiveMapView();
 }
 
-function edgeBaseStyle(edge){
-  if(!isEdgeVisible(edge)) return {color:'#4a6278',weight:0,opacity:0,dashArray:''};
-  if(!edge.result) return {color:'#4a6278',weight:2,opacity:.7,dashArray:'5 4'};
-  if(edge.result.status==='error') return {color:'#e74c3c',weight:2,opacity:.8,dashArray:'3 5'};
-  const col=edge.result.status==='clear'?'#2ecc71':edge.result.status==='marginal'?'#f39c12':'#e74c3c';
-  return {color:col,weight:3,opacity:.9,dashArray:''};
-}
-
 function setDisplayVisibility(kind, visible) {
   if (kind === 'links') {
     S.showLinks = !!visible;
@@ -617,7 +702,7 @@ function selectNodeView(id, opts={}){
   renderResults();
   if(opts.pan){
     const node=S.nodes.find(n=>n.id===id);
-    S.map.panTo([node.lat,node.lng],{animate:true});
+    S.map.panTo([node.lng,node.lat],{animate:true});
   }
   requestAnimationFrame(()=>{
     document.querySelector(`.wp-card[data-id="${id}"]`)?.scrollIntoView({block:'nearest'});
@@ -681,39 +766,11 @@ function clearActiveView(){
 // un-analysed) and only thicken/opacify it for emphasis, so a "clear" link stays
 // green, a "blocked" link stays red, etc. — selection never recolours the link.
 function highlightActiveMapView(){
-  const activePath=S.activeView?.type==='path'?S.paths.find(p=>p.id===S.activeView.id):null;
-  const shouldEmphasizeSelected=visibleEdgeCount()>1;
-  const edgesByPair=edgeByNodePairMap();
-  // Collect the edge ids that make up the active path (consecutive node pairs).
-  const pathEdgeIds=new Set();
-  if(activePath){
-    for(let i=0;i<activePath.nodeIds.length-1;i++){
-      const edge=edgeBetween(activePath.nodeIds[i],activePath.nodeIds[i+1],edgesByPair);
-      if(edge) pathEdgeIds.add(edge.id);
-    }
-  }
-  S.edges.forEach(e=>{
-    if(!e.line) return;
-    if(!isEdgeVisible(e)){
-      e.line.setStyle(edgeBaseStyle(e));
-      if(e.hitLine) e.hitLine.setStyle({weight:0,opacity:0});
-      return;
-    }
-    const isSelectedEdge=S.activeView?.type==='edge'&&S.activeView.id===e.id;
-    if(shouldEmphasizeSelected&&(isSelectedEdge||pathEdgeIds.has(e.id))){
-      // Emphasise by keeping the link's own colour but making it bolder.
-      // weight:6 (vs the analysed default of 3) reads clearly as "selected"
-      // while preserving the clear/marginal/blocked colour coding.
-      e.line.setStyle({...edgeBaseStyle(e),weight:6,opacity:1});
-      e.line.bringToFront();
-    }else{
-      e.line.setStyle(edgeBaseStyle(e));
-    }
-    if(e.hitLine){
-      e.hitLine.setStyle({weight:24,opacity:0});
-      e.hitLine.bringToFront();
-    }
-  });
+  // Selection/status/visibility styling is entirely data-driven (paint
+  // expressions in initMapLayers() read the 'status'/'selected'/'hidden'
+  // feature properties) — rebuilding the source is all that's needed to
+  // reflect the current selection, in place of Leaflet's per-line setStyle.
+  syncEdgesSource();
   refreshAllIcons();
 }
 
@@ -724,9 +781,9 @@ function invalidateEdgesForNode(nodeId) {
     e.result = null;
     e.profile = null;
     changed = true;
-    if (e.line) e.line.setStyle(edgeBaseStyle(e));
   });
   if (!changed) return;
+  syncEdgesSource();
 
   // Clear stale chart but keep activeView so runAnalysis can restore the same view.
   const active = S.activeView;
@@ -1113,7 +1170,7 @@ function setNodeColor(id, value) {
   node.color = /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : null;
   refreshAllIcons();                       // marker pin colour
   renderNodeList();                        // card number badge + border
-  if(node.coverageLayer) renderCoveragePolygon(node);  // coverage fill + outline
+  if(node.coverageRendered) renderCoveragePolygon(node);  // coverage fill + outline
 }
 // Collapse/expand a single node card — toggles the class directly (no re-render,
 // so it can't disturb focus, drag, or markers).
@@ -1137,8 +1194,8 @@ function setNodeCoord(id, field, val) {
     return;
   }
   node[field]=Number(val); node.elev=null;
-  if(node.marker) node.marker.setLatLng([node.lat,node.lng]);
-  redrawEdgeLines(); invalidateEdgesForNode(id); fetchElev(node);
+  if(node.marker) node.marker.setLngLat([node.lng,node.lat]);
+  syncEdgesSource(); invalidateEdgesForNode(id); fetchElev(node);
   invalidateNodeCoverage(node, true);
   // Mirror the marker-drag behaviour: a moved node re-runs the analysis so the
   // links don't sit stale after a manual coordinate edit.
@@ -1237,19 +1294,25 @@ function showPathCtx(cx,cy,path){
   buildCtx('PATH',items); posCtx(cx,cy);
 }
 
-function attachEdgeHandlers(edge){
-  const target=edge.hitLine||edge.line;
-  if(!target) return;
-  target.on('click',e=>{
-    L.DomEvent.stopPropagation(e.originalEvent);
-    selectEdgeView(edge.id);
+// Registered ONCE (not per-edge) against the 'edges-hit' layer — MapLibre's
+// layer-scoped map.on(event, layerId, fn) fires for whichever feature was hit,
+// looked up here by its 'id' property, replacing Leaflet's per-polyline
+// .on(event, fn) handlers attached in the old per-edge attachEdgeHandlers().
+function attachEdgeLayerHandlers(){
+  const findEdge = e => S.edges.find(x => x.id === e.features[0].properties.id);
+  S.map.on('mouseenter','edges-hit',()=>{ S.map.getCanvas().style.cursor='pointer'; });
+  S.map.on('mouseleave','edges-hit',()=>{ S.map.getCanvas().style.cursor=''; hideProfileCursor(); });
+  S.map.on('click','edges-hit',e=>{
+    S._clickConsumed=true;
+    const edge=findEdge(e); if(edge) selectEdgeView(edge.id);
   });
-  target.on('mousemove',e=>handleMapLineHover(edge,e.latlng));
-  target.on('mouseout',hideProfileCursor);
-  target.on('contextmenu',e=>{
-    L.DomEvent.preventDefault(e.originalEvent);
-    L.DomEvent.stopPropagation(e.originalEvent);
-    showEdgeCtx(e.originalEvent.clientX,e.originalEvent.clientY,edge);
+  S.map.on('mousemove','edges-hit',e=>{
+    const edge=findEdge(e); if(edge) handleMapLineHover(edge,e.lngLat);
+  });
+  S.map.on('contextmenu','edges-hit',e=>{
+    e.preventDefault();
+    S._clickConsumed=true;
+    const edge=findEdge(e); if(edge) showEdgeCtx(e.originalEvent.clientX,e.originalEvent.clientY,edge);
   });
 }
 
@@ -1257,7 +1320,7 @@ function insertNodeAt(idx){
   const ref=S.nodes[Math.min(idx,S.nodes.length-1)];
   const node={id:S.nextId++,name:defaultNodeName(S.nodes.length),lat:ref.lat+0.003,lng:ref.lng+0.003,antH:6,elev:null,marker:null,
     rfOverride:false,txDbm:null,gainDbi:null,rxDbm:null,
-    coverageOn:false,coverageLayer:null,coverageDirty:true,coverageComputed:false};
+    coverageOn:false,coverageRendered:false,coverageDirty:true,coverageComputed:false};
   S.nodes.splice(idx,0,node);
   node.marker=makeMarker(node);
   refreshAllIcons(); renderNodeList(); fetchElev(node);
@@ -1273,8 +1336,7 @@ function isSelectionControlTarget(target){
     '.path-row',
     '.hop-card',
     '.chart-tab',
-    '.leaflet-marker-icon',
-    '.leaflet-interactive',
+    '.maplibregl-marker',
     'button',
     'input',
     'select',
@@ -1311,11 +1373,17 @@ function goToMyLocation(){
   toast('Finding your location…');
   navigator.geolocation.getCurrentPosition(pos=>{
     const{latitude:lat,longitude:lng}=pos.coords;
-    S.map.setView([lat,lng],14);
+    S.map.setCenter([lng,lat]); S.map.setZoom(14);
     hideToast();
-    // Add a temporary pulse circle
-    const circle=L.circle([lat,lng],{radius:50,color:accentColor(),fillColor:accentColor(),fillOpacity:.2,weight:2}).addTo(S.map);
-    setTimeout(()=>S.map.removeLayer(circle),4000);
+    // Pulse a temporary marker at the found location via the persistent
+    // location-pulse layer (added in initMapLayers()) — shown for 4s then
+    // hidden again, in place of Leaflet's add-then-removeLayer L.circle.
+    whenMapLayersReady(()=>{
+      S.map.getSource('location-pulse-src')?.setData({ type:'FeatureCollection',
+        features:[{ type:'Feature', properties:{}, geometry:{ type:'Point', coordinates:[lng,lat] } }] });
+      S.map.setLayoutProperty('location-pulse','visibility','visible');
+      setTimeout(()=>S.map.setLayoutProperty('location-pulse','visibility','none'),4000);
+    });
   },err=>{hideToast();toast('Could not get location: '+err.message,3000);});
 }
 function accentColor(){return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#00c8f0';}
@@ -2009,15 +2077,20 @@ function toggleNodeRfOverride(id){
 
 function invalidateNodeCoverage(node, redraw){
   node.coverageDirty = true;
-  if(redraw && node.coverageLayer && node.coverageOn){
-    styleCoverageLayer(node.coverageLayer,{dashArray:'4 4', fillOpacity:0.05});
+  if(redraw && node.coverageRendered && node.coverageOn){
+    setNodeCoverageDirtyFlag(node.id, true);
   }
   updateCovBtn(node);
 }
 
-function styleCoverageLayer(layer, style){
-  if(layer?.setStyle) layer.setStyle(style);
-  else layer?.eachLayer?.(child=>child.setStyle?.(style));
+// Flags/unflags this node's already-rendered wedge+outline features as
+// "recompute in progress" — dims them via the 'dirty' paint expression in
+// initMapLayers() instead of restyling each shape individually (which is what
+// Leaflet's per-child styleCoverageLayer() workaround existed for).
+function setNodeCoverageDirtyFlag(nodeId, dirty){
+  let changed = false;
+  (S._coverageFeatures||[]).forEach(f => { if(f.properties.nodeId === nodeId){ f.properties.dirty = dirty; changed = true; } });
+  if(changed) syncCoverageSource();
 }
 
 function updateCovBtn(node){
@@ -2042,10 +2115,8 @@ function coverageStatusText(node){
 function setNodeCoverageOn(id, on){
   const node = S.nodes.find(n => n.id === id); if(!node) return;
   node.coverageOn = on;
-  if(node.coverageLayer){
-    if(on) node.coverageLayer.addTo(S.map);
-    else S.map.removeLayer(node.coverageLayer);
-  }
+  if(on) S._coverageOnIds.add(id); else S._coverageOnIds.delete(id);
+  setCoverageLayerFilters();
   updateCovCount();
   refreshOverlap();
 }
@@ -2053,12 +2124,10 @@ function setNodeCoverageOn(id, on){
 function setAllCoverage(on){
   S.nodes.forEach(n => {
     n.coverageOn = on;
-    if(n.coverageLayer){
-      if(on) n.coverageLayer.addTo(S.map);
-      else S.map.removeLayer(n.coverageLayer);
-    }
+    if(on) S._coverageOnIds.add(n.id); else S._coverageOnIds.delete(n.id);
     const cb = document.getElementById(`cov_${n.id}`); if(cb) cb.checked = on;
   });
+  setCoverageLayerFilters();
   updateCovCount();
   refreshOverlap();
 }
@@ -2263,11 +2332,14 @@ async function _computeNodeCoverageImpl(node){
   updateCovBtn(node);
 }
 
+// Rebuilds this node's wedge + outline features in the shared coverage-src
+// GeoJSON source (all nodes' coverage geometry lives in one source; MapLibre
+// GeoJSON sources only support whole-collection replacement via setData, so
+// every coverage change funnels through syncCoverageSource()).
 function renderCoveragePolygon(node){
-  if(node.coverageLayer){ S.map.removeLayer(node.coverageLayer); node.coverageLayer = null; }
-  if(!node.coverageHeatRays || node.coverageHeatRays.length < 2) return;
+  removeNodeCoverageFeatures(node.id);
+  if(!node.coverageHeatRays || node.coverageHeatRays.length < 2){ node.coverageRendered = false; return; }
   const col = nodeColorFor(node);
-  const group = L.layerGroup();
   const rays = node.coverageHeatRays;
   const R = rays.length;
   // Render each ray as its OWN wedge, spanning the half-angle to each neighbour
@@ -2278,7 +2350,9 @@ function renderCoveragePolygon(node){
   // fine (~40 m); consecutive same-strength samples merge into one polygon, so a
   // ray collapses to a few bands (plus any disconnected far patches). Strength is
   // shown by fill opacity; blank (no-coverage) stretches are skipped.
-  const mid = (P, Q, s) => [ (P[s].latlng[0]+Q[s].latlng[0])/2, (P[s].latlng[1]+Q[s].latlng[1])/2 ];
+  const mid = (P, Q, s) => [ (P[s].latlng[0]+Q[s].latlng[0])/2, (P[s].latlng[1]+Q[s].latlng[1])/2 ]; // [lat,lng]
+  const toLngLat = p => [p[1], p[0]]; // GeoJSON coordinate order
+  const features = [];
   for(let r=0;r<R;r++){
     const cur = rays[r].samples;
     const prev = rays[(r-1+R)%R].samples;
@@ -2286,9 +2360,11 @@ function renderCoveragePolygon(node){
     const n = Math.min(cur.length, prev.length, next.length);
     // Wedge bounded by the midline to the previous ray (left) and next ray (right).
     const addWedge = (i0, i1, level) => {
-      group.addLayer(L.polygon([ mid(prev,cur,i0), mid(cur,next,i0), mid(cur,next,i1), mid(prev,cur,i1) ], {
-        renderer: S._covRenderer, color: col, weight: 0, opacity: 0, fillColor: col, fillOpacity: coverageLevelOpacity(level), interactive: false
-      }));
+      const ring = [ mid(prev,cur,i0), mid(cur,next,i0), mid(cur,next,i1), mid(prev,cur,i1) ].map(toLngLat);
+      ring.push(ring[0]);
+      features.push({ type:'Feature',
+        properties: { nodeId: node.id, color: col, fillOpacity: coverageLevelOpacity(level), dirty: false },
+        geometry: { type:'Polygon', coordinates: [ring] } });
     };
     let runStart = -1, runLevel = 0;
     const flush = endIdx => { if(runStart > 0 && runLevel > 0) addWedge(runStart-1, endIdx, runLevel); runStart = -1; runLevel = 0; };
@@ -2300,14 +2376,33 @@ function renderCoveragePolygon(node){
   }
   // Outline the coverage edge — the farthest covered point per ray.
   if(node.coverageRays?.length){
-    const outline = node.coverageRays.map(r=>r.latlng);
-    outline.push(node.coverageRays[0].latlng);
-    group.addLayer(L.polyline(outline, {
-      renderer: S._covRenderer, color: col, weight: 1.5, opacity: 0.85, interactive: false
-    }));
+    const outline = node.coverageRays.map(r=>toLngLat(r.latlng));
+    outline.push(outline[0]);
+    features.push({ type:'Feature', properties: { nodeId: node.id, color: col, dirty: false },
+      geometry: { type:'LineString', coordinates: outline } });
   }
-  node.coverageLayer = group;
-  if(node.coverageOn) node.coverageLayer.addTo(S.map);
+  S._coverageFeatures.push(...features);
+  node.coverageRendered = true;
+  syncCoverageSource();
+}
+
+function syncCoverageSource(){
+  S.map.getSource('coverage-src')?.setData({ type:'FeatureCollection', features: S._coverageFeatures });
+}
+
+function setCoverageLayerFilters(){
+  const ids = [...S._coverageOnIds];
+  const filter = ids.length ? ['in', ['get','nodeId'], ['literal', ids]] : ['==', ['get','nodeId'], '__none__'];
+  if(S.map.getLayer('coverage-fill')) S.map.setFilter('coverage-fill', filter);
+  if(S.map.getLayer('coverage-outline')) S.map.setFilter('coverage-outline', filter);
+}
+
+function removeNodeCoverageFeatures(nodeId){
+  const before = S._coverageFeatures.length;
+  S._coverageFeatures = S._coverageFeatures.filter(f => f.properties.nodeId !== nodeId);
+  S._coverageOnIds.delete(nodeId);
+  if(S._coverageFeatures.length !== before) syncCoverageSource();
+  setCoverageLayerFilters();
 }
 
 // ── Coverage overlap highlight ──────────────────────────────
@@ -2336,10 +2431,9 @@ function pointInCoverage(node, lat, lng){
 }
 
 function renderCoverageOverlap(){
-  if(S.overlapLayer){ S.map.removeLayer(S.overlapLayer); S.overlapLayer = null; }
-  if(!S.showOverlap) return;
+  if(!S.showOverlap){ S.map.getSource('overlap-src')?.setData(emptyFC()); return; }
   const nodes = S.nodes.filter(n => n.coverageOn && n.coverageHeatRays?.length && n.coverageMaxRange);
-  if(nodes.length < 2) return;
+  if(nodes.length < 2){ S.map.getSource('overlap-src')?.setData(emptyFC()); return; }
   // Combined bounds across every node's reach.
   let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
   for(const n of nodes){
@@ -2383,23 +2477,17 @@ function renderCoverageOverlap(){
     for(let x = 0; x < W; x++){
       if(!grid[y*W+x]) continue;
       const T = latAt(y), B = latAt(y+1), Ln = lngAt(x), Rn = lngAt(x+1);
-      if(!at(grid,x-1,y)) segs.push([[T,Ln],[B,Ln]]);
-      if(!at(grid,x+1,y)) segs.push([[T,Rn],[B,Rn]]);
-      if(!at(grid,x,y-1)) segs.push([[T,Ln],[T,Rn]]);
-      if(!at(grid,x,y+1)) segs.push([[B,Ln],[B,Rn]]);
+      if(!at(grid,x-1,y)) segs.push([[Ln,T],[Ln,B]]);
+      if(!at(grid,x+1,y)) segs.push([[Rn,T],[Rn,B]]);
+      if(!at(grid,x,y-1)) segs.push([[Ln,T],[Rn,T]]);
+      if(!at(grid,x,y+1)) segs.push([[Ln,B],[Rn,B]]);
     }
   }
-  if(!segs.length) return;
-  // Dedicated pane above the coverage fills (overlayPane=400) but below markers (600).
-  if(!S.map.getPane('overlapPane')){
-    S.map.createPane('overlapPane');
-    const p = S.map.getPane('overlapPane');
-    p.style.zIndex = 450;
-    p.style.pointerEvents = 'none';
-  }
-  S.overlapLayer = L.polyline(segs, {
-    color: '#ff2fd0', weight: 2, opacity: 0.95, interactive: false, pane: 'overlapPane'
-  }).addTo(S.map);
+  if(!segs.length){ S.map.getSource('overlap-src')?.setData(emptyFC()); return; }
+  S.map.getSource('overlap-src')?.setData({
+    type:'FeatureCollection',
+    features: segs.map(seg => ({ type:'Feature', properties:{}, geometry:{ type:'LineString', coordinates: seg } }))
+  });
 }
 
 // Redraw the overlap only when the toggle is active (cheap no-op otherwise),
@@ -2481,7 +2569,7 @@ async function runAnalysis(){
         terrainErrors++;
         e.result={dist,status:'error',error:err.message||'Terrain lookup failed'};
         e.profile=null;
-        if(e.line) e.line.setStyle(edgeBaseStyle(e));
+        syncEdgesSource();
         renderResults();
         renderEdgesPanel();
         if(terrainErrors>=MAX_TERRAIN_ERRORS){
@@ -2580,9 +2668,9 @@ async function runAnalysis(){
       }
       dlog(`  ${a.name}↔${b.name}: ${(dist/1000).toFixed(2)}km · ${status.toUpperCase()} · LOS clr ${minLosClear.toFixed(1)}m · Fz clr ${minScaledFzClear.toFixed(1)}m · ν ${maxNu.toFixed(2)} · diff ${diffLossDb.toFixed(1)}dB${clutterNote}`, lvl);
 
-      // Colour the line on map
-      if(e.line) e.line.setStyle(edgeBaseStyle(e));
     }
+    // Colour the lines on map
+    syncEdgesSource();
 
     if(terrainErrors<MAX_TERRAIN_ERRORS) hideToast();
     renderResults();
@@ -3577,23 +3665,22 @@ function interpLatLng(a,b,t){
   return [a.lat+(b.lat-a.lat)*t,a.lng+(b.lng-a.lng)*t];
 }
 
+// A small pink dot marking where the profile-chart cursor sits on the map.
+// z-index is set directly on the element (no MapLibre pane concept) so it
+// renders above node markers, replicating the old profileHoverPane (z750).
 function ensureProfileHoverMarker(){
   if(S.hoverMarker) return S.hoverMarker;
-  S.hoverMarker=L.circleMarker([0,0],{
-    radius:10,
-    color:'#ffffff',
-    weight:3,
-    fillColor:'#ff2bd6',
-    fillOpacity:.9,
-    opacity:1,
-    pane:'profileHoverPane'
-  });
-  S.hoverMarker.bindTooltip('Profile cursor',{direction:'top',offset:[0,-10]});
+  const el=document.createElement('div');
+  el.style.cssText='width:20px;height:20px;border-radius:50%;background:#ff2bd6;'+
+    'border:3px solid #fff;box-sizing:border-box;z-index:10000;position:relative';
+  el.title='Profile cursor';
+  S.hoverMarker=new maplibregl.Marker({element:el});
+  S._hoverMarkerShown=false;
   return S.hoverMarker;
 }
 
 function hideProfileHoverMarker(){
-  if(S.hoverMarker&&S.map.hasLayer(S.hoverMarker)) S.map.removeLayer(S.hoverMarker);
+  if(S.hoverMarker&&S._hoverMarkerShown){ S.hoverMarker.remove(); S._hoverMarkerShown=false; }
 }
 
 function handleProfileHover(ev){
@@ -3609,10 +3696,9 @@ function handleProfileHover(ev){
   if(!seg) return;
   const t=Math.max(0,Math.min(1,(dist-seg.start)/seg.dist));
   const marker=ensureProfileHoverMarker();
-  marker.setLatLng(interpLatLng(seg.a,seg.b,t));
-  if(!S.map.hasLayer(marker)) marker.addTo(S.map);
-  marker.setStyle({opacity:1,fillOpacity:.9});
-  marker.bringToFront();
+  const [lat,lng]=interpLatLng(seg.a,seg.b,t);
+  marker.setLngLat([lng,lat]);
+  if(!S._hoverMarkerShown){ marker.addTo(S.map); S._hoverMarkerShown=true; }
 }
 
 function drawProfileCursorAtDistance(dist){
@@ -3640,9 +3726,9 @@ function drawProfileCursorAtDistance(dist){
 }
 
 function projectPointToSegment(latlng,a,b){
-  const p=S.map.latLngToLayerPoint(latlng);
-  const p0=S.map.latLngToLayerPoint([a.lat,a.lng]);
-  const p1=S.map.latLngToLayerPoint([b.lat,b.lng]);
+  const p=S.map.project([latlng.lng,latlng.lat]);
+  const p0=S.map.project([a.lng,a.lat]);
+  const p1=S.map.project([b.lng,b.lat]);
   const vx=p1.x-p0.x,vy=p1.y-p0.y;
   const len2=vx*vx+vy*vy||1;
   return Math.max(0,Math.min(1,((p.x-p0.x)*vx+(p.y-p0.y)*vy)/len2));
@@ -4058,22 +4144,19 @@ function loadFromHash(hashStr){
     // Restore nodes
     data.nodes.forEach(nd=>{
       const node={...nd, elev:null, marker:null,
-        coverageLayer:null, coverageDirty:true, coverageComputed:false};
+        coverageRendered:false, coverageDirty:true, coverageComputed:false};
       S.nodes.push(node);
       node.marker=makeMarker(node);
       fetchElev(node);
     });
     refreshAllIcons();
-    // Restore edges (lines only, no profile/result yet)
+    // Restore edges (geometry only, no profile/result yet)
     data.edges.forEach(ed=>{
       const a=S.nodes.find(n=>n.id===ed.aId),b=S.nodes.find(n=>n.id===ed.bId);
       if(!a||!b) return;
-      const edge={id:ed.id,aId:ed.aId,bId:ed.bId,hidden:!!ed.hidden,line:null,hitLine:null,result:null,profile:null};
-      edge.line=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#4a6278',weight:2,opacity:.7,dashArray:'5 4',interactive:false}).addTo(S.map);
-      edge.hitLine=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#ffffff',weight:24,opacity:0,interactive:true}).addTo(S.map);
-      attachEdgeHandlers(edge);
-      S.edges.push(edge);
+      S.edges.push({id:ed.id,aId:ed.aId,bId:ed.bId,hidden:!!ed.hidden,result:null,profile:null});
     });
+    syncEdgesSource();
     // Restore paths
     data.paths.forEach(p=>S.paths.push({...p}));
     renderNodeList(); renderEdgesPanel(); renderPathsPanel();
@@ -4083,8 +4166,9 @@ function loadFromHash(hashStr){
     document.getElementById('pathCount').textContent=S.paths.length;
     if(S.nodes.length>0){
       document.getElementById('mapHint').style.display='none';
-      const bounds=L.latLngBounds(S.nodes.map(n=>[n.lat,n.lng]));
-      S.map.fitBounds(bounds,{padding:[40,40]});
+      let minLat=90,maxLat=-90,minLng=180,maxLng=-180;
+      S.nodes.forEach(n=>{ minLat=Math.min(minLat,n.lat); maxLat=Math.max(maxLat,n.lat); minLng=Math.min(minLng,n.lng); maxLng=Math.max(maxLng,n.lng); });
+      S.map.fitBounds([[minLng,minLat],[maxLng,maxLat]],{padding:40});
     }
     toast('Map loaded from shared link. Click Analyse to run.',4000);
   }catch(err){
@@ -4267,11 +4351,19 @@ window.addEventListener('load',()=>{
   initProfileHover();
   initCollapsibles();
   renderNodeList();
-  setTimeout(()=>S.map.invalidateSize(),200);
-  setTimeout(()=>{S.map.invalidateSize();loadFromHash();syncPresetFromFreq();refreshSettingsSummary();maybeShowHelp();S._ready=true;},600);
+  setTimeout(()=>S.map.resize(),200);
+  setTimeout(()=>{
+    S.map.resize();
+    // Edge/coverage restore needs the style + our custom sources/layers loaded
+    // first (addSource/setData throw before that) — node placement itself
+    // doesn't, since markers are plain DOM overlays, but loadFromHash() also
+    // restores edges, so gate the whole call.
+    whenMapLayersReady(loadFromHash);
+    syncPresetFromFreq();refreshSettingsSummary();maybeShowHelp();S._ready=true;
+  },600);
 });
 window.addEventListener('resize',()=>{
-  if(S.map) S.map.invalidateSize();
+  if(S.map) S.map.resize();
   if(S.activeView){
     if(S.activeView.type==='edge') showEdgeProfile(S.activeView.id);
     else if(S.activeView.type==='path') showPathProfile(S.activeView.id);

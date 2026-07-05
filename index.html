@@ -312,7 +312,12 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .ctx-check{margin-left:auto;color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:10px}
 
 /* node marker icon (MapLibre Marker custom element) */
-.node-marker-icon{background:none!important;border:none!important}
+.node-marker-icon{background:none!important;border:none!important;position:relative}
+.node-tooltip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:6px;
+  padding:3px 8px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .1s;
+  background:#111824;border:1px solid #1e2d42;border-radius:4px;color:#c8daea;
+  font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:600}
+.node-marker-icon:hover .node-tooltip{opacity:1}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ── COVERAGE ── */
