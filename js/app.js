@@ -2524,6 +2524,15 @@ function renderCoveragePolygon(node){
   // resampled over a large geographic area, unlike the broad fill wedges
   // which tolerate that fine.
   syncNodeOutline(node, col);
+  // Re-derive the outline visibility filter here, not just in the checkbox
+  // handlers: nodes restored from a share/URL hash arrive with coverageOn
+  // already true WITHOUT passing through setNodeCoverageOn, and if the map
+  // style loaded before the restore ran, restoreMapOverlays computed the
+  // filter against an empty node list — leaving the outline permanently
+  // filtered out (fill visible, border missing) until the checkbox was
+  // toggled. Syncing on every render makes the filter self-consistent for
+  // every compute entry path.
+  setCoverageOutlineFilter();
 
   const token = (node._covRenderToken || 0) + 1;
   node._covRenderToken = token;
