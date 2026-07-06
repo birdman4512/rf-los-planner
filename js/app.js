@@ -1939,10 +1939,10 @@ function fsplDb(distM, fMHz){
 // distinguishable; signal strength is shown by fill opacity instead of hue —
 // more opaque = stronger margin, fading out to the coverage edge. Below 0 dB the
 // link budget doesn't close, so there's no coverage to paint (level 0 = blank).
-const COVERAGE_GREEN_DB = 24;     // margin (dB) at/above which coverage is full strength
+const COVERAGE_GREEN_DB = 40;     // margin (dB) at/above which coverage is full strength
 const COVERAGE_LEVELS = 5;        // strength quantisation so adjacent samples merge into runs
-const COVERAGE_FILL_MIN = 0.1;    // fill opacity at the weakest covered level
-const COVERAGE_FILL_MAX = 0.4;    // fill opacity at full strength (kept light/transparent)
+const COVERAGE_FILL_MIN = 0.08;   // fill opacity at the weakest covered level
+const COVERAGE_FILL_MAX = 0.55;   // fill opacity at full strength
 function coverageLevel(marginDb){
   if(!(marginDb >= 0)) return 0;                    // no coverage
   const t = Math.min(1, marginDb / COVERAGE_GREEN_DB);
