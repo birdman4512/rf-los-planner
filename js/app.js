@@ -164,7 +164,10 @@ function cleanName(name, fallback = 'Site') {
 //  map.moveLayer()/addLayer(def, beforeId) where a specific position matters.
 // ═══════════════════════════════════════════════════════════
 const BASEMAPS = {
-  openfreemap: { label: 'OpenFreeMap', style: 'https://tiles.openfreemap.org/styles/liberty' },
+  openfreemap: { label: 'OpenFreeMap Liberty', style: 'https://tiles.openfreemap.org/styles/liberty' },
+  // Bright renders roads with much stronger contrast/weight than Liberty —
+  // the road-legibility option while staying on OpenFreeMap's vector tiles.
+  ofmbright: { label: 'OpenFreeMap Bright', style: 'https://tiles.openfreemap.org/styles/bright' },
   carto: {
     label: 'OpenStreetMap',
     attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
@@ -236,6 +239,13 @@ function initMap() {
     closeCtx();
     if(S.activeView) clearActiveView();
   });
+  // Windows/Chrome can fail to render Chrome's bundled grab/grabbing cursors
+  // over a continuously repainting WebGL canvas — the pointer visibly
+  // vanishes while panning. (Leaflet never hit this: it panned a static DOM
+  // layer, no per-frame GL repaint.) Pin a native OS cursor ('move') on the
+  // canvas for the duration of the drag instead.
+  S.map.on('dragstart', () => { S._dragging = true; S.map.getCanvas().style.cursor = 'move'; });
+  S.map.on('dragend', () => { S._dragging = false; S.map.getCanvas().style.cursor = ''; });
   setTimeout(() => S.map.resize(), 150);
   setTimeout(() => S.map.resize(), 500);
 }
@@ -1415,8 +1425,10 @@ function attachEdgeLayerHandlers(){
   if(S._edgeLayerHandlersAttached) return;
   S._edgeLayerHandlersAttached = true;
   const findEdge = e => S.edges.find(x => x.id === e.features[0].properties.id);
-  S.map.on('mouseenter','edges-hit',()=>{ S.map.getCanvas().style.cursor='pointer'; });
-  S.map.on('mouseleave','edges-hit',()=>{ S.map.getCanvas().style.cursor=''; hideProfileCursor(); });
+  // Skip cursor writes while panning so edge hover can't clobber the native
+  // 'move' drag cursor pinned in initMap (Windows/Chrome workaround).
+  S.map.on('mouseenter','edges-hit',()=>{ if(!S._dragging) S.map.getCanvas().style.cursor='pointer'; });
+  S.map.on('mouseleave','edges-hit',()=>{ if(!S._dragging) S.map.getCanvas().style.cursor=''; hideProfileCursor(); });
   S.map.on('click','edges-hit',e=>{
     S._clickConsumed=true;
     const edge=findEdge(e); if(edge) selectEdgeView(edge.id);

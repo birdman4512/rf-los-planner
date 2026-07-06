@@ -525,8 +525,9 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       </div>
       <div class="field-row" style="margin-top:8px">
         <label>Basemap</label>
-        <select id="inpBasemap" title="Map background. OpenFreeMap is the crisp vector default; OpenStreetMap and Esri Topo are raster alternatives.">
-          <option value="openfreemap">OpenFreeMap</option>
+        <select id="inpBasemap" title="Map background. The OpenFreeMap styles are crisp vector maps (Bright has bolder, easier-to-read roads); OpenStreetMap and Esri Topo are raster alternatives.">
+          <option value="openfreemap">OpenFreeMap Liberty</option>
+          <option value="ofmbright">OpenFreeMap Bright</option>
           <option value="carto">OpenStreetMap</option>
           <option value="esri">Esri Topo</option>
         </select>
@@ -630,7 +631,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260706-10">BUILD 20260706-10</span>
+      <span class="hdr-tag" title="Build 20260706-11">BUILD 20260706-11</span>
     </div>
   </header>
 
@@ -761,7 +762,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="js/share-codec.js?v=20260706-10"></script>
-<script src="js/app.js?v=20260706-10"></script>
+<script src="js/share-codec.js?v=20260706-11"></script>
+<script src="js/app.js?v=20260706-11"></script>
 </body>
 </html>
