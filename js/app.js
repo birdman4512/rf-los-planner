@@ -2351,11 +2351,15 @@ function renderCoveragePolygon(node){
   const maxR = node.coverageMaxRange || 1000;
   const { dLat, dLng } = metresToDegrees(node.lat, maxR * 1.05);
   const bbox = { north: node.lat+dLat, south: node.lat-dLat, east: node.lng+dLng, west: node.lng-dLng };
-  // Size the raster to the actual coverage radius (~30m/pixel) rather than a
+  // Size the raster to the actual coverage radius (~15m/pixel) rather than a
   // fixed resolution, so smaller/typical coverage areas stay sharp when
   // zoomed in instead of blurring — capped so a huge search radius doesn't
-  // blow up canvas memory/upload cost.
-  const W = Math.round(clampNum((maxR * 2.1) / 30, 512, 2200));
+  // blow up canvas memory/upload cost. Users routinely zoom in much closer
+  // than the coverage radius itself (checking a specific street), so this
+  // is deliberately generous; paired with nearest-neighbour resampling
+  // below (crisp/blocky when stretched, not smeared) rather than raising
+  // resolution indefinitely to chase every possible zoom level.
+  const W = Math.round(clampNum((maxR * 2.1) / 15, 512, 4096));
   const H = W;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
@@ -2431,7 +2435,9 @@ function renderCoveragePolygon(node){
     });
     S.map.addLayer({ id: layerId, type:'raster', source: srcId,
       layout: { visibility: node.coverageOn ? 'visible' : 'none' },
-      paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 } }, 'overlap-outline');
+      // 'nearest' keeps zoomed-in edges crisp/blocky rather than smeared —
+      // users often zoom in much closer than the coverage radius itself.
+      paint: { 'raster-opacity': 1, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' } }, 'overlap-outline');
   });
 }
 
