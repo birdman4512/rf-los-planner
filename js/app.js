@@ -32,7 +32,9 @@ const S = {
   _dragId: null,
   showLinks: true,
   showPaths: true,
+  activeBasemap: 'openfreemap',
   _clickConsumed: false,
+  _edgeLayerHandlersAttached: false,
   _outlineFeatures: [] // GeoJSON LineString Feature[] backing the shared coverage-outline-src, one per node
 };
 
@@ -161,10 +163,50 @@ function cleanName(name, fallback = 'Site') {
 //  paint in add-order, controlled via initMapLayers()'s call order plus
 //  map.moveLayer()/addLayer(def, beforeId) where a specific position matters.
 // ═══════════════════════════════════════════════════════════
+const BASEMAPS = {
+  openfreemap: { label: 'OpenFreeMap', style: 'https://tiles.openfreemap.org/styles/liberty' },
+  carto: {
+    label: 'OpenStreetMap',
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+    tiles: ['https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', 'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', 'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', 'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png']
+  },
+  esri: {
+    label: 'Esri Topo',
+    attribution: '&copy; Esri',
+    tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}']
+  },
+  fallback: {
+    label: 'Blank',
+    style: { version: 8, sources: {}, layers: [
+      { id: 'fallback-bg', type: 'background', paint: { 'background-color': '#dfe5df' } }
+    ]}
+  }
+};
+
+function rasterBasemapStyle(key){
+  const bm = BASEMAPS[key];
+  return {
+    version: 8,
+    sources: {
+      [`${key}-tiles`]: { type: 'raster', tiles: bm.tiles, tileSize: 256, attribution: bm.attribution, maxzoom: 19 }
+    },
+    layers: [
+      { id: `${key}-bg`, type: 'background', paint: { 'background-color': '#dfe5df' } },
+      { id: `${key}-raster`, type: 'raster', source: `${key}-tiles` }
+    ]
+  };
+}
+
+function basemapStyle(key){
+  const bm = BASEMAPS[key] || BASEMAPS.openfreemap;
+  if(bm.style) return bm.style;
+  return rasterBasemapStyle(key);
+}
+
 function initMap() {
   S.map = new maplibregl.Map({
     container: 'map',
-    style: 'https://tiles.openfreemap.org/styles/liberty',
+    style: basemapStyle(S.activeBasemap),
     center: [153.1, -27.6],
     zoom: 10,
     attributionControl: { compact: true }
@@ -172,23 +214,16 @@ function initMap() {
   S.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   S._mapLayersReady = false;
   S._mapReadyCallbacks = [];
-  S.map.on('load', () => {
-    initMapLayers();
-    S._mapLayersReady = true;
-    S._mapReadyCallbacks.forEach(fn => fn());
-    S._mapReadyCallbacks = [];
-  });
+  S.map.on('load', onMapStyleReady);
+  S.map.on('style.load', onMapStyleReady);
   // Watchdog: if the vector style hasn't loaded after 10s (tile server
   // unreachable / offline field use), swap to a minimal inline style so the
-  // map still fires 'load' — edges, coverage, and queued share-link renders
-  // then draw over a plain background instead of waiting forever. The old
-  // raster app kept working when its tiles failed; this preserves that.
+  // map still fires 'load' -- edges, coverage, and queued share-link renders
+  // then draw over a plain background instead of waiting forever.
   setTimeout(() => {
     if(!S._mapLayersReady){
-      dlog('Basemap style failed to load — falling back to a blank background', 'warn');
-      S.map.setStyle({ version: 8, sources: {}, layers: [
-        { id: 'fallback-bg', type: 'background', paint: { 'background-color': '#dfe5df' } }
-      ]});
+      dlog('Basemap style failed to load -- falling back to a blank background', 'warn');
+      switchBasemap('fallback', { silent: true });
     }
   }, 10000);
   S.map.on('contextmenu', e => {
@@ -205,22 +240,58 @@ function initMap() {
   setTimeout(() => S.map.resize(), 500);
 }
 
+function onMapStyleReady(){
+  if(!S.map || S.map.getSource('edges-src')) return;
+  initMapLayers();
+  S._mapLayersReady = true;
+  const callbacks = S._mapReadyCallbacks.splice(0);
+  callbacks.forEach(fn => fn());
+  restoreMapOverlays();
+}
+
+function switchBasemap(key, opts = {}){
+  if(!BASEMAPS[key] || !S.map) return;
+  if(S.activeBasemap === key && S._mapLayersReady) return;
+  S.activeBasemap = key;
+  S._mapLayersReady = false;
+  // diff:false forces a full style reload. The default diffing path applies
+  // incremental ops WITHOUT firing 'style.load' when it succeeds — so
+  // onMapStyleReady would never run, _mapLayersReady would stay false, and
+  // every whenMapLayersReady-queued map write would wait forever.
+  S.map.setStyle(basemapStyle(key), { diff: false });
+  // Keep the Settings dropdown in sync ('fallback' isn't an option there —
+  // assigning it would blank the select, so leave it showing the last choice).
+  const sel = document.getElementById('inpBasemap');
+  if(sel && [...sel.options].some(o => o.value === key)) sel.value = key;
+  if(!opts.silent) toast(`${BASEMAPS[key].label} basemap selected.`, 1200);
+}
+
 // Run fn now if the style + our custom sources/layers are ready, else queue it
-// for the map's 'load' event — addSource/addLayer/setData all require the
+// for the map's style load event -- addSource/addLayer/setData all require the
 // style to have finished loading first.
 function whenMapLayersReady(fn){
   if(S._mapLayersReady) fn(); else S._mapReadyCallbacks.push(fn);
 }
 
+function restoreMapOverlays(){
+  syncEdgesSource();
+  setCoverageOutlineFilter();
+  whenMapLayersReady(() => {
+    S.map.getSource('coverage-outline-src')?.setData({ type:'FeatureCollection', features: S._outlineFeatures });
+  });
+  S.nodes.filter(n => n.coverageRendered).forEach(n => renderCoveragePolygon(n));
+  refreshOverlap();
+}
+
 // Adds every custom source/layer this app draws on top of the base style, in
 // the order that reproduces the old Leaflet pane stack (coverage rasters
-// lowest — added per-node, on demand, in renderCoveragePolygon(), always
-// inserted just below 'overlap-outline' — then the overlap outline, then
-// edges, with node markers — plain DOM elements — implicitly topmost since
+// lowest -- added per-node, on demand, in renderCoveragePolygon(), always
+// inserted just below 'overlap-outline' -- then the overlap outline, then
+// edges, with node markers -- plain DOM elements -- implicitly topmost since
 // they sit above the WebGL canvas).
 function initMapLayers(){
   // Coverage wedge fills are rasterised per-node (see renderCoveragePolygon),
-  // but the thin "farthest reach" outline stays a real vector line layer —
+  // but the thin "farthest reach" outline stays a real vector line layer --
   // a single thin stroke per node doesn't have the overlapping-shapes
   // seam/flicker problem the raster switch solved, and a raster stroke gets
   // badly mangled (jagged staircase) when stretched over a large area.
@@ -235,9 +306,9 @@ function initMapLayers(){
 
   S.map.addSource('edges-src', { type:'geojson', data: emptyFC() });
   // line-dasharray cannot be a data-driven (per-feature) expression in
-  // MapLibre (addLayer silently rejects the whole layer if it is — this bit
+  // MapLibre (addLayer silently rejects the whole layer if it is -- this bit
   // us once already: edges rendered invisibly with no thrown JS error, just a
-  // console validation error) — so the dashed/solid distinction is split into
+  // console validation error) -- so the dashed/solid distinction is split into
   // two filtered layers over the same source instead of one data-driven one.
   const edgeLinePaint = {
     'line-color': ['match', ['get','status'],
@@ -254,7 +325,7 @@ function initMapLayers(){
     paint: edgeLinePaint });
   // The hidden filter matters even though the hit line is always invisible:
   // without it, a hidden edge stays fully interactive (pointer cursor,
-  // click-select, context menu) along its invisible geometry — the old
+  // click-select, context menu) along its invisible geometry -- the old
   // Leaflet code zeroed the hit-line width for hidden edges for this reason.
   S.map.addLayer({ id:'edges-hit', type:'line', source:'edges-src',
     filter: ['!', ['get','hidden']],
@@ -324,7 +395,6 @@ function makeMarker(node) {
 
   el.addEventListener('click', e => {
     e.stopPropagation();
-    S._clickConsumed = true;
     selectNodeView(node.id);
   });
   marker.on('drag', () => {
@@ -343,7 +413,6 @@ function makeMarker(node) {
   });
   el.addEventListener('contextmenu', e => {
     e.preventDefault(); e.stopPropagation();
-    S._clickConsumed = true;
     showNodeCtx(e.clientX, e.clientY, node);
   });
   return marker;
@@ -1343,6 +1412,8 @@ function showPathCtx(cx,cy,path){
 // looked up here by its 'id' property, replacing Leaflet's per-polyline
 // .on(event, fn) handlers attached in the old per-edge attachEdgeHandlers().
 function attachEdgeLayerHandlers(){
+  if(S._edgeLayerHandlersAttached) return;
+  S._edgeLayerHandlersAttached = true;
   const findEdge = e => S.edges.find(x => x.id === e.features[0].properties.id);
   S.map.on('mouseenter','edges-hit',()=>{ S.map.getCanvas().style.cursor='pointer'; });
   S.map.on('mouseleave','edges-hit',()=>{ S.map.getCanvas().style.cursor=''; hideProfileCursor(); });
@@ -2454,31 +2525,45 @@ function renderCoveragePolygon(node){
   // which tolerate that fine.
   syncNodeOutline(node, col);
 
+  const token = (node._covRenderToken || 0) + 1;
+  node._covRenderToken = token;
   const srcId = `cov-src-${node.id}`, layerId = `cov-layer-${node.id}`;
   node._covSrcId = srcId;
   node._covLayerId = layerId;
   node.coverageRendered = true;
   // addSource/addLayer throw (not silently no-op) if the style hasn't
   // finished loading yet — queue via whenMapLayersReady like syncEdgesSource.
-  // Uses an ImageSource (canvas.toDataURL PNG), not a CanvasSource: MapLibre's
-  // CanvasSource is built for opaque continuously-sampled content (e.g.
-  // video) and does not composite per-pixel alpha correctly — transparent
-  // canvas pixels rendered solid black instead of see-through. ImageSource is
-  // the georeferenced-overlay primitive and handles a transparent PNG
-  // (a one-shot snapshot, which is exactly what this is) correctly.
-  whenMapLayersReady(() => {
-    S.map.addSource(srcId, {
-      type: 'image', url: canvas.toDataURL(),
-      coordinates: [ [bbox.west,bbox.north], [bbox.east,bbox.north], [bbox.east,bbox.south], [bbox.west,bbox.south] ]
+  // Uses an ImageSource, not a CanvasSource: MapLibre's CanvasSource is
+  // built for opaque continuously-sampled content (e.g. video) and does not
+  // composite per-pixel alpha correctly — transparent canvas pixels rendered
+  // solid black instead of see-through. ImageSource is the georeferenced
+  // overlay primitive and handles a transparent PNG snapshot correctly.
+  // The PNG is delivered as a blob: object URL rather than a data: URL —
+  // toBlob() encodes off the main thread (toDataURL was a synchronous encode
+  // of up to ~67MB of pixels right as compute finished), and blob: keeps the
+  // CSP connect-src free of data: (MapLibre fetches the ImageSource URL).
+  canvas.toBlob(blob => {
+    if(!blob) return;
+    whenMapLayersReady(() => {
+      const current = S.nodes.find(n => n.id === node.id);
+      if(!current || current._covRenderToken !== token || current._covSrcId !== srcId || current._covLayerId !== layerId) return;
+      if(current._covImgUrl) URL.revokeObjectURL(current._covImgUrl);
+      current._covImgUrl = URL.createObjectURL(blob);
+      if(S.map.getLayer(layerId)) S.map.removeLayer(layerId);
+      if(S.map.getSource(srcId)) S.map.removeSource(srcId);
+      S.map.addSource(srcId, {
+        type: 'image', url: current._covImgUrl,
+        coordinates: [ [bbox.west,bbox.north], [bbox.east,bbox.north], [bbox.east,bbox.south], [bbox.west,bbox.south] ]
+      });
+      S.map.addLayer({ id: layerId, type:'raster', source: srcId,
+        layout: { visibility: current.coverageOn ? 'visible' : 'none' },
+        // 'nearest' keeps zoomed-in edges crisp/blocky rather than smeared —
+        // users often zoom in much closer than the coverage radius itself.
+        // beforeId 'coverage-outline' (the lowest custom layer) keeps the fill
+        // raster UNDER the farthest-reach outline, matching the original app
+        // where the outline drew on top of the fills.
+        paint: { 'raster-opacity': 1, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' } }, 'coverage-outline');
     });
-    S.map.addLayer({ id: layerId, type:'raster', source: srcId,
-      layout: { visibility: node.coverageOn ? 'visible' : 'none' },
-      // 'nearest' keeps zoomed-in edges crisp/blocky rather than smeared —
-      // users often zoom in much closer than the coverage radius itself.
-      // beforeId 'coverage-outline' (the lowest custom layer) keeps the fill
-      // raster UNDER the farthest-reach outline, matching the original app
-      // where the outline drew on top of the fills.
-      paint: { 'raster-opacity': 1, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' } }, 'coverage-outline');
   });
 }
 
@@ -2491,6 +2576,7 @@ function removeNodeCoverageLayer(nodeId){
   if(!node) return;
   if(node._covLayerId && S.map.getLayer(node._covLayerId)) S.map.removeLayer(node._covLayerId);
   if(node._covSrcId && S.map.getSource(node._covSrcId)) S.map.removeSource(node._covSrcId);
+  if(node._covImgUrl){ URL.revokeObjectURL(node._covImgUrl); node._covImgUrl = null; }
   node._covLayerId = null; node._covSrcId = null;
 }
 
@@ -4406,6 +4492,7 @@ function initStaticHandlers(){
     .forEach(id=>on(id,'change',onCoverageParamChanged));
   on('inpShowLinks','change',function(){ setDisplayVisibility('links', this.checked); });
   on('inpShowPaths','change',function(){ setDisplayVisibility('paths', this.checked); });
+  on('inpBasemap','change',function(){ switchBasemap(this.value); });
   on('btnCovAllOn','click',()=>setAllCoverage(true));
   on('btnCovAllOff','click',()=>setAllCoverage(false));
   on('btnCovComputeAll','click',computeAllCoverage);

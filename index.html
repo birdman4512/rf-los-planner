@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>ClearPath — RF Line of Sight Planner</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; connect-src 'self' data: https://tiles.openfreemap.org https://cloudflareinsights.com https://tracker.quirkyit.com.au; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self'; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://s3.amazonaws.com/elevation-tiles-prod/ https://services.terrascope.be https://titiler.terrascope.be https://tracker.quirkyit.com.au; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; connect-src 'self' blob: https://tiles.openfreemap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://cloudflareinsights.com https://tracker.quirkyit.com.au; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self'; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tiles.openfreemap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://s3.amazonaws.com/elevation-tiles-prod/ https://services.terrascope.be https://titiler.terrascope.be https://tracker.quirkyit.com.au; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
 <meta name="referrer" content="no-referrer">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <!-- PWA / iOS home-screen install. iOS uses the apple-* tags + PNG touch icon
@@ -523,6 +523,14 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <label class="display-toggle"><input type="checkbox" id="inpShowLinks" checked> SHOW LINKS</label>
         <label class="display-toggle"><input type="checkbox" id="inpShowPaths" checked> SHOW PATHS</label>
       </div>
+      <div class="field-row" style="margin-top:8px">
+        <label>Basemap</label>
+        <select id="inpBasemap" title="Map background. OpenFreeMap is the crisp vector default; OpenStreetMap and Esri Topo are raster alternatives.">
+          <option value="openfreemap">OpenFreeMap</option>
+          <option value="carto">OpenStreetMap</option>
+          <option value="esri">Esri Topo</option>
+        </select>
+      </div>
     </div>
     </div><!-- /rf panel -->
 
@@ -622,7 +630,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260706-08">BUILD 20260706-08</span>
+      <span class="hdr-tag" title="Build 20260706-09">BUILD 20260706-09</span>
     </div>
   </header>
 
@@ -753,7 +761,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="js/share-codec.js?v=20260706-08"></script>
-<script src="js/app.js?v=20260706-08"></script>
+<script src="js/share-codec.js?v=20260706-09"></script>
+<script src="js/app.js?v=20260706-09"></script>
 </body>
 </html>
