@@ -32,7 +32,8 @@ const S = {
   _dragId: null,
   showLinks: true,
   showPaths: true,
-  _clickConsumed: false
+  _clickConsumed: false,
+  _outlineFeatures: [] // GeoJSON LineString Feature[] backing the shared coverage-outline-src, one per node
 };
 
 const COLORS = ['#00c8f0','#f39c12','#2ecc71','#e74c3c','#9b59b6','#1abc9c','#e67e22','#3498db','#f1c40f','#e91e63'];
@@ -205,6 +206,16 @@ function whenMapLayersReady(fn){
 // edges, with node markers — plain DOM elements — implicitly topmost since
 // they sit above the WebGL canvas).
 function initMapLayers(){
+  // Coverage wedge fills are rasterised per-node (see renderCoveragePolygon),
+  // but the thin "farthest reach" outline stays a real vector line layer —
+  // a single thin stroke per node doesn't have the overlapping-shapes
+  // seam/flicker problem the raster switch solved, and a raster stroke gets
+  // badly mangled (jagged staircase) when stretched over a large area.
+  S.map.addSource('coverage-outline-src', { type:'geojson', data: emptyFC() });
+  S.map.addLayer({ id:'coverage-outline', type:'line', source:'coverage-outline-src',
+    filter: ['==', ['get','nodeId'], '__none__'],
+    paint: { 'line-color': ['get','color'], 'line-width':1.5, 'line-opacity':0.85 } });
+
   S.map.addSource('overlap-src', { type:'geojson', data: emptyFC() });
   S.map.addLayer({ id:'overlap-outline', type:'line', source:'overlap-src',
     paint: { 'line-color':'#ff2fd0', 'line-width':2, 'line-opacity':0.95 } });
@@ -357,6 +368,7 @@ function removeNode(id) {
   const idx = S.nodes.findIndex(n => n.id === id);
   if (idx < 0) return;
   removeNodeCoverageLayer(id);
+  removeNodeOutline(id);
   S.nodes[idx].marker.remove();
   S.nodes.splice(idx, 1);
   // Remove all edges involving this node
@@ -382,7 +394,7 @@ function removeNode(id) {
 }
 
 function clearAll() {
-  S.nodes.forEach(n => { if (n.marker) n.marker.remove(); removeNodeCoverageLayer(n.id); });
+  S.nodes.forEach(n => { if (n.marker) n.marker.remove(); removeNodeCoverageLayer(n.id); removeNodeOutline(n.id); });
   S.nodes = []; S.edges = []; S.paths = [];
   syncEdgesSource();
   S.activeView = null;
@@ -2116,6 +2128,7 @@ function setNodeCoverageOn(id, on){
   const node = S.nodes.find(n => n.id === id); if(!node) return;
   node.coverageOn = on;
   if(node._covLayerId && S.map.getLayer(node._covLayerId)) S.map.setLayoutProperty(node._covLayerId, 'visibility', on ? 'visible' : 'none');
+  setCoverageOutlineFilter();
   updateCovCount();
   refreshOverlap();
 }
@@ -2126,6 +2139,7 @@ function setAllCoverage(on){
     if(n._covLayerId && S.map.getLayer(n._covLayerId)) S.map.setLayoutProperty(n._covLayerId, 'visibility', on ? 'visible' : 'none');
     const cb = document.getElementById(`cov_${n.id}`); if(cb) cb.checked = on;
   });
+  setCoverageOutlineFilter();
   updateCovCount();
   refreshOverlap();
 }
@@ -2401,19 +2415,12 @@ function renderCoveragePolygon(node){
     }
     flush(n-1);
   }
-  // Outline the coverage edge — the farthest covered point per ray.
-  if(node.coverageRays?.length){
-    ctx.globalAlpha = 0.85;
-    ctx.strokeStyle = col;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    node.coverageRays.forEach((ray,i) => {
-      const [x,y] = toPx(ray.latlng[0], ray.latlng[1]);
-      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-    });
-    ctx.closePath();
-    ctx.stroke();
-  }
+  // The farthest-reach outline is drawn as a real vector line layer (see
+  // below), not baked into this raster — a thin 1-2px stroke gets badly
+  // mangled (jagged staircase) when the canvas is stretched/nearest-neighbour
+  // resampled over a large geographic area, unlike the broad fill wedges
+  // which tolerate that fine.
+  syncNodeOutline(node, col);
 
   const srcId = `cov-src-${node.id}`, layerId = `cov-layer-${node.id}`;
   node._covCanvas = canvas;
@@ -2451,6 +2458,41 @@ function removeNodeCoverageLayer(nodeId){
   if(node._covLayerId && S.map.getLayer(node._covLayerId)) S.map.removeLayer(node._covLayerId);
   if(node._covSrcId && S.map.getSource(node._covSrcId)) S.map.removeSource(node._covSrcId);
   node._covLayerId = null; node._covSrcId = null; node._covCanvas = null;
+}
+
+// Rebuilds this node's farthest-reach outline in the shared vector line
+// source (coverage-outline-src) — kept as real vector geometry, not part of
+// the per-node raster, since a thin stroke doesn't tolerate being stretched
+// over a large area the way the broad fill wedges do.
+function syncNodeOutline(node, col){
+  S._outlineFeatures = S._outlineFeatures.filter(f => f.properties.nodeId !== node.id);
+  if(node.coverageRays?.length){
+    const coords = node.coverageRays.map(r => [r.latlng[1], r.latlng[0]]); // [lng,lat]
+    coords.push(coords[0]);
+    S._outlineFeatures.push({ type:'Feature', properties:{ nodeId: node.id, color: col },
+      geometry:{ type:'LineString', coordinates: coords } });
+  }
+  whenMapLayersReady(() => {
+    S.map.getSource('coverage-outline-src')?.setData({ type:'FeatureCollection', features: S._outlineFeatures });
+  });
+}
+
+function removeNodeOutline(nodeId){
+  const before = S._outlineFeatures.length;
+  S._outlineFeatures = S._outlineFeatures.filter(f => f.properties.nodeId !== nodeId);
+  if(S._outlineFeatures.length !== before){
+    whenMapLayersReady(() => {
+      S.map.getSource('coverage-outline-src')?.setData({ type:'FeatureCollection', features: S._outlineFeatures });
+    });
+  }
+}
+
+function setCoverageOutlineFilter(){
+  const ids = S.nodes.filter(n => n.coverageOn).map(n => n.id);
+  const filter = ids.length ? ['in', ['get','nodeId'], ['literal', ids]] : ['==', ['get','nodeId'], '__none__'];
+  whenMapLayersReady(() => {
+    if(S.map.getLayer('coverage-outline')) S.map.setFilter('coverage-outline', filter);
+  });
 }
 
 // ── Coverage overlap highlight ──────────────────────────────
