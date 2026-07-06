@@ -42,6 +42,13 @@ test.describe('RF LOS Planner — smoke', () => {
     const pageErrors = trackErrors(page);
     await page.goto('/index.html', { waitUntil: 'load' });
 
+    // The first-run help modal opens on a ~600ms timer and would intercept
+    // the '+ NEW PATH' click below whenever this test crosses that timer
+    // (a machine-load-dependent flake). Wait for it and dismiss it instead
+    // of racing it.
+    await page.locator('#helpModal.open').waitFor({ timeout: 5000 });
+    await page.keyboard.press('Escape');
+
     // Two linked nodes -> one auto-created standalone 2-node path.
     const counts = await page.evaluate(() => {
       const a = addNode(-37.81, 144.96);

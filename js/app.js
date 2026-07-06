@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 // ═══════════════════════════════════════════════════════════
 const S = {
   map: null,
-  nodes: [],       // {id, name, lat, lng, antH, elev, marker, rfOverride, txDbm, gainDbi, rxDbm, coverageOn, coverageRendered, coverageDirty, coverageComputed, _covCanvas, _covSrcId, _covLayerId}
+  nodes: [],       // {id, name, lat, lng, antH, elev, marker, rfOverride, txDbm, gainDbi, rxDbm, coverageOn, coverageRendered, coverageDirty, coverageComputed, _covSrcId, _covLayerId}
   edges: [],       // {id, aId, bId, hidden, result, profile}  — geometry lives in the shared edges-src GeoJSON source, not on the edge object
   paths: [],       // {id, name, hidden, nodeIds[]}  — user-defined chains for chart
   nextId: 1,
@@ -178,6 +178,19 @@ function initMap() {
     S._mapReadyCallbacks.forEach(fn => fn());
     S._mapReadyCallbacks = [];
   });
+  // Watchdog: if the vector style hasn't loaded after 10s (tile server
+  // unreachable / offline field use), swap to a minimal inline style so the
+  // map still fires 'load' — edges, coverage, and queued share-link renders
+  // then draw over a plain background instead of waiting forever. The old
+  // raster app kept working when its tiles failed; this preserves that.
+  setTimeout(() => {
+    if(!S._mapLayersReady){
+      dlog('Basemap style failed to load — falling back to a blank background', 'warn');
+      S.map.setStyle({ version: 8, sources: {}, layers: [
+        { id: 'fallback-bg', type: 'background', paint: { 'background-color': '#dfe5df' } }
+      ]});
+    }
+  }, 10000);
   S.map.on('contextmenu', e => {
     e.preventDefault();
     showMapCtx(e.originalEvent.clientX, e.originalEvent.clientY, { lat: e.lngLat.lat, lng: e.lngLat.lng });
@@ -239,7 +252,12 @@ function initMapLayers(){
   S.map.addLayer({ id:'edges-line-analysed', type:'line', source:'edges-src',
     filter: ['get','analysed'],
     paint: edgeLinePaint });
+  // The hidden filter matters even though the hit line is always invisible:
+  // without it, a hidden edge stays fully interactive (pointer cursor,
+  // click-select, context menu) along its invisible geometry — the old
+  // Leaflet code zeroed the hit-line width for hidden edges for this reason.
   S.map.addLayer({ id:'edges-hit', type:'line', source:'edges-src',
+    filter: ['!', ['get','hidden']],
     paint: { 'line-color':'#ffffff', 'line-width':24, 'line-opacity':0 } });
 
   S.map.addSource('location-pulse-src', { type:'geojson', data: emptyFC() });
@@ -383,9 +401,9 @@ function removeNode(id) {
   removeNodeOutline(id);
   S.nodes[idx].marker.remove();
   S.nodes.splice(idx, 1);
-  // Remove all edges involving this node
+  // Remove all edges involving this node. No direct syncEdgesSource() here —
+  // highlightActiveMapView() below rebuilds the edges source anyway.
   S.edges = S.edges.filter(e => e.aId !== id && e.bId !== id);
-  syncEdgesSource();
   // Remove this node from all paths, delete paths that become too short
   S.paths.forEach(p => { p.nodeIds = p.nodeIds.filter(nid => nid !== id); });
   S.paths = S.paths.filter(p => p.nodeIds.length >= 2);
@@ -449,8 +467,9 @@ function addEdge(aId, bId) {
 function removeEdge(id) {
   const idx = S.edges.findIndex(e => e.id === id);
   if (idx < 0) return;
+  // No direct syncEdgesSource() here — highlightActiveMapView() below
+  // rebuilds the edges source anyway.
   S.edges.splice(idx, 1);
-  syncEdgesSource();
   // Drop any path that relied on the deleted link: a path is only valid if every
   // consecutive node pair still has an edge connecting them.
   S.paths = S.paths.filter(p => {
@@ -2103,17 +2122,18 @@ function toggleNodeRfOverride(id){
 function invalidateNodeCoverage(node, redraw){
   node.coverageDirty = true;
   if(redraw && node.coverageRendered && node.coverageOn){
-    setNodeCoverageDirtyFlag(node.id, true);
+    dimNodeCoverage(node.id);
   }
   updateCovBtn(node);
 }
 
-// Dims this node's rendered coverage raster while a recompute is in
-// progress, via the canvas layer's own raster-opacity paint property.
-function setNodeCoverageDirtyFlag(nodeId, dirty){
+// Dims this node's rendered coverage raster to signal "stale, recompute
+// pending". Deliberately one-way: no un-dim call exists because a recompute
+// always replaces the whole layer (renderCoveragePolygon) at full opacity.
+function dimNodeCoverage(nodeId){
   const node = S.nodes.find(n => n.id === nodeId);
   if(node?._covLayerId && S.map.getLayer(node._covLayerId)){
-    S.map.setPaintProperty(node._covLayerId, 'raster-opacity', dirty ? 0.3 : 1);
+    S.map.setPaintProperty(node._covLayerId, 'raster-opacity', 0.3);
   }
 }
 
@@ -2435,7 +2455,6 @@ function renderCoveragePolygon(node){
   syncNodeOutline(node, col);
 
   const srcId = `cov-src-${node.id}`, layerId = `cov-layer-${node.id}`;
-  node._covCanvas = canvas;
   node._covSrcId = srcId;
   node._covLayerId = layerId;
   node.coverageRendered = true;
@@ -2456,7 +2475,10 @@ function renderCoveragePolygon(node){
       layout: { visibility: node.coverageOn ? 'visible' : 'none' },
       // 'nearest' keeps zoomed-in edges crisp/blocky rather than smeared —
       // users often zoom in much closer than the coverage radius itself.
-      paint: { 'raster-opacity': 1, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' } }, 'overlap-outline');
+      // beforeId 'coverage-outline' (the lowest custom layer) keeps the fill
+      // raster UNDER the farthest-reach outline, matching the original app
+      // where the outline drew on top of the fills.
+      paint: { 'raster-opacity': 1, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' } }, 'coverage-outline');
   });
 }
 
@@ -2469,7 +2491,7 @@ function removeNodeCoverageLayer(nodeId){
   if(!node) return;
   if(node._covLayerId && S.map.getLayer(node._covLayerId)) S.map.removeLayer(node._covLayerId);
   if(node._covSrcId && S.map.getSource(node._covSrcId)) S.map.removeSource(node._covSrcId);
-  node._covLayerId = null; node._covSrcId = null; node._covCanvas = null;
+  node._covLayerId = null; node._covSrcId = null;
 }
 
 // Rebuilds this node's farthest-reach outline in the shared vector line
@@ -4456,11 +4478,15 @@ window.addEventListener('load',()=>{
   setTimeout(()=>S.map.resize(),200);
   setTimeout(()=>{
     S.map.resize();
-    // Edge/coverage restore needs the style + our custom sources/layers loaded
-    // first (addSource/setData throw before that) — node placement itself
-    // doesn't, since markers are plain DOM overlays, but loadFromHash() also
-    // restores edges, so gate the whole call.
-    whenMapLayersReady(loadFromHash);
+    // Run loadFromHash directly, NOT gated on the map style loading: every
+    // map write inside it is already individually load-safe (markers are DOM
+    // overlays that work pre-load, syncEdgesSource self-queues via
+    // whenMapLayersReady, fitBounds is a camera op that works pre-load).
+    // Gating the whole call would mean (a) a tile-server outage silently
+    // kills share-link restore entirely, and (b) S._ready=true below opens a
+    // window where a user edit's syncShareUrl overwrites the pending shared
+    // hash before it is ever read.
+    loadFromHash();
     syncPresetFromFreq();refreshSettingsSummary();maybeShowHelp();S._ready=true;
   },600);
 });
