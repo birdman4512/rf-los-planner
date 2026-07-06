@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>ClearPath — RF Line of Sight Planner</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com https://tracker.quirkyit.com.au; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self'; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://s3.amazonaws.com/elevation-tiles-prod/ https://services.terrascope.be https://titiler.terrascope.be https://tracker.quirkyit.com.au; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; connect-src 'self' blob: https://tiles.openfreemap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://cloudflareinsights.com https://tracker.quirkyit.com.au; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self'; img-src 'self' data: blob: https://cdnjs.cloudflare.com https://tiles.openfreemap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://s3.amazonaws.com/elevation-tiles-prod/ https://services.terrascope.be https://titiler.terrascope.be https://tracker.quirkyit.com.au; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
 <meta name="referrer" content="no-referrer">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <!-- PWA / iOS home-screen install. iOS uses the apple-* tags + PNG touch icon
@@ -19,8 +19,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="ClearPath">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/5.7.3/maplibre-gl.min.css" integrity="sha512-/UDhp6sLyQgK2cEDHUYEyJFXI7+WgJ+nuxTqETJkT8XlfLiMSt2xQblBVnCjE5rGJMBr5sOWaEhflmtBL1Psww==" crossorigin="anonymous"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/5.7.3/maplibre-gl.min.js" integrity="sha512-Gx0xDElSrwjxjT9mjMg+OsoA0ekI8IkwuPurccWk5afkFBzXQHE0eQsQ7syopu9MJ0HD1EYGmVXjY8SPZt5FAg==" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js" integrity="sha512-qtX0GLM3qX8rxJN1gyDfcnMFFrKvixfoEOwbBib9VafR5vbChV5LeE5wSI/x+IlCkTY5ZFddFDCCfaVJJNnuKQ==" crossorigin="anonymous"></script>
 <style>
 /* Self-hosted fonts (latin subsets) — no Google Fonts dependency, font-src 'self'. */
@@ -291,12 +291,12 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 #mapHint{position:absolute;top:8px;left:50%;transform:translateX(-50%);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;background:rgba(11,15,23,.85);border:1px solid var(--border);color:var(--muted);padding:4px 12px;z-index:500;pointer-events:none}
 
 /* ── SHARE MODAL ── */
-.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;display:none;align-items:center;justify-content:center}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;display:none;align-items:center;justify-content:center;padding:24px 0}
 .modal-bg.open{display:flex}
-.modal{background:var(--panel);border:1px solid var(--border);padding:20px;min-width:420px;max-width:90vw}
+.modal{background:var(--panel);border:1px solid var(--border);padding:20px;min-width:420px;max-width:90vw;max-height:100%;overflow-y:auto}
 .modal h2{font-size:14px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#fff;margin-bottom:12px}
 .modal-url{font-family:'Share Tech Mono',monospace;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--accent);padding:8px;word-break:break-all;margin-bottom:10px;line-height:1.5}
-.modal-actions{display:flex;gap:8px;justify-content:flex-end}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;position:sticky;bottom:-20px;background:var(--panel);padding-top:10px;margin-top:16px!important}
 .modal-hint{font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.4}
 .modal-input{width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px;margin-bottom:10px;resize:vertical;word-break:break-all}
 
@@ -311,8 +311,24 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .ctx-sep{height:1px;background:#1e2d42;margin:3px 0}
 .ctx-check{margin-left:auto;color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:10px}
 
-/* leaflet marker */
-.lf-marker{background:none!important;border:none!important}
+/* node marker icon (MapLibre Marker custom element). MapLibre applies
+   position/transform to this element directly but does not size it (unlike
+   Leaflet's divIcon, which set explicit iconSize dimensions) — without an
+   explicit width/height a bare block-level div defaults to filling its
+   container's width, which silently breaks click/hit-testing on the icon.
+   Do NOT set position here — MapLibre relies on this exact element being
+   position:absolute (from its own maplibregl-marker class) for its
+   transform-based placement; overriding it to position:relative keeps the
+   element in normal document flow, so each new marker silently stacks one
+   marker-height below the last. The tooltip's positioning context lives on
+   the nested .node-marker-inner wrapper instead. */
+.node-marker-icon{width:28px;height:34px;background:none!important;border:none!important}
+.node-marker-inner{position:relative;width:100%;height:100%}
+.node-tooltip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:6px;
+  padding:3px 8px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .1s;
+  background:#111824;border:1px solid #1e2d42;border-radius:4px;color:#c8daea;
+  font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:600}
+.node-marker-icon:hover .node-tooltip{opacity:1}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ── COVERAGE ── */
@@ -507,6 +523,15 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <label class="display-toggle"><input type="checkbox" id="inpShowLinks" checked> SHOW LINKS</label>
         <label class="display-toggle"><input type="checkbox" id="inpShowPaths" checked> SHOW PATHS</label>
       </div>
+      <div class="field-row" style="margin-top:8px">
+        <label>Basemap</label>
+        <select id="inpBasemap" title="Map background. The OpenFreeMap styles are crisp vector maps (Bright has bolder, easier-to-read roads); OpenStreetMap and Esri Topo are raster alternatives.">
+          <option value="openfreemap">OpenFreeMap Liberty</option>
+          <option value="ofmbright">OpenFreeMap Bright</option>
+          <option value="carto">OpenStreetMap</option>
+          <option value="esri">Esri Topo</option>
+        </select>
+      </div>
     </div>
     </div><!-- /rf panel -->
 
@@ -606,7 +631,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260705-01">BUILD 20260705-01</span>
+      <span class="hdr-tag" title="Build 20260706-11">BUILD 20260706-11</span>
     </div>
   </header>
 
@@ -737,7 +762,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="js/share-codec.js?v=20260705-01"></script>
-<script src="js/app.js?v=20260705-01"></script>
+<script src="js/share-codec.js?v=20260706-11"></script>
+<script src="js/app.js?v=20260706-11"></script>
 </body>
 </html>

@@ -14,8 +14,8 @@ if (window.top !== window.self) {
 // ═══════════════════════════════════════════════════════════
 const S = {
   map: null,
-  nodes: [],       // {id, name, lat, lng, antH, elev, marker, rfOverride, txDbm, gainDbi, rxDbm, coverageOn, coverageLayer, coverageDirty, coverageComputed}
-  edges: [],       // {id, aId, bId, hidden, line, result, profile}
+  nodes: [],       // {id, name, lat, lng, antH, elev, marker, rfOverride, txDbm, gainDbi, rxDbm, coverageOn, coverageRendered, coverageDirty, coverageComputed, _covSrcId, _covLayerId}
+  edges: [],       // {id, aId, bId, hidden, result, profile}  — geometry lives in the shared edges-src GeoJSON source, not on the edge object
   paths: [],       // {id, name, hidden, nodeIds[]}  — user-defined chains for chart
   nextId: 1,
   activeView: null, // {type:'edge'|'path', id}
@@ -31,7 +31,11 @@ const S = {
   profileCursorHideFrame: null,
   _dragId: null,
   showLinks: true,
-  showPaths: true
+  showPaths: true,
+  activeBasemap: 'openfreemap',
+  _clickConsumed: false,
+  _edgeLayerHandlersAttached: false,
+  _outlineFeatures: [] // GeoJSON LineString Feature[] backing the shared coverage-outline-src, one per node
 };
 
 const COLORS = ['#00c8f0','#f39c12','#2ecc71','#e74c3c','#9b59b6','#1abc9c','#e67e22','#3498db','#f1c40f','#e91e63'];
@@ -152,47 +156,201 @@ function cleanName(name, fallback = 'Site') {
   const s = String(name ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
   return (s || fallback).slice(0, LIMITS.nameChars);
 }
-function textNode(value) {
-  const span = document.createElement('span');
-  span.textContent = String(value ?? '');
-  return span;
-}
-
-function removeEdgeLayers(edge){
-  if(edge.line) S.map.removeLayer(edge.line);
-  if(edge.hitLine) S.map.removeLayer(edge.hitLine);
-}
-
 // ═══════════════════════════════════════════════════════════
 //  MAP INIT
+//  MapLibre GL JS + OpenFreeMap (Liberty vector style). Leaflet's panes
+//  (z-ordered DOM layers) have no MapLibre equivalent — layers instead
+//  paint in add-order, controlled via initMapLayers()'s call order plus
+//  map.moveLayer()/addLayer(def, beforeId) where a specific position matters.
 // ═══════════════════════════════════════════════════════════
+const BASEMAPS = {
+  openfreemap: { label: 'OpenFreeMap Liberty', style: 'https://tiles.openfreemap.org/styles/liberty' },
+  // Bright renders roads with much stronger contrast/weight than Liberty —
+  // the road-legibility option while staying on OpenFreeMap's vector tiles.
+  ofmbright: { label: 'OpenFreeMap Bright', style: 'https://tiles.openfreemap.org/styles/bright' },
+  carto: {
+    label: 'OpenStreetMap',
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+    tiles: ['https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', 'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', 'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', 'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png']
+  },
+  esri: {
+    label: 'Esri Topo',
+    attribution: '&copy; Esri',
+    tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}']
+  },
+  fallback: {
+    label: 'Blank',
+    style: { version: 8, sources: {}, layers: [
+      { id: 'fallback-bg', type: 'background', paint: { 'background-color': '#dfe5df' } }
+    ]}
+  }
+};
+
+function rasterBasemapStyle(key){
+  const bm = BASEMAPS[key];
+  return {
+    version: 8,
+    sources: {
+      [`${key}-tiles`]: { type: 'raster', tiles: bm.tiles, tileSize: 256, attribution: bm.attribution, maxzoom: 19 }
+    },
+    layers: [
+      { id: `${key}-bg`, type: 'background', paint: { 'background-color': '#dfe5df' } },
+      { id: `${key}-raster`, type: 'raster', source: `${key}-tiles` }
+    ]
+  };
+}
+
+function basemapStyle(key){
+  const bm = BASEMAPS[key] || BASEMAPS.openfreemap;
+  if(bm.style) return bm.style;
+  return rasterBasemapStyle(key);
+}
+
 function initMap() {
-  S.map = L.map('map', { center: [-27.6, 153.1], zoom: 10, zoomControl: true });
-  S.map.createPane('profileHoverPane');
-  S.map.getPane('profileHoverPane').style.zIndex=750;
-  S.map.getPane('profileHoverPane').style.pointerEvents='none';
-  // Coverage polygons render on a dedicated CANVAS renderer in a low pane (below
-  // the overlay paths/markers). Canvas avoids the SVG renderer repainting every
-  // polygon on each pan/zoom frame, which made coverage flicker.
-  S.map.createPane('coveragePane');
-  S.map.getPane('coveragePane').style.zIndex=350;
-  S._covRenderer = L.canvas({ pane:'coveragePane', padding:0.5 });
-  const osm = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 19, crossOrigin: true, subdomains: 'abcd'
-  }).addTo(S.map);
-  const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
-    attribution: '© Esri', maxZoom: 19
+  S.map = new maplibregl.Map({
+    container: 'map',
+    style: basemapStyle(S.activeBasemap),
+    center: [153.1, -27.6],
+    zoom: 10,
+    attributionControl: { compact: true }
   });
-  L.control.layers({'OpenStreetMap': osm, 'Esri Topo': esri}, {}, {position:'topright'}).addTo(S.map);
-  S.map.on('contextmenu', e => { L.DomEvent.preventDefault(e.originalEvent); showMapCtx(e.originalEvent.clientX, e.originalEvent.clientY, e.latlng); });
+  S.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+  S._mapLayersReady = false;
+  S._mapReadyCallbacks = [];
+  S.map.on('load', onMapStyleReady);
+  S.map.on('style.load', onMapStyleReady);
+  // Watchdog: if the vector style hasn't loaded after 10s (tile server
+  // unreachable / offline field use), swap to a minimal inline style so the
+  // map still fires 'load' -- edges, coverage, and queued share-link renders
+  // then draw over a plain background instead of waiting forever.
+  setTimeout(() => {
+    if(!S._mapLayersReady){
+      dlog('Basemap style failed to load -- falling back to a blank background', 'warn');
+      switchBasemap('fallback', { silent: true });
+    }
+  }, 10000);
+  S.map.on('contextmenu', e => {
+    e.preventDefault();
+    showMapCtx(e.originalEvent.clientX, e.originalEvent.clientY, { lat: e.lngLat.lat, lng: e.lngLat.lng });
+  });
   S.map.on('mousedown', closeCtx);
   S.map.on('click', () => {
+    if(S._clickConsumed){ S._clickConsumed = false; return; }
     closeCtx();
     if(S.activeView) clearActiveView();
   });
-  setTimeout(() => S.map.invalidateSize(), 150);
-  setTimeout(() => S.map.invalidateSize(), 500);
+  // Windows/Chrome can fail to render Chrome's bundled grab/grabbing cursors
+  // over a continuously repainting WebGL canvas — the pointer visibly
+  // vanishes while panning. (Leaflet never hit this: it panned a static DOM
+  // layer, no per-frame GL repaint.) Pin a native OS cursor ('move') on the
+  // canvas for the duration of the drag instead.
+  S.map.on('dragstart', () => { S._dragging = true; S.map.getCanvas().style.cursor = 'move'; });
+  S.map.on('dragend', () => { S._dragging = false; S.map.getCanvas().style.cursor = ''; });
+  setTimeout(() => S.map.resize(), 150);
+  setTimeout(() => S.map.resize(), 500);
 }
+
+function onMapStyleReady(){
+  if(!S.map || S.map.getSource('edges-src')) return;
+  initMapLayers();
+  S._mapLayersReady = true;
+  const callbacks = S._mapReadyCallbacks.splice(0);
+  callbacks.forEach(fn => fn());
+  restoreMapOverlays();
+}
+
+function switchBasemap(key, opts = {}){
+  if(!BASEMAPS[key] || !S.map) return;
+  if(S.activeBasemap === key && S._mapLayersReady) return;
+  S.activeBasemap = key;
+  S._mapLayersReady = false;
+  // diff:false forces a full style reload. The default diffing path applies
+  // incremental ops WITHOUT firing 'style.load' when it succeeds — so
+  // onMapStyleReady would never run, _mapLayersReady would stay false, and
+  // every whenMapLayersReady-queued map write would wait forever.
+  S.map.setStyle(basemapStyle(key), { diff: false });
+  // Keep the Settings dropdown in sync ('fallback' isn't an option there —
+  // assigning it would blank the select, so leave it showing the last choice).
+  const sel = document.getElementById('inpBasemap');
+  if(sel && [...sel.options].some(o => o.value === key)) sel.value = key;
+  if(!opts.silent) toast(`${BASEMAPS[key].label} basemap selected.`, 1200);
+}
+
+// Run fn now if the style + our custom sources/layers are ready, else queue it
+// for the map's style load event -- addSource/addLayer/setData all require the
+// style to have finished loading first.
+function whenMapLayersReady(fn){
+  if(S._mapLayersReady) fn(); else S._mapReadyCallbacks.push(fn);
+}
+
+function restoreMapOverlays(){
+  syncEdgesSource();
+  setCoverageOutlineFilter();
+  whenMapLayersReady(() => {
+    S.map.getSource('coverage-outline-src')?.setData({ type:'FeatureCollection', features: S._outlineFeatures });
+  });
+  S.nodes.filter(n => n.coverageRendered).forEach(n => renderCoveragePolygon(n));
+  refreshOverlap();
+}
+
+// Adds every custom source/layer this app draws on top of the base style, in
+// the order that reproduces the old Leaflet pane stack (coverage rasters
+// lowest -- added per-node, on demand, in renderCoveragePolygon(), always
+// inserted just below 'overlap-outline' -- then the overlap outline, then
+// edges, with node markers -- plain DOM elements -- implicitly topmost since
+// they sit above the WebGL canvas).
+function initMapLayers(){
+  // Coverage wedge fills are rasterised per-node (see renderCoveragePolygon),
+  // but the thin "farthest reach" outline stays a real vector line layer --
+  // a single thin stroke per node doesn't have the overlapping-shapes
+  // seam/flicker problem the raster switch solved, and a raster stroke gets
+  // badly mangled (jagged staircase) when stretched over a large area.
+  S.map.addSource('coverage-outline-src', { type:'geojson', data: emptyFC() });
+  S.map.addLayer({ id:'coverage-outline', type:'line', source:'coverage-outline-src',
+    filter: ['==', ['get','nodeId'], '__none__'],
+    paint: { 'line-color': ['get','color'], 'line-width':1.5, 'line-opacity':0.85 } });
+
+  S.map.addSource('overlap-src', { type:'geojson', data: emptyFC() });
+  S.map.addLayer({ id:'overlap-outline', type:'line', source:'overlap-src',
+    paint: { 'line-color':'#ff2fd0', 'line-width':2, 'line-opacity':0.95 } });
+
+  S.map.addSource('edges-src', { type:'geojson', data: emptyFC() });
+  // line-dasharray cannot be a data-driven (per-feature) expression in
+  // MapLibre (addLayer silently rejects the whole layer if it is -- this bit
+  // us once already: edges rendered invisibly with no thrown JS error, just a
+  // console validation error) -- so the dashed/solid distinction is split into
+  // two filtered layers over the same source instead of one data-driven one.
+  const edgeLinePaint = {
+    'line-color': ['match', ['get','status'],
+      'clear','#2ecc71', 'marginal','#f39c12', 'blocked','#e74c3c', 'error','#e74c3c',
+      /* unanalysed */ '#4a6278'],
+    'line-width': ['case', ['get','selected'], 6, ['get','analysed'], 3, 2],
+    'line-opacity': ['case', ['get','hidden'], 0, ['get','analysed'], 0.9, 0.7]
+  };
+  S.map.addLayer({ id:'edges-line-unanalysed', type:'line', source:'edges-src',
+    filter: ['!', ['get','analysed']],
+    paint: { ...edgeLinePaint, 'line-dasharray': [5,4] } });
+  S.map.addLayer({ id:'edges-line-analysed', type:'line', source:'edges-src',
+    filter: ['get','analysed'],
+    paint: edgeLinePaint });
+  // The hidden filter matters even though the hit line is always invisible:
+  // without it, a hidden edge stays fully interactive (pointer cursor,
+  // click-select, context menu) along its invisible geometry -- the old
+  // Leaflet code zeroed the hit-line width for hidden edges for this reason.
+  S.map.addLayer({ id:'edges-hit', type:'line', source:'edges-src',
+    filter: ['!', ['get','hidden']],
+    paint: { 'line-color':'#ffffff', 'line-width':24, 'line-opacity':0 } });
+
+  S.map.addSource('location-pulse-src', { type:'geojson', data: emptyFC() });
+  S.map.addLayer({ id:'location-pulse', type:'circle', source:'location-pulse-src',
+    layout: { visibility:'none' },
+    paint: { 'circle-radius':16, 'circle-color': accentColor(), 'circle-opacity':0.2,
+      'circle-stroke-color': accentColor(), 'circle-stroke-width':2, 'circle-stroke-opacity':1 } });
+
+  attachEdgeLayerHandlers();
+}
+
+function emptyFC(){ return { type:'FeatureCollection', features:[] }; }
 
 // ═══════════════════════════════════════════════════════════
 //  NODES
@@ -206,7 +364,7 @@ function addNode(lat, lng) {
   const node = { id: S.nextId++, name: defaultNodeName(idx), lat, lng, antH: 6, elev: null, marker: null,
     color: null,
     rfOverride: false, txDbm: null, gainDbi: null, rxDbm: null,
-    coverageOn: false, coverageLayer: null, coverageDirty: true, coverageComputed: false };
+    coverageOn: false, coverageRendered: false, coverageDirty: true, coverageComputed: false };
   S.nodes.push(node);
   node.marker = makeMarker(node);
   renderNodeList();
@@ -217,15 +375,41 @@ function addNode(lat, lng) {
 }
 
 function makeMarker(node) {
-  const idx = S.nodes.indexOf(node);
-  const marker = L.marker([node.lat, node.lng], { draggable: true, icon: buildIcon(node) }).addTo(S.map);
-  marker.on('click', e => {
-    L.DomEvent.stopPropagation(e.originalEvent);
+  const el = document.createElement('div');
+  el.className = 'node-marker-icon';
+  // Nested wrapper carries position:relative for the tooltip's positioning
+  // context — must NOT be on `el` itself, since MapLibre needs `el` to keep
+  // its own position:absolute (from its maplibregl-marker class) for its
+  // transform-based placement; overriding that breaks positioning entirely.
+  const inner = document.createElement('div');
+  inner.className = 'node-marker-inner';
+  inner.innerHTML = nodeIconSvg(node);
+  node._iconHtml = inner.innerHTML;
+  el.appendChild(inner);
+  const tip = document.createElement('div');
+  tip.className = 'node-tooltip';
+  tip.textContent = node.name;
+  inner.appendChild(tip);
+
+  // anchor:'bottom' attaches at the icon box's bottom edge (y=34), but the
+  // pin's actual drawn point sits 3px above that (viewBox="-3 -3 28 34" pads
+  // 3px on every side, and the path's tip is at local y=28 -> rendered
+  // y=31). That constant ~3px gap is invisible at normal zoom (marker size
+  // never scales with map zoom) but reads as a visible gap between the pin
+  // tip and a connected line once zoomed in far enough that everything
+  // else around it is much bigger. offset shifts the anchor down 3px so
+  // the true visual tip, not the box edge, lines up with the geo point.
+  const marker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom', offset: [0, 3] })
+    .setLngLat([node.lng, node.lat])
+    .addTo(S.map);
+
+  el.addEventListener('click', e => {
+    e.stopPropagation();
     selectNodeView(node.id);
   });
   marker.on('drag', () => {
-    const ll = marker.getLatLng(); node.lat = ll.lat; node.lng = ll.lng;
-    updateNodeFields(node); redrawEdgeLines();
+    const ll = marker.getLngLat(); node.lat = ll.lat; node.lng = ll.lng;
+    updateNodeFields(node); syncEdgesSource();
   });
   marker.on('dragend', () => {
     node.elev = null; invalidateEdgesForNode(node.id); fetchElev(node);
@@ -237,18 +421,17 @@ function makeMarker(node) {
     // Re-analyse all links whenever a node is dragged
     if (S.edges.length > 0) runAnalysis();
   });
-  marker.on('contextmenu', e => { L.DomEvent.preventDefault(e.originalEvent); L.DomEvent.stopPropagation(e.originalEvent); showNodeCtx(e.originalEvent.clientX, e.originalEvent.clientY, node); });
-  bindNodeTooltip(marker, node.name);
+  el.addEventListener('contextmenu', e => {
+    e.preventDefault(); e.stopPropagation();
+    showNodeCtx(e.clientX, e.clientY, node);
+  });
   return marker;
-}
-
-function bindNodeTooltip(marker, label) {
-  marker.bindTooltip(textNode(label), { permanent: false, direction: 'top', offset: [0,-14] });
 }
 
 function setNodeTooltip(node, label) {
   if (!node.marker) return;
-  node.marker.setTooltipContent(textNode(label));
+  const tip = node.marker.getElement()?.querySelector('.node-tooltip');
+  if (tip) tip.textContent = label;
 }
 
 // Marker SVG depends on index (number), colour (custom or palette) and selected state.
@@ -258,7 +441,11 @@ function nodeIconSvg(node) {
   const n = idx + 1;
   const selected = S.activeView?.type === 'node' && S.activeView.id === node.id;
   const pinPath = 'M11 0C4.9 0 0 4.9 0 11c0 8.3 11 17 11 17s11-8.7 11-17C22 4.9 17.1 0 11 0z';
-  const selectedOutline = selected ? `<path d="${pinPath}" fill="none" stroke="${c}" stroke-width="4" stroke-linejoin="round" opacity="1"/>` : '';
+  // stroke-linejoin:round blunts/rounds off the pin's sharp pointed tip
+  // (the anchor point the edge lines connect to), making a selected node's
+  // marker visually fall short of where its line actually terminates —
+  // miter preserves the sharp point so the outline doesn't shorten it.
+  const selectedOutline = selected ? `<path d="${pinPath}" fill="none" stroke="${c}" stroke-width="4" stroke-linejoin="miter" opacity="1"/>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="34" viewBox="-3 -3 28 34">
     ${selectedOutline}
     <path d="${pinPath}" fill="${c}" opacity="0.92"/>
@@ -267,36 +454,34 @@ function nodeIconSvg(node) {
   </svg>`;
 }
 
-function nodeDivIcon(svg) {
-  return L.divIcon({ html: svg, className: 'lf-marker', iconSize:[28,34], iconAnchor:[14,31], tooltipAnchor:[0,-31] });
-}
-
-function buildIcon(node) {
-  const svg = nodeIconSvg(node);
-  node._iconHtml = svg;
-  return nodeDivIcon(svg);
-}
-
-// Rebuild only the icons whose appearance actually changed. setIcon() swaps the
-// marker's DOM element, which both causes a visible flicker and aborts an
-// in-progress drag — so skipping unchanged markers (every marker, on every
-// analysis/selection) is what keeps dragging smooth and the screen stable.
+// Rebuild only the icons whose appearance actually changed. Unlike Leaflet's
+// setIcon() (which swaps the marker's whole DOM element, causing flicker and
+// aborting an in-progress drag), a MapLibre Marker's element is never
+// recreated — so this just updates the SVG in place, no drag-abort risk.
+// The diff is kept purely as a cheap perf guard against needless re-renders.
 function refreshAllIcons() {
   S.nodes.forEach(n => {
     if (!n.marker) return;
     const svg = nodeIconSvg(n);
-    if (n._iconHtml !== svg) { n.marker.setIcon(nodeDivIcon(svg)); n._iconHtml = svg; }
+    if (n._iconHtml !== svg) {
+      const inner = n.marker.getElement().querySelector('.node-marker-inner');
+      const tip = inner.querySelector('.node-tooltip');
+      inner.innerHTML = svg;
+      if (tip) inner.appendChild(tip);
+      n._iconHtml = svg;
+    }
   });
 }
 
 function removeNode(id) {
   const idx = S.nodes.findIndex(n => n.id === id);
   if (idx < 0) return;
-  if (S.nodes[idx].coverageLayer) S.map.removeLayer(S.nodes[idx].coverageLayer);
-  S.map.removeLayer(S.nodes[idx].marker);
+  removeNodeCoverageLayer(id);
+  removeNodeOutline(id);
+  S.nodes[idx].marker.remove();
   S.nodes.splice(idx, 1);
-  // Remove all edges involving this node
-  S.edges.filter(e => e.aId === id || e.bId === id).forEach(removeEdgeLayers);
+  // Remove all edges involving this node. No direct syncEdgesSource() here —
+  // highlightActiveMapView() below rebuilds the edges source anyway.
   S.edges = S.edges.filter(e => e.aId !== id && e.bId !== id);
   // Remove this node from all paths, delete paths that become too short
   S.paths.forEach(p => { p.nodeIds = p.nodeIds.filter(nid => nid !== id); });
@@ -318,12 +503,9 @@ function removeNode(id) {
 }
 
 function clearAll() {
-  S.nodes.forEach(n => {
-    if (n.marker) S.map.removeLayer(n.marker);
-    if (n.coverageLayer) S.map.removeLayer(n.coverageLayer);
-  });
-  S.edges.forEach(removeEdgeLayers);
+  S.nodes.forEach(n => { if (n.marker) n.marker.remove(); removeNodeCoverageLayer(n.id); removeNodeOutline(n.id); });
   S.nodes = []; S.edges = []; S.paths = [];
+  syncEdgesSource();
   S.activeView = null;
   closeNodeInfo();
   S.nextId = 1;
@@ -351,13 +533,9 @@ function addEdge(aId, bId) {
   // Prevent duplicate edges
   if (S.edges.some(e => (e.aId===aId&&e.bId===bId)||(e.aId===bId&&e.bId===aId))) { toast('Link already exists.',2000); return; }
   if (aId === bId) { toast('Cannot link a node to itself.',2000); return; }
-  const edge = { id: S.nextId++, aId, bId, hidden: false, line: null, hitLine: null, result: null, profile: null };
+  const edge = { id: S.nextId++, aId, bId, hidden: false, result: null, profile: null };
   S.edges.push(edge);
-  const a = S.nodes.find(n=>n.id===aId), b = S.nodes.find(n=>n.id===bId);
-  edge.line = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#4a6278', weight:2, opacity:.7, dashArray:'5 4', interactive:false }).addTo(S.map);
-  edge.hitLine = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#ffffff', weight:24, opacity:0, interactive:true }).addTo(S.map);
-  attachEdgeHandlers(edge);
-  highlightActiveMapView();
+  syncEdgesSource();
   renderEdgesPanel();
   document.getElementById('edgeCount').textContent = S.edges.length;
 
@@ -368,8 +546,8 @@ function addEdge(aId, bId) {
 function removeEdge(id) {
   const idx = S.edges.findIndex(e => e.id === id);
   if (idx < 0) return;
-  const e = S.edges[idx];
-  removeEdgeLayers(e);
+  // No direct syncEdgesSource() here — highlightActiveMapView() below
+  // rebuilds the edges source anyway.
   S.edges.splice(idx, 1);
   // Drop any path that relied on the deleted link: a path is only valid if every
   // consecutive node pair still has an edge connecting them.
@@ -391,12 +569,50 @@ function removeEdge(id) {
   document.getElementById('pathCount').textContent = S.paths.length;
 }
 
-function redrawEdgeLines() {
-  const nodesById=nodeByIdMap();
-  S.edges.forEach(e => {
-    const a = nodesById.get(e.aId), b = nodesById.get(e.bId);
-    if (a && b && e.line) e.line.setLatLngs([[a.lat,a.lng],[b.lat,b.lng]]);
-    if (a && b && e.hitLine) e.hitLine.setLatLngs([[a.lat,a.lng],[b.lat,b.lng]]);
+// Rebuilds the shared edges-src GeoJSON source from S.edges/S.nodes — the
+// single place edge geometry AND styling (colour/width/dash, driven by
+// data-driven paint expressions keyed on these properties, see
+// initMapLayers()) get pushed to the map. MapLibre GeoJSON sources only
+// support whole-collection replacement, so every edge change (position,
+// analysis result, selection, visibility) funnels through here rather than
+// mutating individual map layers.
+function syncEdgesSource(){
+  // MapLibre's vector style loads asynchronously (unlike Leaflet's near-instant
+  // raster init), so edges-src may not exist yet if this runs very early —
+  // queue via whenMapLayersReady rather than silently dropping the update; the
+  // queued call re-reads S.edges/S.nodes at run time, so it stays correct even
+  // if this is called several times before the map finishes loading.
+  whenMapLayersReady(()=>{
+    const nodesById = nodeByIdMap();
+    const activePath = S.activeView?.type==='path' ? S.paths.find(p=>p.id===S.activeView.id) : null;
+    const edgesByPair = edgeByNodePairMap();
+    const pathEdgeIds = new Set();
+    if(activePath){
+      for(let i=0;i<activePath.nodeIds.length-1;i++){
+        const edge=edgeBetween(activePath.nodeIds[i],activePath.nodeIds[i+1],edgesByPair);
+        if(edge) pathEdgeIds.add(edge.id);
+      }
+    }
+    const shouldEmphasizeSelected = visibleEdgeCount()>1;
+    const features = S.edges.map(e=>{
+      const a=nodesById.get(e.aId), b=nodesById.get(e.bId);
+      if(!a||!b) return null;
+      const visible = isEdgeVisible(e);
+      const isSelectedEdge = S.activeView?.type==='edge' && S.activeView.id===e.id;
+      const selected = visible && shouldEmphasizeSelected && (isSelectedEdge||pathEdgeIds.has(e.id));
+      return {
+        type:'Feature',
+        properties:{
+          id:e.id,
+          status: !e.result ? 'unanalysed' : e.result.status==='error' ? 'error' : e.result.status,
+          analysed: !!e.result,
+          selected,
+          hidden: !visible
+        },
+        geometry:{ type:'LineString', coordinates:[[a.lng,a.lat],[b.lng,b.lat]] }
+      };
+    }).filter(Boolean);
+    S.map.getSource('edges-src').setData({ type:'FeatureCollection', features });
   });
 }
 
@@ -574,14 +790,6 @@ function hideAllPaths(){
   highlightActiveMapView();
 }
 
-function edgeBaseStyle(edge){
-  if(!isEdgeVisible(edge)) return {color:'#4a6278',weight:0,opacity:0,dashArray:''};
-  if(!edge.result) return {color:'#4a6278',weight:2,opacity:.7,dashArray:'5 4'};
-  if(edge.result.status==='error') return {color:'#e74c3c',weight:2,opacity:.8,dashArray:'3 5'};
-  const col=edge.result.status==='clear'?'#2ecc71':edge.result.status==='marginal'?'#f39c12':'#e74c3c';
-  return {color:col,weight:3,opacity:.9,dashArray:''};
-}
-
 function setDisplayVisibility(kind, visible) {
   if (kind === 'links') {
     S.showLinks = !!visible;
@@ -617,7 +825,7 @@ function selectNodeView(id, opts={}){
   renderResults();
   if(opts.pan){
     const node=S.nodes.find(n=>n.id===id);
-    S.map.panTo([node.lat,node.lng],{animate:true});
+    S.map.panTo([node.lng,node.lat],{animate:true});
   }
   requestAnimationFrame(()=>{
     document.querySelector(`.wp-card[data-id="${id}"]`)?.scrollIntoView({block:'nearest'});
@@ -681,39 +889,11 @@ function clearActiveView(){
 // un-analysed) and only thicken/opacify it for emphasis, so a "clear" link stays
 // green, a "blocked" link stays red, etc. — selection never recolours the link.
 function highlightActiveMapView(){
-  const activePath=S.activeView?.type==='path'?S.paths.find(p=>p.id===S.activeView.id):null;
-  const shouldEmphasizeSelected=visibleEdgeCount()>1;
-  const edgesByPair=edgeByNodePairMap();
-  // Collect the edge ids that make up the active path (consecutive node pairs).
-  const pathEdgeIds=new Set();
-  if(activePath){
-    for(let i=0;i<activePath.nodeIds.length-1;i++){
-      const edge=edgeBetween(activePath.nodeIds[i],activePath.nodeIds[i+1],edgesByPair);
-      if(edge) pathEdgeIds.add(edge.id);
-    }
-  }
-  S.edges.forEach(e=>{
-    if(!e.line) return;
-    if(!isEdgeVisible(e)){
-      e.line.setStyle(edgeBaseStyle(e));
-      if(e.hitLine) e.hitLine.setStyle({weight:0,opacity:0});
-      return;
-    }
-    const isSelectedEdge=S.activeView?.type==='edge'&&S.activeView.id===e.id;
-    if(shouldEmphasizeSelected&&(isSelectedEdge||pathEdgeIds.has(e.id))){
-      // Emphasise by keeping the link's own colour but making it bolder.
-      // weight:6 (vs the analysed default of 3) reads clearly as "selected"
-      // while preserving the clear/marginal/blocked colour coding.
-      e.line.setStyle({...edgeBaseStyle(e),weight:6,opacity:1});
-      e.line.bringToFront();
-    }else{
-      e.line.setStyle(edgeBaseStyle(e));
-    }
-    if(e.hitLine){
-      e.hitLine.setStyle({weight:24,opacity:0});
-      e.hitLine.bringToFront();
-    }
-  });
+  // Selection/status/visibility styling is entirely data-driven (paint
+  // expressions in initMapLayers() read the 'status'/'selected'/'hidden'
+  // feature properties) — rebuilding the source is all that's needed to
+  // reflect the current selection, in place of Leaflet's per-line setStyle.
+  syncEdgesSource();
   refreshAllIcons();
 }
 
@@ -724,9 +904,9 @@ function invalidateEdgesForNode(nodeId) {
     e.result = null;
     e.profile = null;
     changed = true;
-    if (e.line) e.line.setStyle(edgeBaseStyle(e));
   });
   if (!changed) return;
+  syncEdgesSource();
 
   // Clear stale chart but keep activeView so runAnalysis can restore the same view.
   const active = S.activeView;
@@ -1113,7 +1293,7 @@ function setNodeColor(id, value) {
   node.color = /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : null;
   refreshAllIcons();                       // marker pin colour
   renderNodeList();                        // card number badge + border
-  if(node.coverageLayer) renderCoveragePolygon(node);  // coverage fill + outline
+  if(node.coverageRendered) renderCoveragePolygon(node);  // coverage fill + outline
 }
 // Collapse/expand a single node card — toggles the class directly (no re-render,
 // so it can't disturb focus, drag, or markers).
@@ -1137,8 +1317,8 @@ function setNodeCoord(id, field, val) {
     return;
   }
   node[field]=Number(val); node.elev=null;
-  if(node.marker) node.marker.setLatLng([node.lat,node.lng]);
-  redrawEdgeLines(); invalidateEdgesForNode(id); fetchElev(node);
+  if(node.marker) node.marker.setLngLat([node.lng,node.lat]);
+  syncEdgesSource(); invalidateEdgesForNode(id); fetchElev(node);
   invalidateNodeCoverage(node, true);
   // Mirror the marker-drag behaviour: a moved node re-runs the analysis so the
   // links don't sit stale after a manual coordinate edit.
@@ -1237,19 +1417,29 @@ function showPathCtx(cx,cy,path){
   buildCtx('PATH',items); posCtx(cx,cy);
 }
 
-function attachEdgeHandlers(edge){
-  const target=edge.hitLine||edge.line;
-  if(!target) return;
-  target.on('click',e=>{
-    L.DomEvent.stopPropagation(e.originalEvent);
-    selectEdgeView(edge.id);
+// Registered ONCE (not per-edge) against the 'edges-hit' layer — MapLibre's
+// layer-scoped map.on(event, layerId, fn) fires for whichever feature was hit,
+// looked up here by its 'id' property, replacing Leaflet's per-polyline
+// .on(event, fn) handlers attached in the old per-edge attachEdgeHandlers().
+function attachEdgeLayerHandlers(){
+  if(S._edgeLayerHandlersAttached) return;
+  S._edgeLayerHandlersAttached = true;
+  const findEdge = e => S.edges.find(x => x.id === e.features[0].properties.id);
+  // Skip cursor writes while panning so edge hover can't clobber the native
+  // 'move' drag cursor pinned in initMap (Windows/Chrome workaround).
+  S.map.on('mouseenter','edges-hit',()=>{ if(!S._dragging) S.map.getCanvas().style.cursor='pointer'; });
+  S.map.on('mouseleave','edges-hit',()=>{ if(!S._dragging) S.map.getCanvas().style.cursor=''; hideProfileCursor(); });
+  S.map.on('click','edges-hit',e=>{
+    S._clickConsumed=true;
+    const edge=findEdge(e); if(edge) selectEdgeView(edge.id);
   });
-  target.on('mousemove',e=>handleMapLineHover(edge,e.latlng));
-  target.on('mouseout',hideProfileCursor);
-  target.on('contextmenu',e=>{
-    L.DomEvent.preventDefault(e.originalEvent);
-    L.DomEvent.stopPropagation(e.originalEvent);
-    showEdgeCtx(e.originalEvent.clientX,e.originalEvent.clientY,edge);
+  S.map.on('mousemove','edges-hit',e=>{
+    const edge=findEdge(e); if(edge) handleMapLineHover(edge,e.lngLat);
+  });
+  S.map.on('contextmenu','edges-hit',e=>{
+    e.preventDefault();
+    S._clickConsumed=true;
+    const edge=findEdge(e); if(edge) showEdgeCtx(e.originalEvent.clientX,e.originalEvent.clientY,edge);
   });
 }
 
@@ -1257,7 +1447,7 @@ function insertNodeAt(idx){
   const ref=S.nodes[Math.min(idx,S.nodes.length-1)];
   const node={id:S.nextId++,name:defaultNodeName(S.nodes.length),lat:ref.lat+0.003,lng:ref.lng+0.003,antH:6,elev:null,marker:null,
     rfOverride:false,txDbm:null,gainDbi:null,rxDbm:null,
-    coverageOn:false,coverageLayer:null,coverageDirty:true,coverageComputed:false};
+    coverageOn:false,coverageRendered:false,coverageDirty:true,coverageComputed:false};
   S.nodes.splice(idx,0,node);
   node.marker=makeMarker(node);
   refreshAllIcons(); renderNodeList(); fetchElev(node);
@@ -1273,8 +1463,7 @@ function isSelectionControlTarget(target){
     '.path-row',
     '.hop-card',
     '.chart-tab',
-    '.leaflet-marker-icon',
-    '.leaflet-interactive',
+    '.maplibregl-marker',
     'button',
     'input',
     'select',
@@ -1311,11 +1500,17 @@ function goToMyLocation(){
   toast('Finding your location…');
   navigator.geolocation.getCurrentPosition(pos=>{
     const{latitude:lat,longitude:lng}=pos.coords;
-    S.map.setView([lat,lng],14);
+    S.map.setCenter([lng,lat]); S.map.setZoom(14);
     hideToast();
-    // Add a temporary pulse circle
-    const circle=L.circle([lat,lng],{radius:50,color:accentColor(),fillColor:accentColor(),fillOpacity:.2,weight:2}).addTo(S.map);
-    setTimeout(()=>S.map.removeLayer(circle),4000);
+    // Pulse a temporary marker at the found location via the persistent
+    // location-pulse layer (added in initMapLayers()) — shown for 4s then
+    // hidden again, in place of Leaflet's add-then-removeLayer L.circle.
+    whenMapLayersReady(()=>{
+      S.map.getSource('location-pulse-src')?.setData({ type:'FeatureCollection',
+        features:[{ type:'Feature', properties:{}, geometry:{ type:'Point', coordinates:[lng,lat] } }] });
+      S.map.setLayoutProperty('location-pulse','visibility','visible');
+      setTimeout(()=>S.map.setLayoutProperty('location-pulse','visibility','none'),4000);
+    });
   },err=>{hideToast();toast('Could not get location: '+err.message,3000);});
 }
 function accentColor(){return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#00c8f0';}
@@ -1870,10 +2065,10 @@ function fsplDb(distM, fMHz){
 // distinguishable; signal strength is shown by fill opacity instead of hue —
 // more opaque = stronger margin, fading out to the coverage edge. Below 0 dB the
 // link budget doesn't close, so there's no coverage to paint (level 0 = blank).
-const COVERAGE_GREEN_DB = 24;     // margin (dB) at/above which coverage is full strength
+const COVERAGE_GREEN_DB = 40;     // margin (dB) at/above which coverage is full strength
 const COVERAGE_LEVELS = 5;        // strength quantisation so adjacent samples merge into runs
-const COVERAGE_FILL_MIN = 0.1;    // fill opacity at the weakest covered level
-const COVERAGE_FILL_MAX = 0.4;    // fill opacity at full strength (kept light/transparent)
+const COVERAGE_FILL_MIN = 0.08;   // fill opacity at the weakest covered level
+const COVERAGE_FILL_MAX = 0.55;   // fill opacity at full strength
 function coverageLevel(marginDb){
   if(!(marginDb >= 0)) return 0;                    // no coverage
   const t = Math.min(1, marginDb / COVERAGE_GREEN_DB);
@@ -2009,15 +2204,20 @@ function toggleNodeRfOverride(id){
 
 function invalidateNodeCoverage(node, redraw){
   node.coverageDirty = true;
-  if(redraw && node.coverageLayer && node.coverageOn){
-    styleCoverageLayer(node.coverageLayer,{dashArray:'4 4', fillOpacity:0.05});
+  if(redraw && node.coverageRendered && node.coverageOn){
+    dimNodeCoverage(node.id);
   }
   updateCovBtn(node);
 }
 
-function styleCoverageLayer(layer, style){
-  if(layer?.setStyle) layer.setStyle(style);
-  else layer?.eachLayer?.(child=>child.setStyle?.(style));
+// Dims this node's rendered coverage raster to signal "stale, recompute
+// pending". Deliberately one-way: no un-dim call exists because a recompute
+// always replaces the whole layer (renderCoveragePolygon) at full opacity.
+function dimNodeCoverage(nodeId){
+  const node = S.nodes.find(n => n.id === nodeId);
+  if(node?._covLayerId && S.map.getLayer(node._covLayerId)){
+    S.map.setPaintProperty(node._covLayerId, 'raster-opacity', 0.3);
+  }
 }
 
 function updateCovBtn(node){
@@ -2042,10 +2242,8 @@ function coverageStatusText(node){
 function setNodeCoverageOn(id, on){
   const node = S.nodes.find(n => n.id === id); if(!node) return;
   node.coverageOn = on;
-  if(node.coverageLayer){
-    if(on) node.coverageLayer.addTo(S.map);
-    else S.map.removeLayer(node.coverageLayer);
-  }
+  if(node._covLayerId && S.map.getLayer(node._covLayerId)) S.map.setLayoutProperty(node._covLayerId, 'visibility', on ? 'visible' : 'none');
+  setCoverageOutlineFilter();
   updateCovCount();
   refreshOverlap();
 }
@@ -2053,12 +2251,10 @@ function setNodeCoverageOn(id, on){
 function setAllCoverage(on){
   S.nodes.forEach(n => {
     n.coverageOn = on;
-    if(n.coverageLayer){
-      if(on) n.coverageLayer.addTo(S.map);
-      else S.map.removeLayer(n.coverageLayer);
-    }
+    if(n._covLayerId && S.map.getLayer(n._covLayerId)) S.map.setLayoutProperty(n._covLayerId, 'visibility', on ? 'visible' : 'none');
     const cb = document.getElementById(`cov_${n.id}`); if(cb) cb.checked = on;
   });
+  setCoverageOutlineFilter();
   updateCovCount();
   refreshOverlap();
 }
@@ -2263,13 +2459,44 @@ async function _computeNodeCoverageImpl(node){
   updateCovBtn(node);
 }
 
+// Renders this node's coverage as a rasterised <canvas> registered with
+// MapLibre as a CanvasSource + raster layer, rather than many individual
+// GeoJSON wedge polygons on a shared GL fill layer. This mirrors the original
+// Leaflet build's own design choice — its code comment explains it switched
+// coverage rendering to a dedicated Canvas renderer specifically because
+// many adjacent semi-transparent polygons flickered/seamed under the SVG
+// renderer on pan/zoom. MapLibre's WebGL fill layer hits the same class of
+// artifact (visible seams between wedges, z-fighting/flicker on thin
+// overlapping shapes) since it's still compositing many separate vector
+// draws — rasterising once, like the original Canvas renderer, avoids it
+// entirely: adjacent wedges are pixels on the same bitmap, not separately
+// anti-aliased GPU primitives.
 function renderCoveragePolygon(node){
-  if(node.coverageLayer){ S.map.removeLayer(node.coverageLayer); node.coverageLayer = null; }
-  if(!node.coverageHeatRays || node.coverageHeatRays.length < 2) return;
+  removeNodeCoverageLayer(node.id);
+  if(!node.coverageHeatRays || node.coverageHeatRays.length < 2){ node.coverageRendered = false; return; }
   const col = nodeColorFor(node);
-  const group = L.layerGroup();
   const rays = node.coverageHeatRays;
   const R = rays.length;
+  const maxR = node.coverageMaxRange || 1000;
+  const { dLat, dLng } = metresToDegrees(node.lat, maxR * 1.05);
+  const bbox = { north: node.lat+dLat, south: node.lat-dLat, east: node.lng+dLng, west: node.lng-dLng };
+  // Size the raster to the actual coverage radius (~15m/pixel) rather than a
+  // fixed resolution, so smaller/typical coverage areas stay sharp when
+  // zoomed in instead of blurring — capped so a huge search radius doesn't
+  // blow up canvas memory/upload cost. Users routinely zoom in much closer
+  // than the coverage radius itself (checking a specific street), so this
+  // is deliberately generous; paired with nearest-neighbour resampling
+  // below (crisp/blocky when stretched, not smeared) rather than raising
+  // resolution indefinitely to chase every possible zoom level.
+  const W = Math.round(clampNum((maxR * 2.1) / 15, 512, 4096));
+  const H = W;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const toPx = (lat,lng) => [
+    (lng - bbox.west) / (bbox.east - bbox.west) * W,
+    (bbox.north - lat) / (bbox.north - bbox.south) * H
+  ];
   // Render each ray as its OWN wedge, spanning the half-angle to each neighbour
   // (so adjacent wedges tile seamlessly), and fill it to that ray's own reach.
   // Colouring by each ray independently — rather than the min of two neighbours —
@@ -2278,7 +2505,8 @@ function renderCoveragePolygon(node){
   // fine (~40 m); consecutive same-strength samples merge into one polygon, so a
   // ray collapses to a few bands (plus any disconnected far patches). Strength is
   // shown by fill opacity; blank (no-coverage) stretches are skipped.
-  const mid = (P, Q, s) => [ (P[s].latlng[0]+Q[s].latlng[0])/2, (P[s].latlng[1]+Q[s].latlng[1])/2 ];
+  const mid = (P, Q, s) => [ (P[s].latlng[0]+Q[s].latlng[0])/2, (P[s].latlng[1]+Q[s].latlng[1])/2 ]; // [lat,lng]
+  ctx.fillStyle = col;
   for(let r=0;r<R;r++){
     const cur = rays[r].samples;
     const prev = rays[(r-1+R)%R].samples;
@@ -2286,9 +2514,13 @@ function renderCoveragePolygon(node){
     const n = Math.min(cur.length, prev.length, next.length);
     // Wedge bounded by the midline to the previous ray (left) and next ray (right).
     const addWedge = (i0, i1, level) => {
-      group.addLayer(L.polygon([ mid(prev,cur,i0), mid(cur,next,i0), mid(cur,next,i1), mid(prev,cur,i1) ], {
-        renderer: S._covRenderer, color: col, weight: 0, opacity: 0, fillColor: col, fillOpacity: coverageLevelOpacity(level), interactive: false
-      }));
+      const pts = [ mid(prev,cur,i0), mid(cur,next,i0), mid(cur,next,i1), mid(prev,cur,i1) ].map(p=>toPx(p[0],p[1]));
+      ctx.globalAlpha = coverageLevelOpacity(level);
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for(let k=1;k<pts.length;k++) ctx.lineTo(pts[k][0], pts[k][1]);
+      ctx.closePath();
+      ctx.fill();
     };
     let runStart = -1, runLevel = 0;
     const flush = endIdx => { if(runStart > 0 && runLevel > 0) addWedge(runStart-1, endIdx, runLevel); runStart = -1; runLevel = 0; };
@@ -2298,16 +2530,110 @@ function renderCoveragePolygon(node){
     }
     flush(n-1);
   }
-  // Outline the coverage edge — the farthest covered point per ray.
+  // The farthest-reach outline is drawn as a real vector line layer (see
+  // below), not baked into this raster — a thin 1-2px stroke gets badly
+  // mangled (jagged staircase) when the canvas is stretched/nearest-neighbour
+  // resampled over a large geographic area, unlike the broad fill wedges
+  // which tolerate that fine.
+  syncNodeOutline(node, col);
+  // Re-derive the outline visibility filter here, not just in the checkbox
+  // handlers: nodes restored from a share/URL hash arrive with coverageOn
+  // already true WITHOUT passing through setNodeCoverageOn, and if the map
+  // style loaded before the restore ran, restoreMapOverlays computed the
+  // filter against an empty node list — leaving the outline permanently
+  // filtered out (fill visible, border missing) until the checkbox was
+  // toggled. Syncing on every render makes the filter self-consistent for
+  // every compute entry path.
+  setCoverageOutlineFilter();
+
+  const token = (node._covRenderToken || 0) + 1;
+  node._covRenderToken = token;
+  const srcId = `cov-src-${node.id}`, layerId = `cov-layer-${node.id}`;
+  node._covSrcId = srcId;
+  node._covLayerId = layerId;
+  node.coverageRendered = true;
+  // addSource/addLayer throw (not silently no-op) if the style hasn't
+  // finished loading yet — queue via whenMapLayersReady like syncEdgesSource.
+  // Uses an ImageSource, not a CanvasSource: MapLibre's CanvasSource is
+  // built for opaque continuously-sampled content (e.g. video) and does not
+  // composite per-pixel alpha correctly — transparent canvas pixels rendered
+  // solid black instead of see-through. ImageSource is the georeferenced
+  // overlay primitive and handles a transparent PNG snapshot correctly.
+  // The PNG is delivered as a blob: object URL rather than a data: URL —
+  // toBlob() encodes off the main thread (toDataURL was a synchronous encode
+  // of up to ~67MB of pixels right as compute finished), and blob: keeps the
+  // CSP connect-src free of data: (MapLibre fetches the ImageSource URL).
+  canvas.toBlob(blob => {
+    if(!blob) return;
+    whenMapLayersReady(() => {
+      const current = S.nodes.find(n => n.id === node.id);
+      if(!current || current._covRenderToken !== token || current._covSrcId !== srcId || current._covLayerId !== layerId) return;
+      if(current._covImgUrl) URL.revokeObjectURL(current._covImgUrl);
+      current._covImgUrl = URL.createObjectURL(blob);
+      if(S.map.getLayer(layerId)) S.map.removeLayer(layerId);
+      if(S.map.getSource(srcId)) S.map.removeSource(srcId);
+      S.map.addSource(srcId, {
+        type: 'image', url: current._covImgUrl,
+        coordinates: [ [bbox.west,bbox.north], [bbox.east,bbox.north], [bbox.east,bbox.south], [bbox.west,bbox.south] ]
+      });
+      S.map.addLayer({ id: layerId, type:'raster', source: srcId,
+        layout: { visibility: current.coverageOn ? 'visible' : 'none' },
+        // 'nearest' keeps zoomed-in edges crisp/blocky rather than smeared —
+        // users often zoom in much closer than the coverage radius itself.
+        // beforeId 'coverage-outline' (the lowest custom layer) keeps the fill
+        // raster UNDER the farthest-reach outline, matching the original app
+        // where the outline drew on top of the fills.
+        paint: { 'raster-opacity': 1, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' } }, 'coverage-outline');
+    });
+  });
+}
+
+// Removes this node's canvas source/layer (called at the start of every
+// recompute as well as on node deletion — recompute always immediately
+// re-adds a fresh one via renderCoveragePolygon, so this alone never turns
+// coverage off; only removeNode/clearAll actually discard the node).
+function removeNodeCoverageLayer(nodeId){
+  const node = S.nodes.find(n => n.id === nodeId);
+  if(!node) return;
+  if(node._covLayerId && S.map.getLayer(node._covLayerId)) S.map.removeLayer(node._covLayerId);
+  if(node._covSrcId && S.map.getSource(node._covSrcId)) S.map.removeSource(node._covSrcId);
+  if(node._covImgUrl){ URL.revokeObjectURL(node._covImgUrl); node._covImgUrl = null; }
+  node._covLayerId = null; node._covSrcId = null;
+}
+
+// Rebuilds this node's farthest-reach outline in the shared vector line
+// source (coverage-outline-src) — kept as real vector geometry, not part of
+// the per-node raster, since a thin stroke doesn't tolerate being stretched
+// over a large area the way the broad fill wedges do.
+function syncNodeOutline(node, col){
+  S._outlineFeatures = S._outlineFeatures.filter(f => f.properties.nodeId !== node.id);
   if(node.coverageRays?.length){
-    const outline = node.coverageRays.map(r=>r.latlng);
-    outline.push(node.coverageRays[0].latlng);
-    group.addLayer(L.polyline(outline, {
-      renderer: S._covRenderer, color: col, weight: 1.5, opacity: 0.85, interactive: false
-    }));
+    const coords = node.coverageRays.map(r => [r.latlng[1], r.latlng[0]]); // [lng,lat]
+    coords.push(coords[0]);
+    S._outlineFeatures.push({ type:'Feature', properties:{ nodeId: node.id, color: col },
+      geometry:{ type:'LineString', coordinates: coords } });
   }
-  node.coverageLayer = group;
-  if(node.coverageOn) node.coverageLayer.addTo(S.map);
+  whenMapLayersReady(() => {
+    S.map.getSource('coverage-outline-src')?.setData({ type:'FeatureCollection', features: S._outlineFeatures });
+  });
+}
+
+function removeNodeOutline(nodeId){
+  const before = S._outlineFeatures.length;
+  S._outlineFeatures = S._outlineFeatures.filter(f => f.properties.nodeId !== nodeId);
+  if(S._outlineFeatures.length !== before){
+    whenMapLayersReady(() => {
+      S.map.getSource('coverage-outline-src')?.setData({ type:'FeatureCollection', features: S._outlineFeatures });
+    });
+  }
+}
+
+function setCoverageOutlineFilter(){
+  const ids = S.nodes.filter(n => n.coverageOn).map(n => n.id);
+  const filter = ids.length ? ['in', ['get','nodeId'], ['literal', ids]] : ['==', ['get','nodeId'], '__none__'];
+  whenMapLayersReady(() => {
+    if(S.map.getLayer('coverage-outline')) S.map.setFilter('coverage-outline', filter);
+  });
 }
 
 // ── Coverage overlap highlight ──────────────────────────────
@@ -2336,10 +2662,9 @@ function pointInCoverage(node, lat, lng){
 }
 
 function renderCoverageOverlap(){
-  if(S.overlapLayer){ S.map.removeLayer(S.overlapLayer); S.overlapLayer = null; }
-  if(!S.showOverlap) return;
+  if(!S.showOverlap){ S.map.getSource('overlap-src')?.setData(emptyFC()); return; }
   const nodes = S.nodes.filter(n => n.coverageOn && n.coverageHeatRays?.length && n.coverageMaxRange);
-  if(nodes.length < 2) return;
+  if(nodes.length < 2){ S.map.getSource('overlap-src')?.setData(emptyFC()); return; }
   // Combined bounds across every node's reach.
   let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
   for(const n of nodes){
@@ -2383,23 +2708,17 @@ function renderCoverageOverlap(){
     for(let x = 0; x < W; x++){
       if(!grid[y*W+x]) continue;
       const T = latAt(y), B = latAt(y+1), Ln = lngAt(x), Rn = lngAt(x+1);
-      if(!at(grid,x-1,y)) segs.push([[T,Ln],[B,Ln]]);
-      if(!at(grid,x+1,y)) segs.push([[T,Rn],[B,Rn]]);
-      if(!at(grid,x,y-1)) segs.push([[T,Ln],[T,Rn]]);
-      if(!at(grid,x,y+1)) segs.push([[B,Ln],[B,Rn]]);
+      if(!at(grid,x-1,y)) segs.push([[Ln,T],[Ln,B]]);
+      if(!at(grid,x+1,y)) segs.push([[Rn,T],[Rn,B]]);
+      if(!at(grid,x,y-1)) segs.push([[Ln,T],[Rn,T]]);
+      if(!at(grid,x,y+1)) segs.push([[Ln,B],[Rn,B]]);
     }
   }
-  if(!segs.length) return;
-  // Dedicated pane above the coverage fills (overlayPane=400) but below markers (600).
-  if(!S.map.getPane('overlapPane')){
-    S.map.createPane('overlapPane');
-    const p = S.map.getPane('overlapPane');
-    p.style.zIndex = 450;
-    p.style.pointerEvents = 'none';
-  }
-  S.overlapLayer = L.polyline(segs, {
-    color: '#ff2fd0', weight: 2, opacity: 0.95, interactive: false, pane: 'overlapPane'
-  }).addTo(S.map);
+  if(!segs.length){ S.map.getSource('overlap-src')?.setData(emptyFC()); return; }
+  S.map.getSource('overlap-src')?.setData({
+    type:'FeatureCollection',
+    features: segs.map(seg => ({ type:'Feature', properties:{}, geometry:{ type:'LineString', coordinates: seg } }))
+  });
 }
 
 // Redraw the overlap only when the toggle is active (cheap no-op otherwise),
@@ -2481,7 +2800,7 @@ async function runAnalysis(){
         terrainErrors++;
         e.result={dist,status:'error',error:err.message||'Terrain lookup failed'};
         e.profile=null;
-        if(e.line) e.line.setStyle(edgeBaseStyle(e));
+        syncEdgesSource();
         renderResults();
         renderEdgesPanel();
         if(terrainErrors>=MAX_TERRAIN_ERRORS){
@@ -2580,9 +2899,9 @@ async function runAnalysis(){
       }
       dlog(`  ${a.name}↔${b.name}: ${(dist/1000).toFixed(2)}km · ${status.toUpperCase()} · LOS clr ${minLosClear.toFixed(1)}m · Fz clr ${minScaledFzClear.toFixed(1)}m · ν ${maxNu.toFixed(2)} · diff ${diffLossDb.toFixed(1)}dB${clutterNote}`, lvl);
 
-      // Colour the line on map
-      if(e.line) e.line.setStyle(edgeBaseStyle(e));
     }
+    // Colour the lines on map
+    syncEdgesSource();
 
     if(terrainErrors<MAX_TERRAIN_ERRORS) hideToast();
     renderResults();
@@ -3154,7 +3473,7 @@ async function computeHorizon(node){
 function openNodeInfo(node){
   closeCtx();
   selectNodeView(node.id, { force:true });
-  S.map.panTo([node.lat, node.lng], { animate:true });
+  S.map.panTo([node.lng, node.lat], { animate:true });
   NI.node = node;
   niWire();
   niEl('nodeInfoPanel').classList.add('open');
@@ -3577,23 +3896,22 @@ function interpLatLng(a,b,t){
   return [a.lat+(b.lat-a.lat)*t,a.lng+(b.lng-a.lng)*t];
 }
 
+// A small pink dot marking where the profile-chart cursor sits on the map.
+// z-index is set directly on the element (no MapLibre pane concept) so it
+// renders above node markers, replicating the old profileHoverPane (z750).
 function ensureProfileHoverMarker(){
   if(S.hoverMarker) return S.hoverMarker;
-  S.hoverMarker=L.circleMarker([0,0],{
-    radius:10,
-    color:'#ffffff',
-    weight:3,
-    fillColor:'#ff2bd6',
-    fillOpacity:.9,
-    opacity:1,
-    pane:'profileHoverPane'
-  });
-  S.hoverMarker.bindTooltip('Profile cursor',{direction:'top',offset:[0,-10]});
+  const el=document.createElement('div');
+  el.style.cssText='width:20px;height:20px;border-radius:50%;background:#ff2bd6;'+
+    'border:3px solid #fff;box-sizing:border-box;z-index:10000;position:relative';
+  el.title='Profile cursor';
+  S.hoverMarker=new maplibregl.Marker({element:el});
+  S._hoverMarkerShown=false;
   return S.hoverMarker;
 }
 
 function hideProfileHoverMarker(){
-  if(S.hoverMarker&&S.map.hasLayer(S.hoverMarker)) S.map.removeLayer(S.hoverMarker);
+  if(S.hoverMarker&&S._hoverMarkerShown){ S.hoverMarker.remove(); S._hoverMarkerShown=false; }
 }
 
 function handleProfileHover(ev){
@@ -3609,10 +3927,9 @@ function handleProfileHover(ev){
   if(!seg) return;
   const t=Math.max(0,Math.min(1,(dist-seg.start)/seg.dist));
   const marker=ensureProfileHoverMarker();
-  marker.setLatLng(interpLatLng(seg.a,seg.b,t));
-  if(!S.map.hasLayer(marker)) marker.addTo(S.map);
-  marker.setStyle({opacity:1,fillOpacity:.9});
-  marker.bringToFront();
+  const [lat,lng]=interpLatLng(seg.a,seg.b,t);
+  marker.setLngLat([lng,lat]);
+  if(!S._hoverMarkerShown){ marker.addTo(S.map); S._hoverMarkerShown=true; }
 }
 
 function drawProfileCursorAtDistance(dist){
@@ -3640,9 +3957,9 @@ function drawProfileCursorAtDistance(dist){
 }
 
 function projectPointToSegment(latlng,a,b){
-  const p=S.map.latLngToLayerPoint(latlng);
-  const p0=S.map.latLngToLayerPoint([a.lat,a.lng]);
-  const p1=S.map.latLngToLayerPoint([b.lat,b.lng]);
+  const p=S.map.project([latlng.lng,latlng.lat]);
+  const p0=S.map.project([a.lng,a.lat]);
+  const p1=S.map.project([b.lng,b.lat]);
   const vx=p1.x-p0.x,vy=p1.y-p0.y;
   const len2=vx*vx+vy*vy||1;
   return Math.max(0,Math.min(1,((p.x-p0.x)*vx+(p.y-p0.y)*vy)/len2));
@@ -4058,22 +4375,19 @@ function loadFromHash(hashStr){
     // Restore nodes
     data.nodes.forEach(nd=>{
       const node={...nd, elev:null, marker:null,
-        coverageLayer:null, coverageDirty:true, coverageComputed:false};
+        coverageRendered:false, coverageDirty:true, coverageComputed:false};
       S.nodes.push(node);
       node.marker=makeMarker(node);
       fetchElev(node);
     });
     refreshAllIcons();
-    // Restore edges (lines only, no profile/result yet)
+    // Restore edges (geometry only, no profile/result yet)
     data.edges.forEach(ed=>{
       const a=S.nodes.find(n=>n.id===ed.aId),b=S.nodes.find(n=>n.id===ed.bId);
       if(!a||!b) return;
-      const edge={id:ed.id,aId:ed.aId,bId:ed.bId,hidden:!!ed.hidden,line:null,hitLine:null,result:null,profile:null};
-      edge.line=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#4a6278',weight:2,opacity:.7,dashArray:'5 4',interactive:false}).addTo(S.map);
-      edge.hitLine=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#ffffff',weight:24,opacity:0,interactive:true}).addTo(S.map);
-      attachEdgeHandlers(edge);
-      S.edges.push(edge);
+      S.edges.push({id:ed.id,aId:ed.aId,bId:ed.bId,hidden:!!ed.hidden,result:null,profile:null});
     });
+    syncEdgesSource();
     // Restore paths
     data.paths.forEach(p=>S.paths.push({...p}));
     renderNodeList(); renderEdgesPanel(); renderPathsPanel();
@@ -4083,8 +4397,9 @@ function loadFromHash(hashStr){
     document.getElementById('pathCount').textContent=S.paths.length;
     if(S.nodes.length>0){
       document.getElementById('mapHint').style.display='none';
-      const bounds=L.latLngBounds(S.nodes.map(n=>[n.lat,n.lng]));
-      S.map.fitBounds(bounds,{padding:[40,40]});
+      let minLat=90,maxLat=-90,minLng=180,maxLng=-180;
+      S.nodes.forEach(n=>{ minLat=Math.min(minLat,n.lat); maxLat=Math.max(maxLat,n.lat); minLng=Math.min(minLng,n.lng); maxLng=Math.max(maxLng,n.lng); });
+      S.map.fitBounds([[minLng,minLat],[maxLng,maxLat]],{padding:40});
     }
     toast('Map loaded from shared link. Click Analyse to run.',4000);
   }catch(err){
@@ -4198,6 +4513,7 @@ function initStaticHandlers(){
     .forEach(id=>on(id,'change',onCoverageParamChanged));
   on('inpShowLinks','change',function(){ setDisplayVisibility('links', this.checked); });
   on('inpShowPaths','change',function(){ setDisplayVisibility('paths', this.checked); });
+  on('inpBasemap','change',function(){ switchBasemap(this.value); });
   on('btnCovAllOn','click',()=>setAllCoverage(true));
   on('btnCovAllOff','click',()=>setAllCoverage(false));
   on('btnCovComputeAll','click',computeAllCoverage);
@@ -4267,11 +4583,23 @@ window.addEventListener('load',()=>{
   initProfileHover();
   initCollapsibles();
   renderNodeList();
-  setTimeout(()=>S.map.invalidateSize(),200);
-  setTimeout(()=>{S.map.invalidateSize();loadFromHash();syncPresetFromFreq();refreshSettingsSummary();maybeShowHelp();S._ready=true;},600);
+  setTimeout(()=>S.map.resize(),200);
+  setTimeout(()=>{
+    S.map.resize();
+    // Run loadFromHash directly, NOT gated on the map style loading: every
+    // map write inside it is already individually load-safe (markers are DOM
+    // overlays that work pre-load, syncEdgesSource self-queues via
+    // whenMapLayersReady, fitBounds is a camera op that works pre-load).
+    // Gating the whole call would mean (a) a tile-server outage silently
+    // kills share-link restore entirely, and (b) S._ready=true below opens a
+    // window where a user edit's syncShareUrl overwrites the pending shared
+    // hash before it is ever read.
+    loadFromHash();
+    syncPresetFromFreq();refreshSettingsSummary();maybeShowHelp();S._ready=true;
+  },600);
 });
 window.addEventListener('resize',()=>{
-  if(S.map) S.map.invalidateSize();
+  if(S.map) S.map.resize();
   if(S.activeView){
     if(S.activeView.type==='edge') showEdgeProfile(S.activeView.id);
     else if(S.activeView.type==='path') showPathProfile(S.activeView.id);

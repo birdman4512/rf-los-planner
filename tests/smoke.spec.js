@@ -26,7 +26,7 @@ test.describe('RF LOS Planner — smoke', () => {
     await expect(page.locator('#map')).toBeVisible();
     await expect(page.getByRole('button', { name: '+ NEW PATH' })).toBeVisible();
 
-    // App globals + Leaflet map initialised.
+    // App globals + MapLibre map initialised.
     const ready = await page.evaluate(
       () => typeof addNode === 'function' && typeof addEdge === 'function' && !!(window.S || S).map
     );
@@ -41,6 +41,13 @@ test.describe('RF LOS Planner — smoke', () => {
   test('linking nodes makes standalone paths; path builder opens with all nodes', async ({ page }) => {
     const pageErrors = trackErrors(page);
     await page.goto('/index.html', { waitUntil: 'load' });
+
+    // The first-run help modal opens on a ~600ms timer and would intercept
+    // the '+ NEW PATH' click below whenever this test crosses that timer
+    // (a machine-load-dependent flake). Wait for it and dismiss it instead
+    // of racing it.
+    await page.locator('#helpModal.open').waitFor({ timeout: 5000 });
+    await page.keyboard.press('Escape');
 
     // Two linked nodes -> one auto-created standalone 2-node path.
     const counts = await page.evaluate(() => {
@@ -79,11 +86,18 @@ test.describe('RF LOS Planner — smoke', () => {
     const pageErrors = trackErrors(page);
     await page.goto('/index.html', { waitUntil: 'load' });
 
-    const visibility = await page.evaluate(() => {
+    const visibility = await page.evaluate(async () => {
+      const St = window.S || S;
+      // MapLibre's vector style loads asynchronously, unlike Leaflet's
+      // near-instant raster init — wait for it before reading the edges-src
+      // GeoJSON source below, or getSource() returns undefined.
+      await new Promise(resolve => {
+        const check = () => St._mapLayersReady ? resolve() : setTimeout(check, 20);
+        check();
+      });
       const a = addNode(-37.81, 144.96);
       const b = addNode(-37.79, 144.99);
       addEdge(a.id, b.id);
-      const St = window.S || S;
       const autoPath = St.paths[0];
       St.paths.push({ id: St.nextId++, name: 'Shared link path', hidden: false, nodeIds: [a.id, b.id] });
 
@@ -119,9 +133,15 @@ test.describe('RF LOS Planner — smoke', () => {
       };
 
       showOnlyEdge(St.edges[0].id);
-      const selectedSingleWeight = St.edges[0].line.options.weight;
+      // Edge styling is data-driven (see syncEdgesSource()/initMapLayers()):
+      // 'selected' only turns on emphasis (line-width 6) when more than one
+      // edge is visible, so with only one edge showing it should read false —
+      // the equivalent of the old Leaflet weight staying at the base value (2).
+      const selectedFeature = St.map.getSource('edges-src')._data.features
+        .find(f => f.properties.id === St.edges[0].id);
+      const selectedSingleEmphasis = selectedFeature.properties.selected;
 
-      return { afterHide, afterPartialLinkHide, afterAllLinkHide, afterHideAll, selectedSingleWeight };
+      return { afterHide, afterPartialLinkHide, afterAllLinkHide, afterHideAll, selectedSingleEmphasis };
     });
 
     expect(visibility.afterHide).toEqual({
@@ -138,7 +158,7 @@ test.describe('RF LOS Planner — smoke', () => {
       edgeHidden: true,
       edgeVisible: false
     });
-    expect(visibility.selectedSingleWeight).toBe(2);
+    expect(visibility.selectedSingleEmphasis).toBe(false);
 
     expect(pageErrors, `Uncaught page errors:\n${pageErrors.join('\n')}`).toEqual([]);
   });
