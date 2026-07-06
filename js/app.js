@@ -292,7 +292,15 @@ function makeMarker(node) {
   tip.textContent = node.name;
   inner.appendChild(tip);
 
-  const marker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
+  // anchor:'bottom' attaches at the icon box's bottom edge (y=34), but the
+  // pin's actual drawn point sits 3px above that (viewBox="-3 -3 28 34" pads
+  // 3px on every side, and the path's tip is at local y=28 -> rendered
+  // y=31). That constant ~3px gap is invisible at normal zoom (marker size
+  // never scales with map zoom) but reads as a visible gap between the pin
+  // tip and a connected line once zoomed in far enough that everything
+  // else around it is much bigger. offset shifts the anchor down 3px so
+  // the true visual tip, not the box edge, lines up with the geo point.
+  const marker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom', offset: [0, 3] })
     .setLngLat([node.lng, node.lat])
     .addTo(S.map);
 
@@ -336,7 +344,11 @@ function nodeIconSvg(node) {
   const n = idx + 1;
   const selected = S.activeView?.type === 'node' && S.activeView.id === node.id;
   const pinPath = 'M11 0C4.9 0 0 4.9 0 11c0 8.3 11 17 11 17s11-8.7 11-17C22 4.9 17.1 0 11 0z';
-  const selectedOutline = selected ? `<path d="${pinPath}" fill="none" stroke="${c}" stroke-width="4" stroke-linejoin="round" opacity="1"/>` : '';
+  // stroke-linejoin:round blunts/rounds off the pin's sharp pointed tip
+  // (the anchor point the edge lines connect to), making a selected node's
+  // marker visually fall short of where its line actually terminates —
+  // miter preserves the sharp point so the outline doesn't shorten it.
+  const selectedOutline = selected ? `<path d="${pinPath}" fill="none" stroke="${c}" stroke-width="4" stroke-linejoin="miter" opacity="1"/>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="34" viewBox="-3 -3 28 34">
     ${selectedOutline}
     <path d="${pinPath}" fill="${c}" opacity="0.92"/>
