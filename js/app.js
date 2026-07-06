@@ -3344,7 +3344,7 @@ async function computeHorizon(node){
 function openNodeInfo(node){
   closeCtx();
   selectNodeView(node.id, { force:true });
-  S.map.panTo([node.lat, node.lng], { animate:true });
+  S.map.panTo([node.lng, node.lat], { animate:true });
   NI.node = node;
   niWire();
   niEl('nodeInfoPanel').classList.add('open');
