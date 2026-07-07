@@ -244,7 +244,7 @@ function initMap() {
     const edge = hit && S.edges.find(ed => ed.id === hit.properties.id);
     if (edge) showEdgeCtx(x, y, edge);
     else { const ll = S.map.unproject(point); showMapCtx(x, y, { lat: ll.lat, lng: ll.lng }); }
-  }, 550, 'map');
+  }, 550);
   S.map.on('mousedown', closeCtx);
   S.map.on('click', () => {
     if(S._clickConsumed){ S._clickConsumed = false; return; }
@@ -424,13 +424,11 @@ function makeMarker(node) {
     .addTo(S.map);
 
   el.addEventListener('click', e => {
-    dlog(`marker[${node.name}] native click, target=${e.target.className||e.target.tagName}, clickConsumed=${S._clickConsumed}`);
     e.stopPropagation();
     if(S._clickConsumed){ S._clickConsumed = false; return; }
     selectNodeView(node.id);
   });
-  attachLongPress(el, (x, y) => { S._clickConsumed = true; dlog(`marker[${node.name}] showNodeCtx(${x},${y})`, 'ok'); showNodeCtx(x, y, node); }, 550, node.name);
-  marker.on('dragstart', () => dlog(`marker[${node.name}] MapLibre dragstart`, 'warn'));
+  attachLongPress(el, (x, y) => { S._clickConsumed = true; showNodeCtx(x, y, node); });
   marker.on('drag', () => {
     const ll = marker.getLngLat(); node.lat = ll.lat; node.lng = ll.lng;
     updateNodeFields(node); syncEdgesSource();
@@ -1365,11 +1363,10 @@ const ctxMenu=document.getElementById('ctxMenu'), ctxTitle=document.getElementBy
 // we only arm the timer for 'touch' since mouse/pen already get a native
 // 'contextmenu' event. Cancelled if the finger moves >10px (treat as a pan/
 // drag, not a hold) or lifts before the timer fires.
-function attachLongPress(el, onLongPress, delay = 550, label = '?') {
+function attachLongPress(el, onLongPress, delay = 550) {
   let timer = null, start = null;
-  const clear = (why) => { if(timer) dlog(`longpress[${label}] cleared (${why})`); clearTimeout(timer); timer = null; start = null; };
+  const clear = () => { clearTimeout(timer); timer = null; start = null; };
   el.addEventListener('pointerdown', e => {
-    dlog(`longpress[${label}] pointerdown type=${e.pointerType}`);
     if (e.pointerType !== 'touch') return;
     // Marker elements live inside the map's canvas container, so a touch on
     // a node otherwise bubbles up and arms the canvas's own long-press timer
@@ -1378,20 +1375,16 @@ function attachLongPress(el, onLongPress, delay = 550, label = '?') {
     e.stopPropagation();
     start = { x: e.clientX, y: e.clientY };
     timer = setTimeout(() => {
-      const s = start; clear('fired');
-      dlog(`longpress[${label}] FIRING onLongPress`, 'ok');
+      const s = start; clear();
       onLongPress(s.x, s.y, e);
     }, delay);
   });
   el.addEventListener('pointermove', e => {
-    if (start) {
-      const d = Math.hypot(e.clientX - start.x, e.clientY - start.y);
-      if (d > 10) clear(`move ${d.toFixed(1)}px`);
-    }
+    if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) clear();
   });
-  el.addEventListener('pointerup', () => clear('pointerup'));
-  el.addEventListener('pointercancel', () => clear('pointercancel'));
-  el.addEventListener('pointerleave', () => clear('pointerleave'));
+  el.addEventListener('pointerup', clear);
+  el.addEventListener('pointercancel', clear);
+  el.addEventListener('pointerleave', clear);
 }
 
 function buildCtx(title, items) {
@@ -1422,9 +1415,8 @@ function posCtx(cx,cy){
   ctxMenu.style.display='block';
   const mw=ctxMenu.offsetWidth,mh=ctxMenu.offsetHeight,vw=window.innerWidth,vh=window.innerHeight;
   ctxMenu.style.left=(cx+mw>vw?cx-mw:cx)+'px'; ctxMenu.style.top=(cy+mh>vh?cy-mh:cy)+'px';
-  dlog(`posCtx opened at (${cx},${cy}) size ${mw}x${mh}`, 'ok');
 }
-function closeCtx(){ if(ctxMenu.style.display==='block') dlog('closeCtx() called', 'warn'); ctxMenu.style.display='none';}
+function closeCtx(){ctxMenu.style.display='none';}
 
 function showMapCtx(cx,cy,latlng){
   const items=[{icon:'＋',label:'Add node here',action:()=>addNode(latlng.lat,latlng.lng)}];
@@ -1533,7 +1525,6 @@ function isSelectionControlTarget(target){
 }
 
 document.addEventListener('click',e=>{
-  dlog(`document click target=${e.target.className||e.target.tagName}`);
   if(!ctxMenu.contains(e.target)) closeCtx();
   if(!S.activeView||isSelectionControlTarget(e.target)) return;
   const blankPanel=e.target.closest?.('.wp-scroll,.edges-panel,.paths-panel,.results-area,.chart-panel,.sidebar');
