@@ -411,7 +411,15 @@ function makeMarker(node) {
   // tip and a connected line once zoomed in far enough that everything
   // else around it is much bigger. offset shifts the anchor down 3px so
   // the true visual tip, not the box edge, lines up with the geo point.
-  const marker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom', offset: [0, 3] })
+  // clickTolerance raised well above MapLibre's default (~3px): its own
+  // drag-start detection runs independently of attachLongPress's 10px
+  // cancel threshold below, so a stationary touch hold's natural finger
+  // jitter (a few px) was tripping MapLibre's drag-start first -- hijacking
+  // the gesture (and hiding the marker via pointer-events:none mid-hold)
+  // before the long-press timer ever got to fire the context menu. 15px
+  // sits above our 10px cancel threshold so a deliberate drag still cancels
+  // the long-press and falls through to MapLibre's own drag handling.
+  const marker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom', offset: [0, 3], clickTolerance: 15 })
     .setLngLat([node.lng, node.lat])
     .addTo(S.map);
 
