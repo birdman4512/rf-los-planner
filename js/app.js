@@ -233,6 +233,18 @@ function initMap() {
     e.preventDefault();
     showMapCtx(e.originalEvent.clientX, e.originalEvent.clientY, { lat: e.lngLat.lat, lng: e.lngLat.lng });
   });
+  // Touch has no contextmenu event -- press-and-hold on the canvas stands in
+  // for right-click. Hit-test 'edges-hit' first so holding on a link opens
+  // the link menu instead of "Add node here".
+  attachLongPress(S.map.getCanvasContainer(), (x, y) => {
+    S._clickConsumed = true;
+    const rect = S.map.getCanvas().getBoundingClientRect();
+    const point = [x - rect.left, y - rect.top];
+    const hit = S.map.getLayer('edges-hit') && S.map.queryRenderedFeatures(point, { layers: ['edges-hit'] })[0];
+    const edge = hit && S.edges.find(ed => ed.id === hit.properties.id);
+    if (edge) showEdgeCtx(x, y, edge);
+    else { const ll = S.map.unproject(point); showMapCtx(x, y, { lat: ll.lat, lng: ll.lng }); }
+  });
   S.map.on('mousedown', closeCtx);
   S.map.on('click', () => {
     if(S._clickConsumed){ S._clickConsumed = false; return; }
@@ -405,8 +417,10 @@ function makeMarker(node) {
 
   el.addEventListener('click', e => {
     e.stopPropagation();
+    if(S._clickConsumed){ S._clickConsumed = false; return; }
     selectNodeView(node.id);
   });
+  attachLongPress(el, (x, y) => { S._clickConsumed = true; showNodeCtx(x, y, node); });
   marker.on('drag', () => {
     const ll = marker.getLngLat(); node.lat = ll.lat; node.lng = ll.lng;
     updateNodeFields(node); syncEdgesSource();
@@ -1335,6 +1349,30 @@ function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').
 //  CONTEXT MENU
 // ═══════════════════════════════════════════════════════════
 const ctxMenu=document.getElementById('ctxMenu'), ctxTitle=document.getElementById('ctxTitle');
+
+// iPad/touch has no right-click, so context menus (add-node, node, edge) are
+// reached via press-and-hold instead. Pointer Events unify touch/pen/mouse;
+// we only arm the timer for 'touch' since mouse/pen already get a native
+// 'contextmenu' event. Cancelled if the finger moves >10px (treat as a pan/
+// drag, not a hold) or lifts before the timer fires.
+function attachLongPress(el, onLongPress, delay = 550) {
+  let timer = null, start = null;
+  const clear = () => { clearTimeout(timer); timer = null; start = null; };
+  el.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch') return;
+    start = { x: e.clientX, y: e.clientY };
+    timer = setTimeout(() => {
+      const s = start; clear();
+      onLongPress(s.x, s.y, e);
+    }, delay);
+  });
+  el.addEventListener('pointermove', e => {
+    if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) clear();
+  });
+  el.addEventListener('pointerup', clear);
+  el.addEventListener('pointercancel', clear);
+  el.addEventListener('pointerleave', clear);
+}
 
 function buildCtx(title, items) {
   ctxTitle.textContent=title;
