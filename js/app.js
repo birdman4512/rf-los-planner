@@ -1371,6 +1371,11 @@ function attachLongPress(el, onLongPress, delay = 550, label = '?') {
   el.addEventListener('pointerdown', e => {
     dlog(`longpress[${label}] pointerdown type=${e.pointerType}`);
     if (e.pointerType !== 'touch') return;
+    // Marker elements live inside the map's canvas container, so a touch on
+    // a node otherwise bubbles up and arms the canvas's own long-press timer
+    // too -- both fire moments apart and the map/edge menu stomps the node
+    // menu that just opened. Stop it at the marker so only its own handler runs.
+    e.stopPropagation();
     start = { x: e.clientX, y: e.clientY };
     timer = setTimeout(() => {
       const s = start; clear('fired');
