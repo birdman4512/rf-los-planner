@@ -2388,29 +2388,31 @@ async function _computeNodeCoverageImpl(node){
     const { dLat, dLng } = metresToDegrees(node.lat, maxRange);
     dlog(`  Clutter ON: forest ${g.clutterHeights[10]}m, urban ${g.clutterHeights[50]}m, clear-radius ${g.clutterExcludeM}m, atten ${clutterAttenDbPerM(g.freq, g.clutterAttenRef).toFixed(3)}dB/m — loading…`);
     toast(`${node.name}: loading land cover…`);
-    const wc = await buildWorldCoverGrid(node.lat - dLat, node.lng - dLng,
-      node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M, g.clutterHeights);
-    if(wc){
-      let canopySrc = null, canopyLabel = '';
-      if(canopyEnabled()){
-        // Measured canopy: one downsampled titiler PNG per source tile over the
-        // sweep bbox (uncapped — dense forest works). If titiler is unavailable,
-        // tree pixels fall back to WorldCover's flat Forest(m).
-        toast(`${node.name}: loading canopy (titiler)…`);
-        const cg = await buildCanopyGrid(node.lat - dLat, node.lng - dLng,
-          node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M);
-        if(cg){
-          canopySrc = cg; canopyLabel = ' + measured canopy (titiler)';
-          dlog(`  Canopy: titiler grid loaded over ${cg.tiles} source tile(s)`,'ok');
-        } else {
-          dlog('  Canopy: titiler unavailable — using flat Forest(m)','warn');
-        }
-      }
+    // WorldCover and titiler canopy are independent sources — fetch both so a
+    // Terrascope outage doesn't also take down the (unrelated) self-hosted
+    // titiler canopy data, and vice versa.
+    let canopySrc = null, canopyLabel = '';
+    const canopyPromise = canopyEnabled()
+      ? (toast(`${node.name}: loading canopy (titiler)…`),
+         buildCanopyGrid(node.lat - dLat, node.lng - dLng, node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M))
+      : Promise.resolve(null);
+    const [wc, cg] = await Promise.all([
+      buildWorldCoverGrid(node.lat - dLat, node.lng - dLng,
+        node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M, g.clutterHeights),
+      canopyPromise
+    ]);
+    if(cg){
+      canopySrc = cg; canopyLabel = ' + measured canopy (titiler)';
+      dlog(`  Canopy: titiler grid loaded over ${cg.tiles} source tile(s)`,'ok');
+    } else if(canopyEnabled()){
+      dlog('  Canopy: titiler unavailable — using flat Forest(m)','warn');
+    }
+    if(wc || canopySrc){
       clutter = {
-        source: canopySrc ? `${wc.source}${canopyLabel}` : wc.source,
+        source: canopySrc ? `${wc ? wc.source : 'no WorldCover'}${canopyLabel}` : wc.source,
         heightAt(la, ln){
           if(canopySrc){ const h = canopySrc.heightAt(la, ln); if(isFinite(h) && h > 0) return h; }
-          return wc.heightAt(la, ln);
+          return wc ? wc.heightAt(la, ln) : 0;
         }
       };
     }
@@ -2883,17 +2885,20 @@ async function runAnalysis(){
       let clutterH=null, clutterClass=null, clutterImpact=null;
       if(clutterOn){
         const pad=0.005;
-        const wc=await buildWorldCoverGrid(
-          Math.min(a.lat,b.lat)-pad, Math.min(a.lng,b.lng)-pad,
-          Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad,
-          Math.max(20, dist/N), clutterHeights);
-        if(wc){
-          // Measured canopy from the titiler grid (one fetch over the link bbox);
-          // where titiler is unavailable, tree pixels use WorldCover Forest(m).
-          const canopySrc = await buildCanopyGrid(
+        // WorldCover and titiler canopy are independent sources — fetch both so a
+        // Terrascope outage doesn't also take down the (unrelated) self-hosted
+        // titiler canopy data, and vice versa.
+        const [wc,canopySrc]=await Promise.all([
+          buildWorldCoverGrid(
             Math.min(a.lat,b.lat)-pad, Math.min(a.lng,b.lng)-pad,
-            Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad, Math.max(20, dist/N));
-          if(canopySrc) dlog(`  Canopy: titiler grid loaded over ${canopySrc.tiles} source tile(s)`,'ok');
+            Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad,
+            Math.max(20, dist/N), clutterHeights),
+          buildCanopyGrid(
+            Math.min(a.lat,b.lat)-pad, Math.min(a.lng,b.lng)-pad,
+            Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad, Math.max(20, dist/N))
+        ]);
+        if(canopySrc) dlog(`  Canopy: titiler grid loaded over ${canopySrc.tiles} source tile(s)`,'ok');
+        if(wc || canopySrc){
           clutterImpact=makeClutterImpactStats();
           // Parallel land-cover class per sample (0 where excluded/none) so the
           // profile can colour the clutter band by type — see drawClutterBand.
@@ -2901,9 +2906,9 @@ async function runAnalysis(){
           clutterH=dists.map((d,s)=>{
             if(d<clutterExcludeM || (dist-d)<clutterExcludeM) return 0;
             const [lat,lng]=llAt(s);
-            const cls=wc.classAt(lat,lng);
+            const cls=wc?wc.classAt(lat,lng):0;
             clutterClass[s]=cls;
-            let h = wc.heightAt(lat,lng);
+            let h = wc?wc.heightAt(lat,lng):0;
             if(canopySrc){ const c = canopySrc.heightAt(lat,lng); if(isFinite(c) && c>0) h=c; }
             addClutterImpact(clutterImpact, h, d, [lat,lng], null);
             return h;
