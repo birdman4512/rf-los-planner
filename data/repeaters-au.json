@@ -1,8 +1,8 @@
 {
- "generated": "2026-07-01",
+ "generated": "2026-08-01",
  "source": "ACMA Register of Radiocommunications Licences (CC BY 4.0)",
  "attribution": "Contains data sourced from the ACMA, licensed under CC BY 4.0.",
- "count": 483,
+ "count": 479,
  "repeaters": [
   {
    "call": "VK1RBM",
@@ -305,18 +305,6 @@
    "eirp": "0 W"
   },
   {
-   "call": "VK2RBE",
-   "name": "Commsite MT BETHUNGRA",
-   "lat": -34.720724,
-   "lng": 147.877424,
-   "state": "NSW",
-   "outMhz": 146.775,
-   "inMhz": 146.175,
-   "offsetMhz": -0.6,
-   "antH": 30,
-   "eirp": "83 W"
-  },
-  {
    "call": "VK2RCC",
    "name": "Country Energy Site Needle Mountain Near COONABARABRAN",
    "lat": -31.346311,
@@ -339,18 +327,6 @@
    "offsetMhz": -0.6,
    "antH": 110,
    "eirp": "0 W"
-  },
-  {
-   "call": "VK2RTD",
-   "name": "Forestry NSW 13m Lattice Tower Fire Lookout, Tumorrama Mountain off Lookout Road TUMORRAMA",
-   "lat": -35.239366,
-   "lng": 148.500225,
-   "state": "NSW",
-   "outMhz": 146.8,
-   "inMhz": 146.2,
-   "offsetMhz": -0.6,
-   "antH": 10,
-   "eirp": "83 W"
   },
   {
    "call": "VK2RHR",
@@ -869,18 +845,6 @@
    "eirp": "41.785923 W"
   },
   {
-   "call": "VK2RTW",
-   "name": "NSWTA 30m Lattice Tower Wagga/Willans Hill Captain Cook Dr TURVEY PARK",
-   "lat": -35.132713,
-   "lng": 147.372072,
-   "state": "NSW",
-   "outMhz": 438.025,
-   "inMhz": 433.025,
-   "offsetMhz": -5,
-   "antH": 0,
-   "eirp": "0 W"
-  },
-  {
    "call": "VK2RGR",
    "name": "EACOM Eastern Tower Scenic Hill GRIFFITH",
    "lat": -34.276011,
@@ -1245,6 +1209,18 @@
    "name": "Amateur Radio Site Corner of Marabunga Road SOMERSBY",
    "lat": -33.360078,
    "lng": 151.291215,
+   "state": "NSW",
+   "outMhz": 438.85,
+   "inMhz": 431.85,
+   "offsetMhz": -7,
+   "antH": 10,
+   "eirp": "83 W"
+  },
+  {
+   "call": "VK2RCA",
+   "name": "Northern Rivers Comms. Site CANGAI EAST",
+   "lat": -29.613986,
+   "lng": 152.479179,
    "state": "NSW",
    "outMhz": 438.85,
    "inMhz": 431.85,
@@ -2561,18 +2537,6 @@
    "eirp": "38 W"
   },
   {
-   "call": "VK4RRC",
-   "name": "Redcliffe_Districts_Radio Townsend Road Ocean View",
-   "lat": -27.1379,
-   "lng": 152.81552,
-   "state": "QLD",
-   "outMhz": 438.675,
-   "inMhz": 431.675,
-   "offsetMhz": -7,
-   "antH": 15,
-   "eirp": "83 W"
-  },
-  {
    "call": "VK4RBA",
    "name": "Amateur Repeater Site 21 Rochedale Road Rochedale",
    "lat": -27.553116,
@@ -3372,6 +3336,18 @@
    "state": "SA",
    "outMhz": 438.925,
    "inMhz": 431.925,
+   "offsetMhz": -7,
+   "antH": 20,
+   "eirp": "83 W"
+  },
+  {
+   "call": "VK5RDS",
+   "name": "RSD 1800 Range Rd WILLUNGA HILL",
+   "lat": -35.289141,
+   "lng": 138.583763,
+   "state": "SA",
+   "outMhz": 439.925,
+   "inMhz": 432.925,
    "offsetMhz": -7,
    "antH": 20,
    "eirp": "83 W"
@@ -4325,18 +4301,6 @@
    "eirp": "0 W"
   },
   {
-   "call": "VK3RNW",
-   "name": "GWW Lot 27 Woodland Drive MT GISBORNE",
-   "lat": -37.521839,
-   "lng": 144.585444,
-   "state": "VIC",
-   "outMhz": 146.875,
-   "inMhz": 146.275,
-   "offsetMhz": -0.6,
-   "antH": 20,
-   "eirp": "83 W"
-  },
-  {
    "call": "VK3REB",
    "name": "State Government Tower 23 km NNE of Lakes Entrance MT NOWA NOWA",
    "lat": -37.692799,
@@ -4347,18 +4311,6 @@
    "offsetMhz": -0.6,
    "antH": 0,
    "eirp": "0 W"
-  },
-  {
-   "call": "VK3RSH",
-   "name": "3km North West of Swan Hi SWAN HILL",
-   "lat": -35.330018,
-   "lng": 143.505368,
-   "state": "VIC",
-   "outMhz": 146.9,
-   "inMhz": 146.3,
-   "offsetMhz": -0.6,
-   "antH": 20,
-   "eirp": "83 W"
   },
   {
    "call": "VK3RWZ",
