@@ -2541,7 +2541,12 @@ function renderCoveragePolygon(node){
   // is deliberately generous; paired with nearest-neighbour resampling
   // below (crisp/blocky when stretched, not smeared) rather than raising
   // resolution indefinitely to chase every possible zoom level.
-  const W = Math.round(clampNum((maxR * 2.1) / 15, 512, 4096));
+  // Rounded up to a power of two: an arbitrary (non-POT) size here left the
+  // WHOLE bbox rendering solid opaque black instead of the transparent/tinted
+  // fan — a WebGL "incomplete texture" (undefined per spec, GPUs commonly
+  // fall back to opaque black) when a non-power-of-two texture is sampled
+  // with a mipmapped filter. POT sizes are always texture-complete.
+  const W = 2 ** Math.ceil(Math.log2(clampNum((maxR * 2.1) / 15, 512, 4096)));
   const H = W;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
@@ -2616,6 +2621,8 @@ function renderCoveragePolygon(node){
   // toBlob() encodes off the main thread (toDataURL was a synchronous encode
   // of up to ~67MB of pixels right as compute finished), and blob: keeps the
   // CSP connect-src free of data: (MapLibre fetches the ImageSource URL).
+  // Explicit MIME (not the default-arg omission) so an alpha-preserving
+  // encode is never left to a browser's unstated toBlob() default.
   canvas.toBlob(blob => {
     if(!blob) return;
     whenMapLayersReady(() => {
@@ -2638,7 +2645,7 @@ function renderCoveragePolygon(node){
         // where the outline drew on top of the fills.
         paint: { 'raster-opacity': 1, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' } }, 'coverage-outline');
     });
-  });
+  }, 'image/png');
 }
 
 // Removes this node's canvas source/layer (called at the start of every
