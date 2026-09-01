@@ -1,8 +1,8 @@
 {
- "generated": "2026-08-01",
+ "generated": "2026-09-01",
  "source": "ACMA Register of Radiocommunications Licences (CC BY 4.0)",
  "attribution": "Contains data sourced from the ACMA, licensed under CC BY 4.0.",
- "count": 479,
+ "count": 481,
  "repeaters": [
   {
    "call": "VK1RBM",
@@ -905,18 +905,6 @@
    "eirp": "82.979345 W"
   },
   {
-   "call": "VK2RDX",
-   "name": "Amateur site MT BINDO",
-   "lat": -33.677019,
-   "lng": 150.009289,
-   "state": "NSW",
-   "outMhz": 438.15,
-   "inMhz": 431.15,
-   "offsetMhz": -7,
-   "antH": 15,
-   "eirp": "83 W"
-  },
-  {
    "call": "VK2RTZ",
    "name": "Gencom Site 1 Sugarloaf  Range  Sugarloaf Dam Access Rd SUGARLOAF STATE CONSERVATION AREA",
    "lat": -32.944671,
@@ -1193,18 +1181,6 @@
    "eirp": "83 W"
   },
   {
-   "call": "VK2RBA",
-   "name": "Walabadah Mawson Street BOMBALA",
-   "lat": -36.924324,
-   "lng": 149.235232,
-   "state": "NSW",
-   "outMhz": 438.8375,
-   "inMhz": 431.8375,
-   "offsetMhz": -7,
-   "antH": 12,
-   "eirp": "83 W"
-  },
-  {
    "call": "VK2RAG",
    "name": "Amateur Radio Site Corner of Marabunga Road SOMERSBY",
    "lat": -33.360078,
@@ -1287,6 +1263,18 @@
    "offsetMhz": -5,
    "antH": 200,
    "eirp": "120 W"
+  },
+  {
+   "call": "VK2RBS",
+   "name": "NSWPF 45m Lattice Tower off St Helena Rd MCLEODS SHOOT",
+   "lat": -28.660016,
+   "lng": 153.560704,
+   "state": "NSW",
+   "outMhz": 439.6,
+   "inMhz": 434.6,
+   "offsetMhz": -5,
+   "antH": 30,
+   "eirp": "165.56 W"
   },
   {
    "call": "VK2RWB",
@@ -1503,6 +1491,18 @@
    "offsetMhz": 805.75,
    "antH": 0,
    "eirp": "0 W"
+  },
+  {
+   "call": "VK2RDX",
+   "name": "Amateur site MT BINDO",
+   "lat": -33.677019,
+   "lng": 150.009289,
+   "state": "NSW",
+   "outMhz": 1257.6,
+   "inMhz": 1297.6,
+   "offsetMhz": 40,
+   "antH": 13,
+   "eirp": "126.2 W"
   },
   {
    "call": "VK2RNW",
@@ -3737,18 +3737,6 @@
    "eirp": "84.7 W"
   },
   {
-   "call": "VK3RMH",
-   "name": "Silver Comm Site Lot 13 Kinglake Rd KINGLAKE",
-   "lat": -37.515708,
-   "lng": 145.316285,
-   "state": "VIC",
-   "outMhz": 53.55,
-   "inMhz": 52.55,
-   "offsetMhz": -1,
-   "antH": 15,
-   "eirp": "70.8 W"
-  },
-  {
    "call": "VK3RDD",
    "name": "Rear of Girl Guide Hall Grant street CRANBOURNE",
    "lat": -38.113722,
@@ -4446,15 +4434,15 @@
   },
   {
    "call": "VK3RCV",
-   "name": "Southern Cross Site Mt Alexander Joseph Young Dr HARCORT NORTH",
-   "lat": -36.990597,
-   "lng": 144.308725,
+   "name": "Victoria Police Site 26 km S of Bendigo MT ALEXANDER",
+   "lat": -36.996985,
+   "lng": 144.304286,
    "state": "VIC",
    "outMhz": 147.15,
    "inMhz": 147.75,
    "offsetMhz": 0.6,
-   "antH": 0,
-   "eirp": "0 W"
+   "antH": 30,
+   "eirp": "83 W"
   },
   {
    "call": "VK3REC",
@@ -4659,6 +4647,18 @@
    "offsetMhz": -7,
    "antH": 20,
    "eirp": "83 W"
+  },
+  {
+   "call": "VK3RIR",
+   "name": "6 Steane Ave ARTHURS SEAT",
+   "lat": -38.354463,
+   "lng": 144.953894,
+   "state": "VIC",
+   "outMhz": 438.15,
+   "inMhz": 433.15,
+   "offsetMhz": -5,
+   "antH": 0,
+   "eirp": "0 W"
   },
   {
    "call": "VK3RUG",
@@ -4935,6 +4935,18 @@
    "offsetMhz": -7,
    "antH": 14,
    "eirp": "83 W"
+  },
+  {
+   "call": "VK3RMH",
+   "name": "Briar Hill Community Hall 126-132 Mountain View Road BRIAR HALL",
+   "lat": -37.7072,
+   "lng": 145.1185,
+   "state": "VIC",
+   "outMhz": 438.675,
+   "inMhz": 431.675,
+   "offsetMhz": -7,
+   "antH": 14,
+   "eirp": "82.8 W"
   },
   {
    "call": "VK3RKK",
@@ -5690,6 +5702,18 @@
    "inMhz": 434.85,
    "offsetMhz": -5,
    "antH": 30,
+   "eirp": "83 W"
+  },
+  {
+   "call": "VK6RGN",
+   "name": "Amateur Site Moresby Range 10.91 km NNE of Geraldton",
+   "lat": -28.688907,
+   "lng": 114.66743,
+   "state": "WA",
+   "outMhz": 439.9,
+   "inMhz": 432.9,
+   "offsetMhz": -7,
+   "antH": 15,
    "eirp": "83 W"
   },
   {
