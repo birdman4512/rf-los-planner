@@ -8,49 +8,32 @@ Meshtastic, amateur radio, and point-to-point Wi-Fi links.
 
 ## Features
 
-- Leaflet map interface for placing and linking sites
-- Terrain profile analysis using AWS Open Terrain Tiles
-- Line-of-sight and 1st Fresnel zone clearance checks, with earth-curvature
-  correction (selectable k-factor: 4/3, 1, 2/3)
-- Per-link knife-edge diffraction loss estimate in dB (ITU-R P.526), so marginal
-  links report an actual loss figure rather than just a pass/fail flag
-- Multi-hop path profile views
-- Per-band RF presets for Meshtastic, VHF/UHF, and Wi-Fi
-- Terrain-aware radial coverage estimates
-- Optional surface clutter: ESA WorldCover land cover plus measured Meta/WRI
-  canopy height (via a self-hosted titiler) for foliage/building obstruction
-  and diffraction loss — see [docs/canopy-titiler.md](docs/canopy-titiler.md)
-- Shareable URLs that preserve nodes, links, paths, and RF settings
+- MapLibre map for sites, links, paths and terrain-aware coverage
+- One shared RF solver for profiles and coverage, with directional budgets
+- Bullington diffraction, single-edge comparison and strict surface-LOS modes
+- Separate geometry, predicted receive power/margin/SNR and observed reception
+- Distance-based profiles, marginal-profile refinement and adaptive coverage rays
+- Per-node radio settings, cable loss, surveyed ground and local clutter overrides
+- Canopy/WorldCover modelling, zero default clearing radius and explicit data quality
+- Height-sensitivity scenarios, local DEM imports and traceroute/measurement validation
+- Shareable settings URLs and downloadable projects including local data
 
-## Link Status
+## Accuracy and limitations
 
-Each analysed link is classified by clearance:
+Budget status now means **BUDGET OK**, **LOW MARGIN** or **BELOW SENSITIVITY**.
+Geometry is reported independently. A successful traceroute is evidence of a
+received packet, not proof of clear LOS or reliable availability.
 
-- **✓ CLEAR** — LOS clear and the 1st Fresnel zone meets the preset threshold
-  (40% for Meshtastic/ham, 60% for Wi-Fi).
-- **⚠ MARGINAL** — LOS clear but the Fresnel zone is obstructed below the
-  threshold; the estimated knife-edge diffraction loss (**Diff**, in dB) is shown
-  on the link result.
-- **✕ BLOCKED** — terrain interrupts the direct line of sight.
+The default uses the Bullington component of ITU-R P.526, not the complete
+spherical-earth/delta-Bullington model. Clutter attenuation and terminal-region
+selection still contain assumptions. Source resolution, missing canopy data,
+noise/interference and changing conditions limit prediction accuracy. Height
+scenarios are sensitivity checks, not confidence intervals.
 
-## Modelling & Limitations
-
-This is a first-order **line-of-sight** planner. It is frequency-aware — both the
-Fresnel zone radius and free-space path loss scale correctly with frequency — so
-it is well suited to comparing bands for clear point-to-point links.
-
-Bare-earth terrain (~30 m DEM) is always the hard LOS gate. **Optional surface
-clutter** adds foliage/building obstruction on top: ESA WorldCover land-cover
-heights, optionally refined by measured Meta/WRI canopy height served by a
-self-hosted titiler ([docs/canopy-titiler.md](docs/canopy-titiler.md)). Clutter
-is treated as soft loss (extra Fresnel/diffraction intrusion plus a capped
-per-metre attenuation), never as new hard terrain.
-
-It does **not** model non-line-of-sight propagation (diffraction-dominated paths,
-tropospheric or ground-wave), rain or atmospheric attenuation, multipath, or
-antenna patterns. The diffraction figure is a single knife-edge estimate over the
-dominant obstruction. For full NLOS coverage prediction, use a Longley-Rice/ITWOM
-tool (SPLAT!, Radio Mobile, CloudRF).
+See [Accuracy model and validation](docs/accuracy.md) for the equations used,
+limitations, measurement/traceroute JSON format, terrain-grid format and tests.
+Measured canopy comes from a self-hosted titiler; see
+[docs/canopy-titiler.md](docs/canopy-titiler.md).
 
 ## Running Locally
 
@@ -66,11 +49,13 @@ This matches how GitHub Pages serves the site (same-origin fonts,
 Content-Security-Policy behaviour, CORS image decoding). Opening `index.html`
 directly via `file://` mostly works but is not the tested path.
 
-The tool loads Leaflet, LZString, map tiles, and terrain tiles from public
+The tool loads MapLibre, LZString, map tiles, and terrain tiles from public
 CDNs/services, so an internet connection is needed for the full experience.
 Fonts are self-hosted from `fonts/`.
 
-The app itself is `index.html` (markup + styles) plus `js/app.js` (all logic).
+The app uses `index.html` (markup/styles), `js/app.js` (map and workflow),
+`js/rf-model.js` (shared propagation), `js/rf-worker.js` (coverage),
+`js/rf-data.js` (data validation), and `js/accuracy.js` (accuracy controls/imports).
 There is deliberately no inline JavaScript: the Content-Security-Policy omits
 `'unsafe-inline'` from `script-src`.
 
@@ -97,8 +82,8 @@ app and the finder.
 
 The site is published to GitHub Pages by the **CI & Deploy** GitHub Action
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), not by serving the repo
-root directly. On every push to `main` the workflow runs the JS syntax check and
-Playwright smoke tests (`verify`), and only if those pass does the gated `deploy`
+root directly. On every push to `main` the workflow runs the JS syntax check, numerical model tests and
+Playwright regression tests (`verify`), and only if those pass does the gated `deploy`
 job assemble a clean `_site/` and publish it. Failed tests leave the previous
 good deploy live.
 

@@ -5,10 +5,11 @@
   "description": "Dev/CI tooling for the RF Line of Sight Planner. The app itself is static (index.html + js/app.js, no build step); these scripts only run in CI.",
   "type": "module",
   "scripts": {
-    "check:js": "node --check js/app.js && node --check js/share-codec.js && node --check js/repeaters.js && node --check scripts/build-repeaters.mjs",
+    "check:js": "node --check js/app.js && node --check js/rf-model.js && node --check js/rf-worker.js && node --check js/rf-data.js && node --check js/accuracy.js && node --check js/share-codec.js && node --check js/repeaters.js && node --check scripts/build-repeaters.mjs",
     "serve": "node scripts/serve.mjs 8080",
     "test:smoke": "playwright test",
-    "test": "npm run check:js && npm run test:smoke"
+    "test:model": "node --test tests/model.test.mjs",
+    "test": "npm run check:js && npm run test:model && npm run test:smoke"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1"

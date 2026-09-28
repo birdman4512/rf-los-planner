@@ -66,16 +66,16 @@ const LIMITS = {
 const COVERAGE_RAY_OPTIONS = [24, 36, 72, 144, 360];
 const COVERAGE_SAMPLE_OPTIONS = [30, 50, 80];
 // Target sample step (m) along each coverage ray. Finer than the ~30-40 m DEM
-// on purpose: it oversamples terrain (cheap interpolation) so the 1 m measured
-// canopy resolves narrow tree lines and clearings the old 40 m step walked over.
+// on purpose: it reduces missed features in the available rasters. Canopy is
+// resampled by its server and should not be described as 1 m effective detail.
 // The Samples setting is a floor; COVERAGE_MAX_SAMPLES caps total samples per ray.
 const COVERAGE_STEP_M = 20;
-const COVERAGE_MAX_SAMPLES = 3200; // 20 m step holds out to ~64 km before capping
+const COVERAGE_MAX_SAMPLES = 6400; // 20 m step holds out to ~128 km before capping
 const FRESNEL_OPTIONS = [0, 0.4, 0.6, 1];
 
 // ── Surface clutter via Meta/WRI canopy height + ESA WorldCover land cover ──
-// Bare-earth terrain misses trees/buildings; clutter adds obstruction pressure
-// and diffraction loss, while bare terrain remains the hard LOS blocker.
+// Bare-earth terrain misses trees/buildings; optional clutter contributes to
+// geometry and propagation. Only strict LOS mode excludes obstructed paths.
 // Optional and off by default; degrades gracefully to bare terrain if data fails.
 const WORLDCOVER_WMS_SOURCES = [
   { name:'Terrascope TiTiler', url:'https://titiler.terrascope.be/wms', layer:'esa-worldcover-map-10m-2021-v2_map', time:'2021-01-01' },
@@ -539,8 +539,10 @@ function removeNode(id) {
 }
 
 function clearAll() {
+  S.modelRevision=(S.modelRevision||0)+1;
   S.nodes.forEach(n => { if (n.marker) n.marker.remove(); removeNodeCoverageLayer(n.id); removeNodeOutline(n.id); });
   S.nodes = []; S.edges = []; S.paths = [];
+  if(typeof observations!=='undefined') observations=[];
   syncEdgesSource();
   S.activeView = null;
   closeNodeInfo();
@@ -934,6 +936,7 @@ function highlightActiveMapView(){
 }
 
 function invalidateEdgesForNode(nodeId) {
+  S.modelRevision=(S.modelRevision||0)+1;
   let changed = false;
   S.edges.forEach(e => {
     if (e.aId !== nodeId && e.bId !== nodeId) return;
@@ -1161,11 +1164,19 @@ function renderNodeList() {
         <div class="wp-elev">GND:<span id="elev_${node.id}">${node.elev!==null?node.elev.toFixed(1)+'m':'…'}</span></div>
         <div class="wp-amsl">AMSL:<span id="amsl_${node.id}">${amsl}</span></div>
       </div>
+      <details class="site-details"><summary>Site measurements</summary>
+        <div class="wp-grid">
+          <div><label>Surveyed ground AMSL (m)</label><input data-site="groundM" type="number" step="0.1" value="${node.groundM??''}" placeholder="Use DEM"></div>
+          <div><label>Verified clear radius (m)</label><input data-site="clearM" type="number" min="0" value="${node.clearM??''}" placeholder="Global"></div>
+          <div><label>Local clutter height (m)</label><input data-site="clutterM" type="number" min="0" value="${node.clutterM??''}" placeholder="Use map"></div>
+        </div><small>Ground heights must use the DEM's vertical datum. Clutter height overrides the first 100 m along the path.</small>
+      </details>
       <div class="wp-cov">
         <input type="checkbox" id="cov_${node.id}" ${node.coverageOn?'checked':''}/>
         <label for="cov_${node.id}" style="cursor:pointer">COVERAGE</label>
         <button class="wp-cov-btn ${covBtnClass}" id="covBtn_${node.id}">${covBtnLabel}</button>
         <span class="wp-cov-status" id="covStat_${node.id}">${coverageStatusText(node)}</span>
+        ${node.coverageQuality?`<small class="quality-note">${escHtml(node.coverageQuality)}</small>`:""}
       </div>
       <div class="wp-rf-toggle ${node.rfOverride?'open':''}">
         <span class="chev">▸</span> RF OVERRIDE ${node.rfOverride?'(custom)':'(using global)'}
@@ -1173,7 +1184,12 @@ function renderNodeList() {
       <div class="wp-rf-body" id="rfBody_${node.id}" ${node.rfOverride?'':'style="display:none"'}>
         <div><label>TX dBm</label><input type="number" step="0.5" value="${rf.tx}" data-rf="txDbm"/></div>
         <div><label>Gain dBi</label><input type="number" step="0.5" value="${rf.gain}" data-rf="gainDbi"/></div>
-        <div><label>RX dBm</label><input type="number" step="1" value="${rf.rx}" data-rf="rxDbm"/></div>
+        <div><label>RX dBm</label><input type="number" step="0.5" value="${rf.rx}" data-rf="rxDbm"/></div>
+        <div><label>Cable loss dB</label><input type="number" min="0" step="0.1" value="${rf.cable}" data-rf="cableDb"/></div>
+        <div><label>Noise figure dB</label><input type="number" min="0" step="0.1" value="${rf.nf}" data-rf="noiseFigure"/></div>
+        <div><label>Measured noise dBm</label><input type="number" value="${rf.noiseDbm??''}" data-extra-rf="noiseDbm" placeholder="Estimated"/></div>
+        <div><label>Modem</label><select data-extra-rf="modem">${modemOptions(rf.modem)}</select></div>
+        <div><label>Hardware / antenna notes</label><input data-extra-rf="hardware" value="${escHtml(node.hardware||'')}" maxlength="120"/></div>
       </div>
       </div>`;
     // The CSP forbids inline on*= handlers (script-src has no 'unsafe-inline'),
@@ -1190,9 +1206,11 @@ function renderNodeList() {
     q(`#covBtn_${node.id}`).addEventListener('click', () => computeNodeCoverage(node.id));
     q('.wp-rf-toggle').addEventListener('click', () => toggleNodeRfOverride(node.id));
     card.querySelectorAll('[data-rf]').forEach(inp => {
-      inp.addEventListener('change', ev => setNodeRf(node.id, ev.currentTarget.dataset.rf, +ev.currentTarget.value));
+      inp.addEventListener('change', ev => setNodeRf(node.id, ev.currentTarget.dataset.rf, ev.currentTarget.value));
     });
-    const cardControlSelector = 'input,button,label,select,textarea';
+    card.querySelectorAll('[data-site]').forEach(inp=>inp.addEventListener('change',ev=>setSiteMeasurement(node,ev.target.dataset.site,ev.target.value)));
+    card.querySelectorAll('[data-extra-rf]').forEach(inp=>inp.addEventListener('change',ev=>setExtraRadio(node,ev.target.dataset.extraRf,ev.target.value)));
+    const cardControlSelector = 'input,button,label,select,textarea,summary';
     const restoreCardDrag = () => { card.draggable = true; };
     card.querySelectorAll(cardControlSelector).forEach(el=>{
       el.draggable=false;
@@ -1619,38 +1637,33 @@ function loadTile(z, x, y){
         const data = ctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data;
         const out = new Float32Array(TILE_SIZE * TILE_SIZE);
         for(let i = 0, j = 0; i < data.length; i += 4, j++){
-          out[j] = (data[i] * 256 + data[i+1] + data[i+2] / 256) - 32768;
+          out[j] = data[i+3]===0 ? NaN : (data[i] * 256 + data[i+1] + data[i+2] / 256) - 32768;
         }
+        if(out.some(v=>!Number.isFinite(v))) { reject(new Error('Invalid terrain pixels')); return; }
         resolve(out);
       }catch(e){ reject(e); }
     };
     img.onerror = () => reject(new Error(`Tile load failed: ${key}`));
     img.src = TERRAIN_TILE_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y);
   });
+  p.catch(()=>_tileCache.delete(key));
   _tileCache.set(key, p);
   trimCache(_tileCache, TILE_CACHE_MAX);
   return p;
 }
 
 async function tileElevAt(lat, lng, z = TERRAIN_Z){
-  const n = Math.pow(2, z);
-  const fx = lng2tileX(lng, z), fy = lat2tileY(lat, z);
-  const tx = ((Math.floor(fx) % n) + n) % n;
-  const ty = Math.max(0, Math.min(n - 1, Math.floor(fy)));
-  const grid = await loadTile(z, tx, ty);
-  // Bilinear interp within the tile
-  const px = (fx - Math.floor(fx)) * TILE_SIZE;
-  const py = (fy - Math.floor(fy)) * TILE_SIZE;
-  const x0 = Math.max(0, Math.min(TILE_SIZE - 1, Math.floor(px)));
-  const y0 = Math.max(0, Math.min(TILE_SIZE - 1, Math.floor(py)));
-  const x1 = Math.min(TILE_SIZE - 1, x0 + 1);
-  const y1 = Math.min(TILE_SIZE - 1, y0 + 1);
-  const dx = px - x0, dy = py - y0;
-  const e00 = grid[y0 * TILE_SIZE + x0];
-  const e10 = grid[y0 * TILE_SIZE + x1];
-  const e01 = grid[y1 * TILE_SIZE + x0];
-  const e11 = grid[y1 * TILE_SIZE + x1];
-  return e00 * (1-dx)*(1-dy) + e10 * dx*(1-dy) + e01 * (1-dx)*dy + e11 * dx*dy;
+  const local=localTerrainAt(lat,lng);
+  if(local!==null) return local;
+  const n=2**z, px=lng2tileX(lng,z)*TILE_SIZE-.5, py=lat2tileY(lat,z)*TILE_SIZE-.5;
+  const x0=Math.floor(px),y0=Math.floor(py),dx=px-x0,dy=py-y0;
+  async function pixel(x,y){
+    const tx=((Math.floor(x/TILE_SIZE)%n)+n)%n, ty=Math.max(0,Math.min(n-1,Math.floor(y/TILE_SIZE)));
+    const grid=await loadTile(z,tx,ty);
+    return grid[((y%TILE_SIZE+TILE_SIZE)%TILE_SIZE)*TILE_SIZE+((x%TILE_SIZE+TILE_SIZE)%TILE_SIZE)];
+  }
+  const [a,b,c,d]=await Promise.all([pixel(x0,y0),pixel(x0+1,y0),pixel(x0,y0+1),pixel(x0+1,y0+1)]);
+  return a*(1-dx)*(1-dy)+b*dx*(1-dy)+c*(1-dx)*dy+d*dx*dy;
 }
 
 // Kept for backward compatibility with the LOS analyser path
@@ -1668,6 +1681,7 @@ async function fetchElevSingle(lat,lng){
 }
 
 async function fetchElev(node){
+  if(Number.isFinite(node.groundM)){node.elev=node.groundM;updateElevDisplay(node);return;}
   const key=`${(+node.lat).toFixed(5)},${(+node.lng).toFixed(5)}`;
   try{
     const elev=await fetchElevSingle(node.lat,node.lng);
@@ -1697,7 +1711,8 @@ async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
   const profileKey=[lat1,lng1,lat2,lng2,N].map(v=>Number(v).toFixed(5)).join(',');
   if(S.profileCache[profileKey]) return [...S.profileCache[profileKey]];
   const lats=[],lngs=[];
-  for(let i=0;i<=N;i++){const t=i/N;lats.push((lat1+(lat2-lat1)*t).toFixed(5));lngs.push((lng1+(lng2-lng1)*t).toFixed(5));}
+  const distance=haversine(lat1,lng1,lat2,lng2),bearing=bearingTo(lat1,lng1,lat2,lng2);
+  for(let i=0;i<=N;i++){const ll=destPoint(lat1,lng1,bearing,distance*i/N);lats.push(ll[0]);lngs.push(ll[1]);}
   const CHUNK=100; const elevs=[];
   for(let i=0;i<lats.length;i+=CHUNK){
     const bl=lats.slice(i,i+CHUNK),bg=lngs.slice(i,i+CHUNK);
@@ -1822,7 +1837,7 @@ function canopyManifestCacheKey(manifest){
 }
 
 function makeClutterImpactStats(){
-  return { total:0, hits:0, sum:0, max:0, maxDist:0, maxLatLng:null, maxAz:null, blockedByClutter:0, maxLossDb:0 };
+  return { total:0, hits:0, sum:0, max:0, maxDist:0, maxLatLng:null, maxAz:null };
 }
 
 function addClutterImpact(stats, h, dist, latlng, az){
@@ -1856,24 +1871,56 @@ function clutterAttenDbPerM(freqMHz, refDbPerM = CLUTTER_ATTEN_DB_PER_M_915){
   return ref * Math.sqrt(f / 915);
 }
 
-function clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, startIdx, endIdx, freqMHz, refDbPerM, capDb = CLUTTER_ATTEN_CAP_DB){
-  if(!clutterH) return 0;
-  const dbPerM = clutterAttenDbPerM(freqMHz, refDbPerM);
-  const cap = clampNum(capDb, 0, 200, CLUTTER_ATTEN_CAP_DB);
-  let loss = 0;
-  for(let j = startIdx; j < endIdx; j++){
-    const h = clutterH[j] || 0;
-    if(!(h > 0)) continue;
-    const los = losAt(j);
-    const bareEff = bareEffAt(j);
-    if(los <= bareEff) continue; // bare terrain already owns the obstruction
-    if(los >= bareEff + h) continue;
-    const frac = Math.max(0.15, Math.min(1, (bareEff + h - los) / h));
-    const segM = j > 0 ? Math.max(0, dists[j] - dists[j-1]) : 0;
-    loss += segM * dbPerM * frac;
-    if(loss >= cap) return cap;
-  }
-  return Math.min(cap, loss);
+// Clutter height (m) + WorldCover class at a point from the two independent
+// sources. Measured canopy replaces the flat tree height outright over tree /
+// mangrove pixels — including a measured 0 m, which is a real clearing, not
+// missing data. Elsewhere it only adds trees on top of the class height, so a
+// canopy reading never erases a built-up pixel's buildings. guess = the height
+// is the flat Forest(m) stand-in for an unmeasured tree pixel.
+function blendClutter(wc, canopySrc, lat, lng){
+  const cls = wc ? wc.classAt(lat, lng) : 0;
+  const wcH = wc ? wc.heightAt(lat, lng) : 0;
+  const c = canopySrc ? canopySrc.heightAt(lat, lng) : NaN;
+  const tree = cls === 10 || cls === 95;
+  if(!Number.isFinite(c)) return { h: wcH, cls, guess: tree && wcH > 0 };
+  if(!wc || tree) return { h: c, cls, guess: false };
+  return { h: Math.max(wcH, c), cls, guess: false };
+}
+
+// Worst-direction link budget for a→b. Each end uses its own effective RF
+// (per-node override or global); the margin is received power above the
+// receiving end's sensitivity, taking whichever direction is weaker.
+function linkBudgetFor(a, b, pathLossDb){
+  return RFModel.budget(effectiveRf(a), effectiveRf(b), pathLossDb);
+}
+
+function linkStatus(marginDb, requiredMarginDb){
+  return RFModel.status(marginDb, requiredMarginDb);
+}
+
+// Path loss doesn't depend on TX/gain/sensitivity/margin/modem, so when only
+// those change, re-derive each analysed link's budget and status in place
+// instead of making the user re-run the terrain analysis.
+function refreshLinkBudgets(){
+  const requiredMarginDb = clampNum(document.getElementById('inpMargin')?.value, 0, 100, 0);
+  const nodesById = nodeByIdMap();
+  let changed = false;
+  S.edges.forEach(e => {
+    const r = e.result;
+    if(!r || r.pathLossDb == null) return;
+    const a = nodesById.get(e.aId), b = nodesById.get(e.bId);
+    if(!a || !b) return;
+    Object.assign(r, linkBudgetFor(a, b, r.pathLossDb), { requiredMarginDb });
+    r.status = linkStatus(r.marginDb, requiredMarginDb);
+    if(r.pathLossRange) r.marginRange=r.pathLossRange.map(loss=>linkBudgetFor(a,b,loss).marginDb).sort((x,y)=>x-y);
+    changed = true;
+  });
+  if(!changed) return;
+  syncEdgesSource();
+  renderResults();
+  renderEdgesPanel();
+  renderPathsPanel();
+  if(S.redrawProfile) S.redrawProfile();
 }
 
 function lonLatToTile(lng, lat, z){
@@ -1979,6 +2026,7 @@ async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, height
     dlog(`Clutter source status: ${src.name} OK (${filled}/${classes.length} classified pixels)`,'ok');
     return {
       source: src.name,
+      spacingM:Math.max((maxLat-minLat)*111320/rows,(maxLng-minLng)*111320*Math.cos(midLat*Math.PI/180)/cols),
       classAt(lat, lng){
         const c = Math.max(0, Math.min(cols-1, Math.floor((lng - minLng) / (maxLng - minLng) * cols)));
         const r = Math.max(0, Math.min(rows-1, Math.floor((maxLat - lat) / (maxLat - minLat) * rows)));
@@ -2059,6 +2107,7 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
   }
   return {
     tiles: images.length,
+    spacingM:Math.max(...images.map(im=>Math.max((im.n-im.s)*111320/im.rows,(im.e-im.w)*111320*Math.cos(midLat*Math.PI/180)/im.cols))),
     heightAt(lat, lng){
       for(const im of images){
         if(lng < im.w || lng > im.e || lat < im.s || lat > im.n) continue;
@@ -2109,22 +2158,7 @@ function bearingTo(la1,lo1,la2,lo2){
   return (Math.atan2(y,x)*180/Math.PI+360)%360;
 }
 function bulge(d1,d2,K){return d1*d2/(2*K*R_EARTH);}
-function fresnel1(d1,d2,fMHz){const lam=3e8/(fMHz*1e6);return Math.sqrt(lam*d1*d2/(d1+d2));}
-
-// Single knife-edge diffraction loss (dB) from the Fresnel-Kirchhoff diffraction
-// parameter ν, using the ITU-R P.526 approximation J(ν). Valid for ν > -0.78;
-// below that the obstruction clears the LOS line by enough that the loss is
-// negligible (≈0 dB). At ν=0 (terrain grazing the LOS line) this returns ~6 dB,
-// rising as the obstruction intrudes further into the path.
-function knifeEdgeLossDb(nu){
-  if(nu <= -0.78) return 0;
-  const t = Math.sqrt((nu - 0.1)**2 + 1) + nu - 0.1;
-  return 6.9 + 20 * Math.log10(t);
-}
-
-function fsplDb(distM, fMHz){
-  return 20*Math.log10(Math.max(distM,1)/1000)+20*Math.log10(fMHz)+32.44;
-}
+function fresnel1(d1,d2,fMHz){return RFModel.fresnel(d1,d2,fMHz);}
 
 // Coverage is drawn in each node's own colour so overlapping nodes stay
 // distinguishable; signal strength is shown by fill opacity instead of hue —
@@ -2169,15 +2203,12 @@ function friisRangeMeters(txDbm, gainTx, gainRx, rxSensDbm, fMHz, marginDb){
 //  COVERAGE  —  per-node radial sweep, polygon rendering
 // ═══════════════════════════════════════════════════════════
 // Per-preset full settings bundle: link budget + coverage modelling defaults.
-// Meshtastic & ham VHF/UHF use Fresnel=40% + 6 dB margin: the Fresnel zone still
-// matters (partial obstruction adds diffraction loss), but these links tolerate
-// some encroachment — the few dB of loss at ~40% clearance is what the 6 dB
-// margin absorbs. Requiring the full 60% here would double-count that margin.
-// Wi-Fi presets use Fresnel=60% + 10 dB margin (sustained-link engineering).
+// Fresnel fraction is a geometry reporting threshold. Diffraction is calculated
+// independently, and the required margin remains a reserve above sensitivity.
 const PRESET_RF = {
-  '915':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10, clutterCap:45},
-  '868':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10, clutterCap:45},
-  '433':  {tx:22, gain:2, rx:-130, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10, clutterCap:45},
+  '915':  {tx:22, gain:2, rx:-130, modem:'LongFast', margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10, clutterCap:45},
+  '868':  {tx:22, gain:2, rx:-130, modem:'LongFast', margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10, clutterCap:45},
+  '433':  {tx:22, gain:2, rx:-130, modem:'LongFast', margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10, clutterCap:45},
   '146':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:50, clutterAtten:0.10, clutterCap:45},
   '438':  {tx:37, gain:0, rx:-120, margin:6,  fresnel:'0.4', maxKm:30, clutterAtten:0.10, clutterCap:45},
   '2400': {tx:20, gain:2, rx:-85,  margin:10, fresnel:'0.6', maxKm:5,  clutterAtten:0.10, clutterCap:45},
@@ -2198,35 +2229,58 @@ function globalRf(){
     fresnelPct: optionNum(parseFloat(document.getElementById('inpCovFresnel').value), FRESNEL_OPTIONS, 0.4),
     maxKm: clampNum(document.getElementById('inpCovMaxKm').value, 1, LIMITS.covMaxKm, 30),
     clutterOn: clutterEnabled(),
-    clutterExcludeM: clampNum(document.getElementById('inpClutterExclude')?.value, 0, 5000, 100),
+    clutterExcludeM: clampNum(document.getElementById('inpClutterExclude')?.value, 0, 5000, 0),
     clutterAttenRef: clampNum(document.getElementById('inpClutterAtten')?.value, 0, 1, CLUTTER_ATTEN_DB_PER_M_915),
     clutterCapDb: clampNum(document.getElementById('inpClutterCap')?.value, 0, 200, CLUTTER_ATTEN_CAP_DB),
-    clutterHeights: clutterHeightTable()
+    clutterHeights: clutterHeightTable(),
+    cable:clampNum(document.getElementById('inpCable').value,0,100,0),
+    nf:clampNum(document.getElementById('inpNoiseFigure').value,0,30,6),
+    noiseDbm:optionalNumber(document.getElementById('inpNoiseFloor').value,-200,0),
+    modem:document.getElementById('inpModem').value,
+    mode:document.getElementById('inpPropagation').value,
+    clutterMode:document.getElementById('inpClutterMode').value,
+    terrainError:clampNum(document.getElementById('inpTerrainError').value,0,100,5),
+    clutterError:clampNum(document.getElementById('inpClutterError').value,0,100,5),
+    angularTarget:clampNum(document.getElementById('inpAngularTarget').value,25,5000,250),
+    adaptive:document.getElementById('inpAdaptive').checked
   };
 }
 
 function effectiveRf(node){
-  const g = globalRf();
-  if(node.rfOverride){
-    return {
-      tx:   node.txDbm   ?? g.tx,
-      gain: node.gainDbi ?? g.gain,
-      rx:   node.rxDbm   ?? g.rx
-    };
-  }
-  return {tx:g.tx, gain:g.gain, rx:g.rx};
+  const g=globalRf(), custom=node?.rfOverride;
+  return {
+    tx:custom ? node.txDbm ?? g.tx : g.tx,
+    gain:custom ? node.gainDbi ?? g.gain : g.gain,
+    rx:custom ? node.rxDbm ?? g.rx : g.rx,
+    cable:custom ? node.cableDb ?? g.cable : g.cable,
+    nf:custom ? node.noiseFigure ?? g.nf : g.nf,
+    noiseDbm:custom ? node.noiseDbm ?? g.noiseDbm : g.noiseDbm,
+    modem:custom ? node.modem ?? g.modem : g.modem,
+    antH:node?.antH ?? g.rxAntH, ground:node?.groundM ?? undefined,
+    clearM:node?.clearM ?? g.clutterExcludeM
+  };
 }
 
 function onGlobalRfChanged(){
   // Any change to global TX/Gain/Sens/Margin invalidates non-overridden node coverage.
-  S.nodes.forEach(n => { if(!n.rfOverride) invalidateNodeCoverage(n, true); });
+  S.nodes.forEach(n => invalidateNodeCoverage(n, true));
   renderNodeList();
   refreshSettingsSummary();
+  refreshLinkBudgets();
+}
+
+// Picking a LoRa modem preset derives RX sensitivity from its bandwidth and
+// demodulation SNR floor; the field stays editable afterwards.
+function onModemChanged(){
+  const sens = RFModel.sensitivity(document.getElementById('inpModem').value, globalRf().nf);
+  if(sens != null) document.getElementById('inpRx').value = sens.toFixed(1);
+  onGlobalRfChanged();
 }
 
 // Coverage-shape params (freq, K, Fresnel %, rays, samples, max range, RX ant)
 // affect every node regardless of override status.
 function onCoverageParamChanged(){
+  invalidateAllAnalysis();
   S.nodes.forEach(n => invalidateNodeCoverage(n, true));
   renderNodeList();
   refreshSettingsSummary();
@@ -2238,12 +2292,17 @@ function applyPresetRf(presetVal){
   document.getElementById('inpTx').value = rf.tx;
   document.getElementById('inpGain').value = rf.gain;
   document.getElementById('inpRx').value = rf.rx;
+  // LoRa presets pick a modem (and its derived sensitivity); others clear it.
+  const modemSel = document.getElementById('inpModem');
+  if(modemSel) modemSel.value = rf.modem || '';
+  if(rf.modem)document.getElementById('inpRx').value=RFModel.sensitivity(rf.modem,globalRf().nf).toFixed(1);
   if(rf.margin   != null) document.getElementById('inpMargin').value     = rf.margin;
   if(rf.fresnel  != null) document.getElementById('inpCovFresnel').value = rf.fresnel;
   if(rf.maxKm    != null) document.getElementById('inpCovMaxKm').value   = rf.maxKm;
   if(rf.clutterAtten != null) document.getElementById('inpClutterAtten').value = rf.clutterAtten;
   if(rf.clutterCap   != null) document.getElementById('inpClutterCap').value   = rf.clutterCap;
   // Preset change touches freq + RF + coverage modelling — invalidate every node.
+  invalidateAllAnalysis();
   S.nodes.forEach(n => invalidateNodeCoverage(n, true));
   renderNodeList();
   refreshSettingsSummary();
@@ -2251,9 +2310,13 @@ function applyPresetRf(presetVal){
 
 function setNodeRf(id, field, val){
   const node = S.nodes.find(n => n.id === id); if(!node) return;
-  node[field] = val;
+  const ranges={txDbm:[-100,100],gainDbi:[-100,100],rxDbm:[-200,0],cableDb:[0,100],noiseFigure:[0,30]};
+  if(!ranges[field])return;
+  // A blank field clears the override so the global value applies again.
+  node[field] = optionalNumber(val,...ranges[field]);
   invalidateNodeCoverage(node, true);
   renderNodeList();
+  refreshLinkBudgets();
 }
 
 function toggleNodeRfOverride(id){
@@ -2265,9 +2328,11 @@ function toggleNodeRfOverride(id){
   }
   invalidateNodeCoverage(node, true);
   renderNodeList();
+  refreshLinkBudgets();
 }
 
 function invalidateNodeCoverage(node, redraw){
+  S.modelRevision=(S.modelRevision||0)+1;
   node.coverageDirty = true;
   if(redraw && node.coverageRendered && node.coverageOn){
     dimNodeCoverage(node.id);
@@ -2356,9 +2421,12 @@ async function computeNodeCoverage(id, _fromBatch = false){
 }
 
 async function _computeNodeCoverageImpl(node){
+  const revision=S.modelRevision||0;
   const g = globalRf();
   const rf = effectiveRf(node);
-  const friisRange = friisRangeMeters(rf.tx, rf.gain, rf.gain, rf.rx, g.freq, g.margin);
+  const receiverRadio=effectiveRf(null);
+  const allowedLoss=RFModel.budget(rf,receiverRadio,0).marginDb-g.margin;
+  const friisRange = friisRangeMeters(allowedLoss,0,0,0,g.freq,0);
   if(!friisRange){ toast(`${node.name}: link budget too low — no coverage`, 3000); return; }
   // Cap to user-configured search radius so we don't fetch tiles forever, but
   // also honour the free-space RF link budget. The smaller one is the search
@@ -2374,7 +2442,7 @@ async function _computeNodeCoverageImpl(node){
     catch(e){ throw new Error(`elevation tile fetch failed (${e.message||e})`); }
   }
 
-  const srcH = node.elev + node.antH;
+  const srcH = (node.groundM??node.elev) + node.antH;
   const rays = g.rays;
   // The terrain sample step must resolve near-field hills, not just divide the
   // whole search radius into a fixed count. At a 50 km cap, 50 samples = 1 km
@@ -2393,10 +2461,10 @@ async function _computeNodeCoverageImpl(node){
   const clutterImpact = makeClutterImpactStats();
   // Free-space link budget (constant across the sweep): TX + both antenna gains
   // − RX sensitivity − required margin. marginDb = linkBudget − path loss.
-  const linkBudget = rf.tx + rf.gain + rf.gain - rf.rx - g.margin;
+  const linkBudget = allowedLoss;
 
   dlog(`▶ COVERAGE "${node.name}" @ ${node.lat.toFixed(5)},${node.lng.toFixed(5)}  gnd=${node.elev.toFixed(0)}m antH=${node.antH}m (src tip ${srcH.toFixed(0)}m)`);
-  dlog(`  RF: ${g.freq}MHz K=${g.K} · TX ${rf.tx} +G ${rf.gain}×2 −RX ${rf.rx} −margin ${g.margin} = budget ${linkBudget.toFixed(0)}dB`);
+  dlog(`  RF: ${g.freq}MHz K=${g.K} · directional budget including both cable losses = ${linkBudget.toFixed(1)} dB`);
   dlog(`  Range: Friis ${(friisRange/1000).toFixed(1)}km, cap ${g.maxKm}km → max ${(maxRange/1000).toFixed(1)}km${limitedByBudget?' (budget-limited)':''}`);
   dlog(`  Sweep: ${rays} rays × ${samples} samples (~${(maxRange/samples).toFixed(0)}m step) · Fresnel ${(g.fresnelPct*100).toFixed(0)}% · RX ant ${g.rxAntH}m`);
 
@@ -2411,7 +2479,7 @@ async function _computeNodeCoverageImpl(node){
     // WorldCover and titiler canopy are independent sources — fetch both so a
     // Terrascope outage doesn't also take down the (unrelated) self-hosted
     // titiler canopy data, and vice versa.
-    let canopySrc = null, canopyLabel = '';
+    let canopySrc = null;
     const canopyPromise = canopyEnabled()
       ? (toast(`${node.name}: loading canopy (titiler)…`),
          buildCanopyGrid(node.lat - dLat, node.lng - dLng, node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M))
@@ -2422,18 +2490,15 @@ async function _computeNodeCoverageImpl(node){
       canopyPromise
     ]);
     if(cg){
-      canopySrc = cg; canopyLabel = ' + measured canopy (titiler)';
+      canopySrc = cg;
       dlog(`  Canopy: titiler grid loaded over ${cg.tiles} source tile(s)`,'ok');
     } else if(canopyEnabled()){
       dlog('  Canopy: titiler unavailable — using flat Forest(m)','warn');
     }
     if(wc || canopySrc){
       clutter = {
-        source: canopySrc ? `${wc ? wc.source : 'no WorldCover'}${canopyLabel}` : wc.source,
-        heightAt(la, ln){
-          if(canopySrc){ const h = canopySrc.heightAt(la, ln); if(isFinite(h) && h > 0) return h; }
-          return wc ? wc.heightAt(la, ln) : 0;
-        }
+        source: clutterProvenance(wc,canopySrc),
+        sampleAt(la, ln){ return blendClutter(wc, canopySrc, la, ln); }
       };
     }
     dlog(clutter ? `  Clutter: APPLIED ✓ (${clutter.source})`
@@ -2444,9 +2509,10 @@ async function _computeNodeCoverageImpl(node){
     dlog('  Clutter OFF (bare-earth terrain only)');
   }
 
-  for(let r = 0; r < rays; r++){
-    const az = r * 360 / rays;
-    if(r % 6 === 0) toast(`${node.name}: ray ${r+1}/${rays}…`);
+  const computeRay = async az => {
+    if((S.modelRevision||0)!==revision)throw new Error('Settings changed; recompute coverage.');
+    toast(`${node.name}: computing bearing ${az.toFixed(1)}°…`);
+
     // Sample terrain along this ray (tiles are lazy-loaded; first hit may pull a few tiles)
     const dists = [], points = [];
     for(let s = 0; s <= samples; s++){
@@ -2460,56 +2526,46 @@ async function _computeNodeCoverageImpl(node){
     try {
       elevs = await Promise.all(points.map(([la, ln]) => tileElevAt(la, ln)));
     } catch(e){
-      throw new Error(`terrain tile fetch failed at ray ${r}: ${e.message||e}`);
+      throw new Error(`terrain tile fetch failed at bearing ${az}: ${e.message||e}`);
     }
-    // Per-point clutter height (m), excluded near the node (own site assumed clear).
-    const clutterH = clutter ? points.map(([la, ln], i) =>
-      dists[i] >= g.clutterExcludeM ? clutter.heightAt(la, ln) : 0) : null;
-    if(clutterH){
-      clutterH.forEach((h, i) => addClutterImpact(clutterImpact, h, dists[i], points[i], az));
-    }
-    const raySamples = [{dist:0, latlng:[node.lat,node.lng], marginDb:Infinity}];
-    // Walk outward computing the link margin at every sample. The heatmap paints
-    // every covered sample and the outline traces the farthest covered sample per
-    // ray (so a node on a hill shows its true far reach, not a tiny near blob).
-    let farthestIdx = 0;
-    for(let s = 1; s <= samples; s++){
-      const dS = dists[s];                       // distance src→candidate RX
-      const rxAlt = elevs[s] + g.rxAntH;         // RX antenna tip elevation
-      // Bare terrain is the hard LOS gate. Surface clutter influences Fresnel /
-      // diffraction loss, but trees/buildings are not treated as new mountains:
-      // otherwise one forest class around a low site collapses every ray.
-      let maxNu = -Infinity, blocked = false, clutterIntrudes = false;
-      const losAt = j => srcH + (rxAlt - srcH) * (dists[j] / dS);
-      const bareEffAt = j => elevs[j] + bulge(dists[j], dS - dists[j], g.K);
-      for(let j = 1; j < s; j++){
-        const dJ = dists[j];                     // distance src→intermediate point
-        const los = losAt(j);                    // LOS height above the point
-        const fz = fresnel1(dJ, dS - dJ, g.freq);
-        const bareEff = bareEffAt(j);
-        const bareNu = fz > 0 ? Math.SQRT2*(bareEff - los)/fz : -Infinity;
-        if(bareNu >= 0){ blocked = true; break; }
-        const eff = bareEff + (clutterH ? clutterH[j] : 0);   // terrain + clutter + earth curvature
-        const nu = fz > 0 ? Math.SQRT2*(eff - los)/fz : -Infinity;
-        if(clutterH && nu >= 0) clutterIntrudes = true;
-        if(nu > maxNu) maxNu = nu;
-      }
-      if(clutterIntrudes) clutterImpact.blockedByClutter++;
-      const clutterLossDb = clutterH && !blocked ? clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, 1, s, g.freq, g.clutterAttenRef, g.clutterCapDb) : 0;
-      if(clutterLossDb > clutterImpact.maxLossDb) clutterImpact.maxLossDb = clutterLossDb;
-      // Below the LOS line: free-space loss plus the (≤6 dB) grazing diffraction
-      // loss from the dominant near-LOS obstruction.
-      const marginDb = blocked ? -Infinity
-        : linkBudget - fsplDb(dS, g.freq) - knifeEdgeLossDb(maxNu) - clutterLossDb;
-      raySamples.push({dist:dS, latlng:points[s], marginDb});
-      if(marginDb >= 0) farthestIdx = s;
-    }
+    const cs=clutter ? points.map(([la,ln])=>clutter.sampleAt(la,ln)) : null;
+    let clutterH=cs ? cs.map(c=>c.h) : null;
+    const guess=cs ? cs.map(c=>c.guess) : null;
+    const receiver={...effectiveRf(null),antH:g.rxAntH,clearM:g.clutterExcludeM};
+    clutterH=applySiteClutter(clutterH,dists,node,null,guess);
+    if(clutterH)clutterH.forEach((h,i)=>addClutterImpact(clutterImpact,h,dists[i],points[i],az));
+    elevs[0]=node.groundM??node.elev;
+    const margins=await solveCoverageWorker({...modelOptions(),dists,elevs,clutter:clutterH,guess},effectiveRf(node),receiver,g.margin);
+    if((S.modelRevision||0)!==revision)throw new Error('Settings changed; recompute coverage.');
+    const raySamples=points.map((latlng,i)=>({dist:dists[i],latlng,marginDb:margins[i]}));
+    let farthestIdx=0;
+    for(let i=1;i<margins.length;i++) if(margins[i]>=0) farthestIdx=i;
     const reachDist = dists[farthestIdx];
     const [la, ln] = destPoint(node.lat, node.lng, az, Math.max(reachDist, 1));
     reach.push({az, dist:reachDist, latlng:[la, ln]});
-    heatRays.push({az, samples:raySamples});
+    const ray={az,samples:raySamples};
+    heatRays.push(ray);
+    return ray;
+  };
+  for(let r=0;r<rays;r++) await computeRay(r*360/rays);
+  // Bisect sectors with wide spacing or a strong change in predicted margin.
+  const maxRays=720;
+  if(g.adaptive){
+    for(let pass=0;pass<5 && heatRays.length<maxRays;pass++){
+      heatRays.sort((a,b)=>a.az-b.az);
+      const snapshot=[...heatRays]; let added=0;
+      for(let i=0;i<snapshot.length && heatRays.length<maxRays;i++){
+        const a=snapshot[i],b=snapshot[(i+1)%snapshot.length],gap=(b.az-a.az+360)%360;
+        if(gap>.25 && RFModel.refineSector(a,b,maxRange,g.angularTarget)){
+          await computeRay((a.az+gap/2)%360); added++;
+        }
+      }
+      if(!added) break;
+    }
   }
-
+  heatRays.sort((a,b)=>a.az-b.az); reach.sort((a,b)=>a.az-b.az);
+  const widest=Math.max(...heatRays.map((r,i)=>(heatRays[(i+1)%heatRays.length].az-r.az+360)%360));
+  node.coverageQuality=`${heatRays.length} rays; maximum spacing ${(maxRange*widest*Math.PI/180).toFixed(0)} m at outer edge; radial ${(maxRange/samples).toFixed(0)} m. ${terrainProvenance(node.lat,node.lng)}; ${clutter?.source|| (g.clutterOn?'clutter unavailable':'clutter disabled')}. ${g.mode}.`;
   node.coverageRays = reach;
   node.coverageHeatRays = heatRays;
   node.coverageMaxRange = maxRange;
@@ -2521,7 +2577,7 @@ async function _computeNodeCoverageImpl(node){
   node.coverageDirty = false;
   const reachedRays = reach.filter(r=>r.dist>0).length;
   if(clutter){
-    dlog(`  Clutter impact: ${clutterImpactSummary(clutterImpact)}; ${clutterImpact.blockedByClutter} candidate samples had clutter above LOS; max attenuation ${clutterImpact.maxLossDb.toFixed(1)}dB (cap ${g.clutterCapDb}dB)`,'warn');
+    dlog(`  Clutter samples: ${clutterImpactSummary(clutterImpact)}; both endpoints evaluated by ${g.clutterMode}.`);
   }
   dlog(`  ✓ "${node.name}" done: farthest reach ${(node.coverageReachMax/1000).toFixed(2)}km · ${reachedRays}/${rays} rays have coverage`,'ok');
   const limitText = limitedByBudget
@@ -2673,12 +2729,13 @@ function pointInCoverage(node, lat, lng){
   if(!rays || !rays.length || !maxR) return false;
   const d = haversine(node.lat, node.lng, lat, lng);
   if(d > maxR) return false;
-  const R = rays.length;
-  const ri = ((Math.round(bearingTo(node.lat, node.lng, lat, lng) * R / 360) % R) + R) % R;
+  const az=bearingTo(node.lat,node.lng,lat,lng);
+  let ri=0,best=Infinity;
+  for(let i=0;i<rays.length;i++) { const delta=Math.abs(((az-rays[i].az+540)%360)-180); if(delta<best){best=delta;ri=i;} }
   const samples = rays[ri].samples;
   if(!samples || !samples.length) return false;
   // Samples are uniform along the ray: sample k sits at maxR*(k+1)/N.
-  let k = Math.round(d / maxR * samples.length) - 1;
+  let k = Math.round(d / maxR * (samples.length-1));
   if(k < 0) k = 0; else if(k >= samples.length) k = samples.length - 1;
   return samples[k].marginDb >= 0;
 }
@@ -2790,18 +2847,18 @@ async function runAnalysis(){
   if(S._analysing){toast('Analysis is already running. Please wait for it to finish.',2500);return;}
   if(S.nodes.length<2||S.edges.length<1){toast('Add at least 2 nodes and 1 link.',3000);return;}
   S._analysing=true;
+  const revision=S.modelRevision||0;
   const freq=parseFloat(document.getElementById('inpFreq').value)||900;
   const K=parseFloat(document.getElementById('inpK').value)||1.333;
   // Fresnel clearance threshold (preset-driven): 0.4 for forgiving links (Meshtastic/ham VHF/UHF),
-  // 0.6 for engineered links (Wi-Fi). Used to scale the marginal-vs-clear boundary.
+  // 0.6 for engineered links (Wi-Fi). Reported as a clearance figure; the link
+  // status itself comes from the dB margin below.
   const fresnelPct=Math.max(0,Math.min(1,parseFloat(document.getElementById('inpCovFresnel').value)||0));
+  const requiredMarginDb=clampNum(document.getElementById('inpMargin')?.value, 0, 100, 0);
   // Surface clutter (land cover): same model as the coverage sweep, so the two stay consistent.
   const clutterOn=clutterEnabled();
   const clutterHeights=clutterHeightTable();
-  const clutterExcludeM=clampNum(document.getElementById('inpClutterExclude')?.value, 0, 5000, 100);
   const clutterAttenRef=clampNum(document.getElementById('inpClutterAtten')?.value, 0, 1, CLUTTER_ATTEN_DB_PER_M_915);
-  const clutterCapDb=clampNum(document.getElementById('inpClutterCap')?.value, 0, 200, CLUTTER_ATTEN_CAP_DB);
-  const N=80;
   const MAX_TERRAIN_ERRORS=2;
   let terrainErrors=0;
   const preferredView=S.activeView?{...S.activeView}:null;
@@ -2815,6 +2872,9 @@ async function runAnalysis(){
       if(!a||!b) continue;
       toast(`Fetching terrain: ${a.name} ↔ ${b.name} (${ei+1}/${S.edges.length})`);
       const dist=haversine(a.lat,a.lng,b.lat,b.lng);
+      // Distance-based samples reduce missed narrow ridges; source resolution
+      // and interpolation still limit which features can be resolved.
+      let N=Math.max(80, Math.min(COVERAGE_MAX_SAMPLES, Math.ceil(dist/COVERAGE_STEP_M)));
       let elevs;
       try{
         elevs=await fetchProfile(a.lat,a.lng,b.lat,b.lng,N);
@@ -2832,97 +2892,80 @@ async function runAnalysis(){
         continue;
       }
       terrainErrors=0;
+      // Refine potentially marginal profiles to 10 m, still limited by DEM quality.
+      const initial=elevs.map((_,i)=>dist*i/N);
+      const preliminary=RFModel.solve({...modelOptions(),dists:initial,elevs,antA:a.antH,antB:b.antH,groundA:a.groundM,groundB:b.groundM});
+      if(Math.abs(preliminary.minScaledFzClear)<20 && N<COVERAGE_MAX_SAMPLES && dist/N>10){
+        const finerN=Math.min(COVERAGE_MAX_SAMPLES,N*2);
+        try{const finer=await fetchProfile(a.lat,a.lng,b.lat,b.lng,finerN);elevs=finer;N=finerN;}
+        catch(err){dlog(`Refinement unavailable; using ${N+1} samples: ${err.message}`,'warn');}
+      }
       const dists=elevs.map((_,s)=>dist*s/N);
 
       // Ground elevation from profile endpoints (same dataset = consistent datum)
-      const aGnd=elevs[0], bGnd=elevs[N];
+      const aGnd=a.groundM??elevs[0], bGnd=b.groundM??elevs[N];
+      elevs[0]=aGnd; elevs[N]=bGnd;
       a.elev=aGnd; updateElevDisplay(a);
       b.elev=bGnd; updateElevDisplay(b);
 
       // Antenna tip = ground + antenna height
       const aH=aGnd+a.antH, bH=bGnd+b.antH;
 
-      const losAt = s => aH + (bH - aH) * (s / N);
-      const bareEffAt = s => elevs[s] + bulge(dists[s], dist - dists[s], K);
-      const llAt = s => { const t=s/N; return [a.lat+(b.lat-a.lat)*t, a.lng+(b.lng-a.lng)*t]; };
+      const llAt = s => destPoint(a.lat,a.lng,bearingTo(a.lat,a.lng,b.lat,b.lng),dists[s]);
 
-      // Per-point clutter height (m), excluded near both endpoints (own sites clear).
-      // WorldCover gives a class + flat per-class height; where the path GRAZES
-      // tree cover (Fresnel zone within the tallest possible canopy) we replace
-      // the flat value with the measured Meta/WRI canopy height at just those
-      // points — accurate where it can change the result, cheap everywhere else.
-      let clutterH=null, clutterClass=null, clutterImpact=null;
+      // Per-point clutter height (m): WorldCover class height, refined by measured
+      // Meta/WRI canopy (see blendClutter). The solver handles both endpoints;
+      // the profile draws the raw clutter heights separately from predictions.
+      let rawClutterH=null, clutterClass=null, guess=null;
+      let clutterSource='Disabled',fallbackHeights=0;
       if(clutterOn){
         const pad=0.005;
         // WorldCover and titiler canopy are independent sources — fetch both so a
         // Terrascope outage doesn't also take down the (unrelated) self-hosted
-        // titiler canopy data, and vice versa.
+        // titiler canopy data, and vice versa. Links always try measured canopy
+        // (one small bbox); the canopy checkbox only governs coverage sweeps.
         const [wc,canopySrc]=await Promise.all([
           buildWorldCoverGrid(
             Math.min(a.lat,b.lat)-pad, Math.min(a.lng,b.lng)-pad,
             Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad,
-            Math.max(20, dist/N), clutterHeights),
+            Math.max(10, dist/N), clutterHeights),
           buildCanopyGrid(
             Math.min(a.lat,b.lat)-pad, Math.min(a.lng,b.lng)-pad,
-            Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad, Math.max(20, dist/N))
+            Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad, Math.max(10, dist/N))
         ]);
         if(canopySrc) dlog(`  Canopy: titiler grid loaded over ${canopySrc.tiles} source tile(s)`,'ok');
+        clutterSource=clutterProvenance(wc,canopySrc);
         if(wc || canopySrc){
-          clutterImpact=makeClutterImpactStats();
-          // Parallel land-cover class per sample (0 where excluded/none) so the
-          // profile can colour the clutter band by type — see drawClutterBand.
+          // Parallel land-cover class per sample (0 where none) so the profile
+          // can colour the clutter band by type — see drawClutterBand.
           clutterClass=new Array(dists.length).fill(0);
-          clutterH=dists.map((d,s)=>{
-            if(d<clutterExcludeM || (dist-d)<clutterExcludeM) return 0;
+          guess=new Array(dists.length).fill(false);
+          rawClutterH=dists.map((d,s)=>{
             const [lat,lng]=llAt(s);
-            const cls=wc?wc.classAt(lat,lng):0;
-            clutterClass[s]=cls;
-            let h = wc?wc.heightAt(lat,lng):0;
-            if(canopySrc){ const c = canopySrc.heightAt(lat,lng); if(isFinite(c) && c>0) h=c; }
-            addClutterImpact(clutterImpact, h, d, [lat,lng], null);
-            return h;
+            const c=blendClutter(wc,canopySrc,lat,lng);
+            if(c.guess)fallbackHeights++;
+            clutterClass[s]=c.cls;
+            guess[s]=c.guess;
+            return c.h;
           });
         }
       }
 
-      let minLosClear=Infinity,minFzClear=Infinity,minScaledFzClear=Infinity,maxNu=-Infinity;
-      let minBareLosClear=Infinity,minBareScaledFzClear=Infinity;
-      for(let s=1;s<N;s++){
-        const d1=dists[s],d2=dist-dists[s];
-        const bareEff=bareEffAt(s);
-        const eff=bareEff+(clutterH?clutterH[s]:0);
-        const los=losAt(s);
-        const bareClear=los-bareEff;
-        if(bareClear<minBareLosClear) minBareLosClear=bareClear;
-        const clear=los-eff;
-        if(clear<minLosClear) minLosClear=clear;
-        const fz=fresnel1(d1,d2,freq);
-        if(bareClear-fz*fresnelPct<minBareScaledFzClear) minBareScaledFzClear=bareClear-fz*fresnelPct;
-        if(clear-fz<minFzClear) minFzClear=clear-fz;
-        if(clear-fz*fresnelPct<minScaledFzClear) minScaledFzClear=clear-fz*fresnelPct;
-        // Fresnel-Kirchhoff diffraction parameter at this point: the terrain
-        // height above the LOS line is h = -clear, and ν = √2·h/r₁ (r₁ = fz).
-        // Track the dominant (highest-ν) obstruction along the path.
-        const nu=Math.SQRT2*(-clear)/fz;
-        if(nu>maxNu) maxNu=nu;
-      }
-      const status=minBareLosClear<=0?'blocked':minScaledFzClear<=0?'marginal':'clear';
-      const clutterLossDb = clutterH ? clutterAttenuationDb(clutterH, dists, losAt, bareEffAt, 1, N, freq, clutterAttenRef, clutterCapDb) : 0;
-      if(clutterImpact && clutterLossDb > clutterImpact.maxLossDb) clutterImpact.maxLossDb = clutterLossDb;
-      // First-order excess loss beyond free space: single knife-edge diffraction
-      // over the dominant obstruction (Deygout principal edge). ≈0 dB on a fully
-      // Fresnel-clear path, ~6 dB at grazing, rising as terrain intrudes.
-      const diffLossDb=knifeEdgeLossDb(maxNu) + clutterLossDb;
-      e.result={dist,minLosClear,minFzClear,minScaledFzClear,fresnelPct,status,diffLossDb};
-      e.profile={elevs,dists,dist,aH,bH,a,b,freq,K,N,clutterH,clutterClass};
-      const lvl = status==='clear'?'ok':status==='blocked'?'err':'warn';
-      let clutterNote='';
-      if(clutterH){
-        const bareStatus=minBareLosClear<=0?'blocked':minBareScaledFzClear<=0?'marginal':'clear';
-        clutterNote=` · +clutter (${clutterImpactSummary(clutterImpact)}; atten ${clutterLossDb.toFixed(1)}dB)`;
-        if(bareStatus!==status) clutterNote+=` · bare would be ${bareStatus.toUpperCase()}`;
-      }
-      dlog(`  ${a.name}↔${b.name}: ${(dist/1000).toFixed(2)}km · ${status.toUpperCase()} · LOS clr ${minLosClear.toFixed(1)}m · Fz clr ${minScaledFzClear.toFixed(1)}m · ν ${maxNu.toFixed(2)} · diff ${diffLossDb.toFixed(1)}dB${clutterNote}`, lvl);
+      if((S.modelRevision||0)!==revision){toast('Settings changed; run Analyse again.');return;}
+      rawClutterH=applySiteClutter(rawClutterH,dists,a,b,guess);
+      const options={...modelOptions(),dists,elevs,clutter:rawClutterH,guess,antA:a.antH,antB:b.antH,
+        clearA:effectiveRf(a).clearM,clearB:effectiveRf(b).clearM};
+      const result=RFModel.solve(options), budget=linkBudgetFor(a,b,result.pathLossDb);
+      const g=globalRf();
+      const scenarios=[-1,1].map(sign=>RFModel.solve({...options,terrainOffset:sign*g.terrainError,clutterOffset:sign*g.clutterError}));
+      const pathLossRange=[result.pathLossDb,...scenarios.map(r=>r.pathLossDb)];
+      const marginRange=pathLossRange.map(loss=>linkBudgetFor(a,b,loss).marginDb).sort((x,y)=>x-y);
+      const status=linkStatus(budget.marginDb,requiredMarginDb);
+      e.result={...result,...budget,status,requiredMarginDb,marginRange,pathLossRange,
+        provenance:terrainProvenance(a.lat,a.lng)+'; '+clutterSource+`; ${fallbackHeights} unmeasured tree-height samples`,
+        terrainError:g.terrainError,clutterError:g.clutterError,computedAt:new Date().toISOString()};
+      e.profile={elevs,dists,dist,aH,bH,a,b,freq,K,N,clutterH:rawClutterH,clutterClass};
+      dlog(`${a.name} ↔ ${b.name}: ${result.model}, ${N+1} samples, ${result.maxSpacing.toFixed(1)} m step, ${result.geometry}; margin ${budget.marginDb.toFixed(1)} dB. ${e.result.provenance}`);
 
     }
     // Colour the lines on map
@@ -2930,6 +2973,7 @@ async function runAnalysis(){
 
     if(terrainErrors<MAX_TERRAIN_ERRORS) hideToast();
     renderResults();
+    renderValidation();
     renderEdgesPanel();
     renderChartTabs();
 
@@ -2969,6 +3013,20 @@ async function runAnalysis(){
 // ═══════════════════════════════════════════════════════════
 //  RESULTS PANEL
 // ═══════════════════════════════════════════════════════════
+function fmtDb(v){ return `${v>=0?'+':''}${v.toFixed(1)}dB`; }
+function linkStatusColor(st){ return st==='clear'?'var(--green)':st==='marginal'?'var(--orange)':'var(--red)'; }
+function linkStatusTitle(r){
+  if(r.compatible===false)return 'Configured LoRa modems differ; reception is not predicted.';
+  if(r.model==='los' && r.surfaceBlocked)return 'Strict LOS mode excludes this surface-obstructed path.';
+  if(r.status==='blocked') return 'Link budget does not close (margin below 0 dB).';
+  if(r.status==='marginal') return `Link closes with less than the required ${r.requiredMarginDb} dB margin.`;
+  return `Link closes with at least the required ${r.requiredMarginDb} dB margin.`;
+}
+function excessLossTitle(r){
+  return `Excess loss over free space (FSPL ${(r.pathLossDb-r.excessLossDb).toFixed(1)} dB): `+
+    `diffraction ${r.diffLossDb.toFixed(1)} + clutter ${r.clutterLossDb.toFixed(1)} + terminal clutter ${r.termLossDb.toFixed(1)} dB`;
+}
+
 function renderResults(){
   const el=document.getElementById('resultsArea');
   const analysed=S.edges.filter(e=>S.showLinks&&!e.hidden&&e.result);
@@ -2996,16 +3054,19 @@ function renderResults(){
     }else{
       div.innerHTML=`<div class="hop-top">
         <span class="hop-name">${escHtml(a.name)} ↔ ${escHtml(b.name)}</span>
-        <span class="badge ${r.status}">${r.status==='clear'?'✓ CLEAR':r.status==='marginal'?'⚠ MARGINAL':'✕ BLOCKED'}</span>
+        <span class="badge ${r.status}" title="${escHtml(linkStatusTitle(r))}">${r.status==='clear'?'✓ BUDGET OK':r.status==='marginal'?'⚠ LOW MARGIN':'✕ BELOW SENSITIVITY'}</span>
       </div>
+      <div class="quality-note">Geometry: ${escHtml(r.geometry)} · ${escHtml(r.model)}</div>
       <div class="hop-stats">
         <div class="hop-stat"><span class="lbl">Dist: </span><span class="val">${(r.dist/1000).toFixed(2)}km</span></div>
+        <div class="hop-stat" title="Received power above RX sensitivity, weaker direction. Required: ${r.requiredMarginDb} dB."><span class="lbl">Margin: </span><span class="val" style="color:${linkStatusColor(r.status)}">${fmtDb(r.marginDb)}</span></div>
+        ${r.snrDb!=null?`<div class="hop-stat" title="Estimated SNR; thermal noise plus receiver noise figure unless a measured noise floor is supplied. Not an observation."><span class="lbl">SNR: </span><span class="val">${fmtDb(r.snrDb)}</span></div>`:''}
+        <div class="hop-stat" title="${escHtml(excessLossTitle(r))}"><span class="lbl">Loss: </span><span class="val" style="color:${r.excessLossDb<=0.5?'var(--green)':r.excessLossDb<6?'var(--orange)':'var(--red)'}">${r.excessLossDb.toFixed(1)}dB</span></div>
         <div class="hop-stat"><span class="lbl">LOS: </span><span class="val" style="color:${r.minLosClear>0?'var(--green)':'var(--red)'}">${r.minLosClear.toFixed(1)}m</span></div>
         <div class="hop-stat"><span class="lbl">Fz1: </span><span class="val" style="color:${r.minFzClear>0?'var(--green)':'var(--orange)'}">${r.minFzClear.toFixed(1)}m</span></div>
-        <div class="hop-stat" title="Estimated single knife-edge diffraction loss over the dominant obstruction (excess over free space)"><span class="lbl">Diff: </span><span class="val" style="color:${(r.diffLossDb??0)<=0.5?'var(--green)':(r.diffLossDb??0)<6?'var(--orange)':'var(--red)'}">${(r.diffLossDb??0).toFixed(1)}dB</span></div>
-      </div>`;
+      </div>${linkDetailsHtml(e,a,b)}`;
     }
-    div.addEventListener('click', () => selectEdgeView(e.id));
+    div.addEventListener('click', ev => {if(!ev.target.closest('details'))selectEdgeView(e.id);});
     el.appendChild(div);
   });
 }
@@ -3051,7 +3112,7 @@ function showEdgeProfile(edgeId){
   S.redrawProfile=()=>showEdgeProfile(edgeId);
   const{elevs,dists,dist,aH,bH,a,b,freq,K,N,clutterH,clutterClass}=e.profile;
   const r=e.result;
-  const diffTxt=(r&&r.diffLossDb!=null)?`  |  Diff: ${r.diffLossDb.toFixed(1)} dB`:'';
+  const diffTxt=(r&&r.marginDb!=null)?`  |  Margin: ${fmtDb(r.marginDb)}${r.snrDb!=null?`  |  SNR: ${fmtDb(r.snrDb)}`:''}  |  Loss: ${r.excessLossDb.toFixed(1)} dB`:'';
   const title=`${a.name} ↔ ${b.name}  |  ${(dist/1000).toFixed(2)} km  |  GND+ANT: ${aH.toFixed(1)}m → ${bH.toFixed(1)}m${diffTxt}`;
   document.getElementById('chartTitle').textContent=title;
   drawProfile({elevs,dists,dist,aH,bH,freq,K,N,clutterH,clutterClass,result:r,labels:[a.name,b.name]});
@@ -3566,7 +3627,7 @@ function niRenderLinks(node){
     const st = e.result?.status;
     if(st){
       tag.style.color = st==='clear' ? '#2ecc71' : st==='marginal' ? '#f39c12' : '#e74c3c';
-      tag.textContent = (st==='error' ? 'ERROR' : st).toUpperCase();
+      tag.textContent = ({clear:'BUDGET OK',marginal:'LOW MARGIN',blocked:'NO PREDICTED LINK',error:'ERROR'})[st]||st;
     }else{
       tag.style.color = 'var(--muted)'; tag.textContent = 'ANALYSE';
     }
@@ -4061,11 +4122,13 @@ function buildShareHash(){
       cr:inpVal('inpCovRays'), cs:inpVal('inpCovSamples'), cf:inpVal('inpCovFresnel'),
       cm:inpVal('inpCovMaxKm'), co:clutterEnabled()?1:0, cy:canopyEnabled()?1:0,
       fh:inpVal('inpClutterForest'), uh:inpVal('inpClutterUrban'),
-      xe:inpVal('inpClutterExclude'), ca:inpVal('inpClutterAtten'), cc:inpVal('inpClutterCap')
+      xe:inpVal('inpClutterExclude'), ca:inpVal('inpClutterAtten'), cc:inpVal('inpClutterCap'),
+      lm:document.getElementById('inpModem')?.value || '',
+      model:serializeModelSettings()
     },
     nodes:S.nodes.map(n=>({
       lat:n.lat, lng:n.lng, antH:n.antH, name:n.name, rfOverride:n.rfOverride,
-      txDbm:n.txDbm, gainDbi:n.gainDbi, rxDbm:n.rxDbm, coverageOn:n.coverageOn, color:n.color
+      txDbm:n.txDbm, gainDbi:n.gainDbi, rxDbm:n.rxDbm, coverageOn:n.coverageOn, color:n.color, extra:serializeNodeSettings(n)
     })),
     edges:S.edges.map(e=>({a:idx.get(e.aId), b:idx.get(e.bId), hidden:e.hidden})),
     paths:S.paths.map(p=>({name:p.name, hidden:p.hidden, nodeIdx:p.nodeIds.map(id=>idx.get(id))}))
@@ -4225,9 +4288,10 @@ function normaliseV3Hash(raw) {
       antH: clampNum(nd[2], 0, LIMITS.antH, 6),
       name: cleanName(nd[3], defaultNodeName(nodes.length)),
       rfOverride,
-      txDbm: rfOverride ? clampNum(nd[5], -100, 100, null) : null,
-      gainDbi: rfOverride ? clampNum(nd[6], -100, 100, null) : null,
-      rxDbm: rfOverride ? clampNum(nd[7], -200, 0, null) : null,
+      txDbm: rfOverride ? optionalNumber(nd[5], -100, 100) : null,
+      gainDbi: rfOverride ? optionalNumber(nd[6], -100, 100) : null,
+      rxDbm: rfOverride ? optionalNumber(nd[7], -200, 0) : null,
+      ...normaliseNodeSettings(nd[10]),
       coverageOn: !!nd[8],
       color: /^#[0-9a-fA-F]{6}$/.test(nd[9]) ? String(nd[9]).toLowerCase() : null
     });
@@ -4273,9 +4337,12 @@ function normaliseV3Hash(raw) {
     canopyOn: !!raw.cy,
     clutterForest: clampNum(raw.fh, 0, 200, 15),
     clutterUrban: clampNum(raw.uh, 0, 200, 8),
-    clutterExclude: clampNum(raw.xe, 0, 5000, 100),
+    clutterExclude: clampNum(raw.xe ?? 0, 0, 5000, 0),
     clutterAtten: clampNum(raw.ca, 0, 1, presetRf?.clutterAtten ?? CLUTTER_ATTEN_DB_PER_M_915),
     clutterCap: clampNum(raw.cc, 0, 200, presetRf?.clutterCap ?? CLUTTER_ATTEN_CAP_DB),
+    // Links made before the modem setting existed get the band preset's modem.
+    model:normaliseModelSettings(raw.model),
+    modem: raw.lm == null ? (presetRf?.modem || '') : (Object.hasOwn(RFModel.MODEMS, raw.lm) ? raw.lm : ''),
     nodes,
     edges,
     paths,
@@ -4348,7 +4415,7 @@ function normaliseLegacyHash(raw) {
     clutterOn: !!raw.clutterOn,
     clutterForest: clampNum(raw.clutterForest, 0, 200, 15),
     clutterUrban: clampNum(raw.clutterUrban, 0, 200, 8),
-    clutterExclude: clampNum(raw.clutterExclude, 0, 5000, 100),
+    clutterExclude: clampNum(raw.clutterExclude ?? 0, 0, 5000, 0),
     clutterAtten: clampNum(raw.clutterAtten, 0, 1, CLUTTER_ATTEN_DB_PER_M_915),
     clutterCap: clampNum(raw.clutterCap, 0, 200, CLUTTER_ATTEN_CAP_DB),
     nodes,
@@ -4376,10 +4443,12 @@ function loadFromHash(hashStr){
   if(!hash) return;
   try{
     const data=parseSharedHash(hash);
+    restoreModelSettings(data.model);
     setInputValue('inpFreq',data.freq);
     setInputValue('inpK',data.k);
     setInputValue('inpTx',data.tx);
     setInputValue('inpGain',data.gain);
+    setInputValue('inpModem',data.modem ?? '');
     setInputValue('inpRx',data.rx);
     setInputValue('inpMargin',data.margin);
     setInputValue('inpRxAntH',data.rxAntH);
@@ -4532,9 +4601,11 @@ function initStaticHandlers(){
   // Settings — RF + coverage parameters
   on('inpPreset','change',applyPreset);
   on('inpFreq','input',syncPresetFromFreq);
-  ['inpTx','inpGain','inpRx','inpMargin'].forEach(id=>on(id,'change',onGlobalRfChanged));
+  ['inpTx','inpGain','inpRx','inpMargin','inpCable','inpNoiseFigure','inpNoiseFloor'].forEach(id=>on(id,'change',onGlobalRfChanged));
+  on('inpModem','change',onModemChanged);
   ['inpFreq','inpK','inpRxAntH','inpCovMaxKm','inpCovRays','inpCovSamples','inpCovFresnel',
-   'inpClutterOn','inpCanopyOn','inpClutterForest','inpClutterUrban','inpClutterExclude','inpClutterAtten','inpClutterCap']
+    'inpPropagation','inpClutterMode','inpTerrainError','inpClutterError','inpAngularTarget','inpAdaptive',
+    'inpClutterOn','inpCanopyOn','inpClutterForest','inpClutterUrban','inpClutterExclude','inpClutterAtten','inpClutterCap']
     .forEach(id=>on(id,'change',onCoverageParamChanged));
   on('inpShowLinks','change',function(){ setDisplayVisibility('links', this.checked); });
   on('inpShowPaths','change',function(){ setDisplayVisibility('paths', this.checked); });

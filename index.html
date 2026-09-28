@@ -375,6 +375,12 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .display-toggles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .display-toggle{display:flex;align-items:center;gap:7px;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text);letter-spacing:1px;cursor:pointer;user-select:none}
 .display-toggle input{accent-color:var(--accent);width:13px;height:13px;cursor:pointer}
+
+.quality-note {font-size:11px;line-height:1.5;color:var(--text-dim,#91a6b8);white-space:normal;overflow-wrap:anywhere;margin:6px 0}
+.wp-cov {flex-wrap:wrap}.site-details {font-size:11px;margin:8px 0}.site-details input {width:100%;box-sizing:border-box}.site-details label {display:block}
+.link-details {font-size:12px;line-height:1.5;margin:8px 0;overflow-wrap:anywhere}.link-details table {width:100%;border-collapse:collapse}.link-details th,.link-details td {padding:4px;text-align:left;border-bottom:1px solid #26384a}
+.link-details summary,.site-details summary {cursor:pointer}.data-panel {font-size:12px;line-height:1.5}.data-panel label {display:block;margin:10px 0}.data-panel textarea {width:100%;box-sizing:border-box;min-height:110px;background:#111c29;color:#dde8f0}.data-panel pre {white-space:pre-wrap;overflow-wrap:anywhere}.data-actions {display:flex;gap:6px;flex-wrap:wrap}
+@media(max-width:600px){.modal-bg{padding:12px}.modal{min-width:0!important;max-width:100%!important;width:100%;box-sizing:border-box;padding:14px}.field-row{flex-wrap:wrap}.field-row select{max-width:100%}.data-panel input[type=file]{max-width:100%}.wp-rf-body{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 </head>
 <body>
@@ -395,17 +401,17 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <li><strong>Coverage</strong> — tick the <em>COVERAGE</em> box on a node and click <em>COMPUTE</em> (or <em>COMPUTE ALL</em> in Settings). A terrain-aware coverage area is drawn in that node's colour.</li>
     </ol>
     <p style="font-size:12px;color:var(--muted);line-height:1.5">
-      <strong style="color:var(--green)">✓ CLEAR</strong> — LOS clear and Fresnel meets preset threshold (40 % for Meshtastic/ham, 60 % for Wi-Fi).&nbsp;
-      <strong style="color:var(--orange)">⚠ MARGINAL</strong> — LOS clear but the 1st Fresnel zone is obstructed below the preset threshold. Each link result shows the estimated knife-edge diffraction loss (<em>Diff</em>) in dB.&nbsp;
-      <strong style="color:var(--red)">✕ BLOCKED</strong> — terrain crosses the line of sight.
+      <strong style="color:var(--green)">✓ BUDGET OK</strong> — predicted signal meets the required margin in both directions.
+      <strong style="color:var(--orange)">⚠ LOW MARGIN</strong> — predicted reception has less reserve than requested.
+      <strong style="color:var(--red)">✕ BELOW SENSITIVITY</strong> — at least one direction is below sensitivity, or strict LOS excludes the path. Geometry (surface LOS/Fresnel) and observed reception are reported separately. These are estimates, not service guarantees.
     </p>
     <h3 style="font-size:13px;color:var(--accent);margin:16px 0 4px;letter-spacing:1px">HOW COVERAGE IS CALCULATED</h3>
     <p style="font-size:12px;color:var(--muted);line-height:1.5">
-      From each node, rays are swept in every direction (1° steps by default) and terrain is sampled every ~40 m out to the smaller of the free-space link budget or the <em>Search cap</em>. A point is covered when (a) the terrain doesn't cross the optical line of sight and (b) the link budget still closes after free-space loss and knife-edge diffraction. Fill is shown in the node's colour: <strong>more opaque = stronger margin</strong>, fading to the edge; areas with no usable link (terrain shadow) are left blank, and the thin outline marks the farthest reach per direction. <em>Rays</em> and <em>Samples</em> in Settings trade speed for smoothness/accuracy.
+      Coverage and individual links use the same terrain, clutter and directional budget engine. Terrain is sampled at about 20 m, with a cap on long paths; individual marginal profiles refine to about 10 m. Coverage rays optionally adapt to large gaps and changing margins. The remote radio uses global settings and RX antenna height. Opaque fill means more predicted margin. Empty areas fail the selected model, not necessarily real-world reception. Results report actual sampling resolution.
     </p>
     <h3 style="font-size:13px;color:var(--accent);margin:14px 0 4px;letter-spacing:1px">SURFACE CLUTTER (OPTIONAL)</h3>
     <p style="font-size:12px;color:var(--muted);line-height:1.5">
-      Bare terrain misses trees and buildings. Tick <em>Surface clutter</em> in Settings to add canopy/land-cover obstruction: measured tree heights (Meta/WRI via Global Forest Watch) over forest, plus ESA WorldCover land cover (Terrascope). Clutter doesn't hard-block like terrain — it adds frequency-scaled diffraction loss (set by <em>Atten @915</em>, dB/m) as the path grazes through it. The <em>Clear&nbsp;&lt;</em> radius keeps clutter from blocking your own mast. First compute is slower while the data loads.
+      Optional surface clutter combines WorldCover class heights with measured canopy where available. Missing sources are reported. Geometric clutter adds diffraction and empirical through-clutter attenuation. Optional terminal correction uses representative clutter heights at both ends within its supported frequency range. Clearing radii default to zero and should describe verified clear space. Surveyed ground and local clutter heights can be set on each node.
     </p>
     <h3 style="font-size:13px;color:var(--accent);margin:14px 0 4px;letter-spacing:1px">SUN &amp; SHADE (SOLAR EXPOSURE)</h3>
     <p style="font-size:12px;color:var(--muted);line-height:1.5">
@@ -421,7 +427,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       Solar position uses the NOAA low-precision model (~0.01° accuracy); sunlight is treated as a straight ray (no atmospheric refraction), so times near the horizon are approximate.
     </p>
     <p style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.5">
-      Tips: terrain is AWS Open Terrain Tiles (~30 m, no key, cached in memory). Open <strong>🐛 LOG</strong> to see exactly what each calculation used — link budgets, clutter loading, and per-link results. Use <strong>⇪ SHARE</strong> to copy a URL containing your full setup. Modelling is first-order (single knife-edge diffraction, 4/3-earth) — for engineered links verify with a full Longley-Rice/ITWOM tool.
+      Tips: terrain is AWS Open Terrain Tiles (~30 m, no key, cached in memory). Open <strong>🐛 LOG</strong> to see exactly what each calculation used — link budgets, clutter loading, and per-link results. Use <strong>⇪ SHARE</strong> to copy a URL containing your full setup. Modelling is approximate (Bullington component, effective Earth radius and empirical clutter). Measurements and terrain imports are available under Settings → Measurements. See source resolution and height-sensitivity scenarios in each result. Use measured validation for engineered links.
     </p>
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn primary" id="btnHelpClose">GOT IT</button>
@@ -479,6 +485,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
     <div class="settings-tabs">
       <button class="settings-tab active" data-stab="rf" type="button">RF</button>
       <button class="settings-tab" data-stab="coverage" type="button">Coverage</button>
+      <button class="settings-tab" data-stab="data" type="button">Measurements</button>
     </div>
 
     <div class="settings-panel" data-spanel="rf">
@@ -513,12 +520,37 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <label>Gain (dBi)</label>
         <input type="number" id="inpGain" value="2" step="0.5" style="width:60px">
       </div>
+      <div class="field-row" style="margin-bottom:6px">
+        <label>LoRa modem</label>
+        <select id="inpModem" style="flex:1;min-width:0" title="Meshtastic modem preset. Sets RX sensitivity from its bandwidth and SNR floor, and lets link results show predicted SNR the way a Meshtastic traceroute reports it. None for non-LoRa radios.">
+          <option value="">None (not LoRa)</option>
+          <option value="ShortTurbo">ShortTurbo (SF7/500)</option>
+          <option value="ShortFast">ShortFast (SF7/250)</option>
+          <option value="ShortSlow">ShortSlow (SF8/250)</option>
+          <option value="MediumFast">MediumFast (SF9/250)</option>
+          <option value="MediumSlow">MediumSlow (SF10/250)</option>
+          <option value="LongTurbo">LongTurbo (SF11/500)</option>
+          <option value="LongFast" selected>LongFast (SF11/250)</option>
+          <option value="LongModerate">LongModerate (SF11/125)</option>
+          <option value="LongSlow">LongSlow (SF12/125)</option>
+        </select>
+      </div>
       <div class="field-row">
         <label>RX Sens (dBm)</label>
-        <input type="number" id="inpRx" value="-130" step="1" style="width:68px">
+        <input type="number" id="inpRx" value="-131.5" step="0.5" style="width:68px">
         <label>Margin (dB)</label>
-        <input type="number" id="inpMargin" value="6" step="0.5" style="width:60px">
+        <input type="number" id="inpMargin" value="6" step="0.5" style="width:60px" title="Reserve above receiver sensitivity required in both directions for BUDGET OK. Geometry and observations are reported separately.">
       </div>
+    <div class="settings-group">
+      <div class="field-row"><label>Cable loss (dB)</label><input id="inpCable" type="number" value="0" min="0" max="100" step="0.1" style="width:65px"><label>Noise figure (dB)</label><input id="inpNoiseFigure" type="number" value="6" min="0" max="30" step="0.1" style="width:65px"></div>
+      <div class="field-row"><label>Measured noise (dBm)</label><input id="inpNoiseFloor" type="number" placeholder="Estimate" min="-200" max="0" style="width:85px"></div>
+      <p class="quality-note">Leave measured noise blank to estimate thermal noise + noise figure. Sensitivity remains editable for your hardware. Node overrides support separate radio and cable settings.</p>
+      <div class="field-row"><label>Propagation</label><select id="inpPropagation"><option value="bullington">Bullington terrain diffraction</option><option value="knife">Single knife edge (comparison)</option><option value="los">Strict surface LOS</option></select></div>
+      <div class="field-row"><label>Clutter treatment</label><select id="inpClutterMode"><option value="geometry">Geometric + empirical attenuation</option><option value="terminal">Terminal correction (30–3000 MHz)</option></select></div>
+      <div class="field-row"><label>Terrain scenario ±m</label><input id="inpTerrainError" type="number" value="5" min="0" max="100" style="width:60px"><label>Clutter ±m</label><input id="inpClutterError" type="number" value="5" min="0" max="100" style="width:60px"></div>
+      <p class="quality-note">Height scenarios show sensitivity, not a confidence interval. Bullington is the P.526 §4.5.1 component, not the full delta-Bullington/spherical-earth model. Predictions need field validation.</p>
+    </div>
+
     </div>
 
     <div class="settings-group">
@@ -539,6 +571,19 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
     </div>
     </div><!-- /rf panel -->
 
+    <div class="settings-panel data-panel" data-spanel="data" hidden>
+      <p>Import timestamped directed observations or traceroutes as JSON. SNR is not path loss. Match node names exactly, or supply a <code>nodeNameMap</code>. Data stays in this browser session; download a project to retain it.</p>
+      <label>Observations / traceroute JSON <input id="observationFile" type="file" accept=".json,application/json"></label>
+      <textarea id="measurementInput" aria-label="Measurement JSON" placeholder='{"observations":[{"from":"SunBird","to":"Monsoon Moon Server","timestamp":"2026-09-29T00:00:00Z","success":true,"snrDb":-4.5,"modem":"LongFast","frequencyMHz":915,"split":"validation"}]}'></textarea>
+      <div class="data-actions"><button class="btn" id="btnImportMeasurements">Import pasted JSON</button><button class="btn" id="btnExampleMeasurements">Example JSON</button><button class="btn" id="btnExportObservations">Export observations</button></div>
+      <p>Traceroutes: <code>{"traces":[{"timestamp":"…","modem":"LongFast","frequencyMHz":915,"forward":[{"node":"A"},{"node":"B","snrDb":-5}],"reverse":[]}]}</code>. SNR belongs to the receiving hop. Include failed attempts as separate observations with <code>success:false</code>.</p>
+      <button class="btn" id="btnValidationRefresh">Compare with analysed links</button><pre id="validationReport">No observations imported.</pre>
+      <label>Local bare-earth DEM grid JSON <input id="terrainFile" type="file" accept=".json,application/json"></label>
+      <p>Grid: <code>type:"terrain-grid", source, date, datum, rows, cols, north, south, west, east, elevations</code>. WGS84 bounds describe sample centres. Elevations are AMSL metres, row-major north to south; null means no data. Match the vertical datum to AWS terrain and surveyed heights. Maximum 1 million cells. AWS fills outside the grid and no-data cells.</p>
+      <button class="btn" id="btnRemoveTerrain">Use AWS terrain only</button>
+      <label>Restore project <input id="projectFile" type="file" accept=".json,application/json"></label><button class="btn" id="btnExportProject">Download project + measurements + DEM</button>
+      <p>Share URLs contain model settings and sites only. Imported measurements and DEM data travel only in the project file.</p><p id="dataMessage" role="status"></p>
+    </div>
     <div class="settings-panel" data-spanel="coverage" hidden>
     <div class="settings-group">
       <div class="settings-label">Coverage <span id="covCount" style="color:var(--accent)">0</span> active</div>
@@ -564,9 +609,11 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
           <option value="80">80</option>
         </select>
       </div>
+      <div class="field-row"><label><input id="inpAdaptive" type="checkbox" checked> Adaptive coverage rays</label><label>Target spacing (m)</label><input id="inpAngularTarget" type="number" min="25" max="5000" value="250" style="width:65px"></div>
+      <p class="quality-note">Refines wide sectors and changing signal margins, up to 720 rays. The result reports actual spacing; the target may not be reached at the cap. Coverage uses global settings for the remote radio.</p>
       <div class="field-row">
         <label>Fresnel clearance</label>
-        <select id="inpCovFresnel" style="width:120px" title="0 = LOS only (no Fresnel penalty). 40% = forgiving links (Meshtastic/ham — a few dB diffraction loss absorbed by link margin). 60% = professional engineering quality (essentially free-space).">
+        <select id="inpCovFresnel" style="width:120px" title="Geometry reporting threshold only. Diffraction loss and fade margin are calculated independently. 0 checks surface LOS; 60% is a common clearance target.">
           <option value="0">0 (LOS only)</option>
           <option value="0.4" selected>40%</option>
           <option value="0.6">60%</option>
@@ -575,13 +622,13 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       </div>
       <div class="field-row" style="margin-top:6px">
         <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
-          <input type="checkbox" id="inpClutterOn" title="Apply land-cover/canopy clutter as extra obstruction and diffraction loss. Bare terrain still controls hard LOS blocking.">
+          <input type="checkbox" id="inpClutterOn" title="Use land cover and canopy to estimate surface obstruction and loss. Strict LOS mode excludes obstructed paths; diffraction modes estimate additional loss.">
           Surface clutter (land cover)
         </label>
       </div>
       <div class="field-row" style="margin-top:8px;margin-bottom:8px">
         <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
-          <input type="checkbox" id="inpCanopyOn" title="Coverage sweeps: use measured Meta/WRI canopy heights (via the self-hosted titiler) instead of the flat Forest(m) value. Falls back to flat Forest(m) when the titiler is unavailable. Links always use measured canopy automatically.">
+          <input type="checkbox" id="inpCanopyOn" title="Coverage sweeps: use measured Meta/WRI canopy heights (via the self-hosted titiler) instead of the flat Forest(m) value. Falls back to flat Forest(m) when the titiler is unavailable. Links always try measured canopy, whatever this setting.">
           Measured canopy in coverage
         </label>
       </div>
@@ -590,8 +637,8 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
         <input type="number" id="inpClutterForest" value="15" step="1" min="0" style="width:52px" title="Clutter height added over tree-cover / mangrove land.">
         <label>Urban (m)</label>
         <input type="number" id="inpClutterUrban" value="8" step="1" min="0" style="width:52px" title="Clutter height added over built-up land.">
-        <label>Clear &lt;(m)</label>
-        <input type="number" id="inpClutterExclude" value="100" step="10" min="0" style="width:58px" title="Ignore clutter within this distance of the node — your own site is assumed clear of nearby trees/buildings.">
+        <label>Site clear &lt;(m)</label>
+        <input type="number" id="inpClutterExclude" value="0" step="10" min="0" style="width:58px" title="Verified clearing radius at each endpoint. Default zero. Override per site only when the area is known to be clear.">
       </div>
       <div class="field-row" style="margin-bottom:6px">
         <label>Atten @915</label>
@@ -635,7 +682,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <button class="btn share" id="btnShare">⇪ SHARE</button>
       <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
       <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20260807-02">BUILD 20260807-02</span>
+      <span class="hdr-tag" title="Build 20260929-04">BUILD 20260929-04</span>
     </div>
   </header>
 
@@ -766,7 +813,10 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="js/share-codec.js?v=20260708-04"></script>
-<script src="js/app.js?v=20260807-02"></script>
+<script src="js/share-codec.js?v=20260929-04"></script>
+<script src="js/rf-model.js?v=20260929-04"></script>
+<script src="js/rf-data.js?v=20260929-04"></script>
+<script src="js/app.js?v=20260929-04"></script>
+<script src="js/accuracy.js?v=20260929-04"></script>
 </body>
 </html>

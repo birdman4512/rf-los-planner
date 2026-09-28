@@ -14,7 +14,7 @@
 
   // Transform a semantic state object into the compact v4 payload.
   // state = {
-  //   rf: { f,k,tx,gn,rx,mg,ra,cr,cs,cf,cm,co,cy,fh,uh,xe,ca,cc },
+  //   rf: { f,k,tx,gn,rx,mg,ra,cr,cs,cf,cm,co,cy,fh,uh,xe,ca,cc,lm },  // lm = LoRa modem preset name or ''
   //   nodes: [{ lat,lng,antH,name, rfOverride?,txDbm?,gainDbi?,rxDbm?,coverageOn?,color? }],
   //   edges: [{ a,b,hidden? }],   // a,b are node indices
   //   paths: [{ name,hidden?,nodeIdx:[...] }]
@@ -30,12 +30,14 @@
       ra: +rf.ra, cr: +rf.cr, cs: +rf.cs, cf: +rf.cf, cm: +rf.cm, co: rf.co ? 1 : 0,
       cy: rf.cy ? 1 : 0,
       fh: +rf.fh, uh: +rf.uh, xe: +rf.xe, ca: +rf.ca, cc: +rf.cc,
+      lm: rf.lm || '',
+      model: rf.model || {},
       // node: [lat, lng, antH, name, rfOverride?, tx?, gain?, rx?, coverageOn?, color?]
       n: nodes.map(nd => {
         const base = [+(+nd.lat).toFixed(6), +(+nd.lng).toFixed(6), nd.antH, nd.name];
-        if (nd.rfOverride || nd.coverageOn || nd.color) {
+        if (nd.rfOverride || nd.coverageOn || nd.color || nd.extra) {
           base.push(nd.rfOverride ? 1 : 0, nd.txDbm ?? null, nd.gainDbi ?? null,
-                    nd.rxDbm ?? null, nd.coverageOn ? 1 : 0, nd.color || 0);
+                    nd.rxDbm ?? null, nd.coverageOn ? 1 : 0, nd.color || 0, nd.extra || 0);
         }
         return base;
       }),

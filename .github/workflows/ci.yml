@@ -32,6 +32,9 @@ jobs:
       - name: Syntax-check app JS
         run: npm run check:js
 
+      - name: Numerical model and data validation tests
+        run: npm run test:model
+
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 

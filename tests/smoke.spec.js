@@ -172,6 +172,7 @@ test.describe('RF LOS Planner — smoke', () => {
       document.getElementById('inpCovRays').value = '24';
       document.getElementById('inpCovSamples').value = '30';
       document.getElementById('inpCovFresnel').value = '0';
+      document.getElementById('inpAdaptive').checked = false;
 
       const node = addNode(0, 0);
       node.elev = 0;
@@ -195,6 +196,68 @@ test.describe('RF LOS Planner — smoke', () => {
     });
 
     expect(reachKm).toBeGreaterThan(9);
+    expect(pageErrors, `Uncaught page errors:\n${pageErrors.join('\n')}`).toEqual([]);
+  });
+
+  test('node RF override: blank field falls back to global; measured noise inherits', async ({ page }) => {
+    const pageErrors = trackErrors(page);
+    await page.goto('/index.html', { waitUntil: 'load' });
+    const r = await page.evaluate(() => {
+      document.getElementById('inpRx').value = '-125';
+      document.getElementById('inpNoiseFloor').value = '-110';
+      const n = addNode(-27.0, 152.8);
+      toggleNodeRfOverride(n.id);
+      setNodeRf(n.id, 'rxDbm', '');
+      const rf = effectiveRf(n);
+      return { stored: n.rxDbm, rx: rf.rx, noise: rf.noiseDbm };
+    });
+    expect(r).toEqual({ stored: null, rx: -125, noise: -110 });
+    expect(pageErrors, `Uncaught page errors:\n${pageErrors.join('\n')}`).toEqual([]);
+  });
+
+  test('link model: canopy blend, terminal clutter, budget and modem share round-trip', async ({ page }) => {
+    const pageErrors = trackErrors(page);
+    await page.goto('/index.html', { waitUntil: 'load' });
+
+    const r = await page.evaluate(() => {
+      const tree = { classAt: () => 10, heightAt: () => 15 };
+      const built = { classAt: () => 50, heightAt: () => 8 };
+      const a = addNode(-27.0, 152.8), b = addNode(-27.0, 152.9);
+      document.getElementById('inpTx').value = '22';
+      document.getElementById('inpGain').value = '2';
+      document.getElementById('inpRx').value = '-130';
+      document.getElementById('inpModem').value = 'MediumFast';
+      const budget = linkBudgetFor(a, b, 120);
+      return {
+        // A measured 0 m canopy over a tree pixel is a clearing, not missing data.
+        treeClearing: blendClutter(tree, { heightAt: () => 0 }, 0, 0),
+        // Canopy never erases buildings; no canopy data leaves a guessed tree height.
+        builtWithCanopy: blendClutter(built, { heightAt: () => 3 }, 0, 0).h,
+        treeNoCanopy: blendClutter(tree, { heightAt: () => NaN }, 0, 0),
+        // ITU-R P.2108 terminal loss: 6 m antenna in 8 m clutter; none above clutter.
+        termBelow: +RFModel.terminalLoss(6, 8, 915).toFixed(1),
+        termAbove: RFModel.terminalLoss(10, 8, 915),
+        longFastSens: +RFModel.sensitivity('LongFast').toFixed(1),
+        margin: +budget.marginDb.toFixed(1),
+        snr: +budget.snrDb.toFixed(1),
+        status: [linkStatus(-1, 6, false), linkStatus(3, 6, false), linkStatus(20, 6, true), linkStatus(20, 6, false)],
+        modemAfterLoad: parseSharedHash(buildShareHash()).modem,
+        // Nodes without extra settings add nothing to the share link.
+        plainNodeExtra: serializeNodeSettings(a)
+      };
+    });
+
+    expect(r.treeClearing).toEqual({ h: 0, cls: 10, guess: false });
+    expect(r.builtWithCanopy).toBe(8);
+    expect(r.treeNoCanopy).toEqual({ h: 15, cls: 10, guess: true });
+    expect(r.termBelow).toBe(7.6);
+    expect(r.termAbove).toBe(0);
+    expect(r.longFastSens).toBe(-131.5);
+    expect(r.margin).toBe(36);  // 22 + 2 + 2 - 120 - (-130)
+    expect(r.snr).toBe(20);     // -94 dBm received - (-114 dBm MediumFast noise floor)
+    expect(r.status).toEqual(['blocked', 'marginal', 'clear', 'clear']);
+    expect(r.modemAfterLoad).toBe('MediumFast');
+    expect(r.plainNodeExtra).toBe(null);
     expect(pageErrors, `Uncaught page errors:\n${pageErrors.join('\n')}`).toEqual([]);
   });
 });
