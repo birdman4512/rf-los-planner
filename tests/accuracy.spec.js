@@ -74,7 +74,7 @@ test('adaptive coverage reports actual resolution and supports irregular rays',a
       sorted:rays.every((r,i)=>!i||r.az>rays[i-1].az)};
   });
   expect(result.count).toBeGreaterThan(24);expect(result.count).toBeLessThanOrEqual(720);
-  expect(result.sorted).toBe(true);expect(result.atPoint).toBe(true);expect(result.quality).toContain('maximum spacing');expect(errors).toEqual([]);
+  expect(result.sorted).toBe(true);expect(result.atPoint).toBe(true);expect(result.quality).toContain('apart at the');expect(errors).toEqual([]);
 });
 
 test('mobile settings and project download/restore preserve data',async({page})=>{

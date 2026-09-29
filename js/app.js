@@ -220,6 +220,12 @@ function initMap() {
   S._mapReadyCallbacks = [];
   S.map.on('load', onMapStyleReady);
   S.map.on('style.load', onMapStyleReady);
+  // The basemap styles reference POI icons (gate, atm, bollard, ...) their
+  // sprite sheets don't ship, and MapLibre logs a warning per missing icon.
+  // Register a 1x1 transparent placeholder so the console stays readable.
+  S.map.on('styleimagemissing', e => {
+    if(!S.map.hasImage(e.id)) S.map.addImage(e.id, { width:1, height:1, data:new Uint8Array(4) });
+  });
   // Watchdog: if the vector style hasn't loaded after 10s (tile server
   // unreachable / offline field use), swap to a minimal inline style so the
   // map still fires 'load' -- edges, coverage, and queued share-link renders
@@ -324,7 +330,13 @@ function initMapLayers(){
   // dimension or format") -- reproduced live, not a canvas-sizing issue.
   // fill-antialias:false avoids the visible seams GL fill layers otherwise
   // show between adjacent semi-transparent polygons that share an edge.
-  S.map.addSource('coverage-fill-src', { type:'geojson', data: emptyFC() });
+  // tolerance:0 -- with the default (0.375) geojson-vt drops every polygon
+  // whose tile-space area is under tolerance^2, and the per-ray wedges near
+  // the node are the narrowest (width grows with range), so zooming out
+  // blanked a growing disc around the marker even though the wedges
+  // collectively cover whole pixels. Each wedge is only 4 points, so there's
+  // nothing worth simplifying anyway.
+  S.map.addSource('coverage-fill-src', { type:'geojson', data: emptyFC(), tolerance: 0 });
   S.map.addLayer({ id:'coverage-fill', type:'fill', source:'coverage-fill-src',
     filter: ['==', ['get','nodeId'], '__none__'],
     paint: { 'fill-color': ['get','color'], 'fill-opacity': ['get','opacity'], 'fill-antialias': false } });
@@ -2333,6 +2345,10 @@ function toggleNodeRfOverride(id){
 
 function invalidateNodeCoverage(node, redraw){
   S.modelRevision=(S.modelRevision||0)+1;
+  // Coverage computes watch this per-node counter rather than the global
+  // modelRevision, so editing/dragging one node doesn't abort a sweep that's
+  // running for another. Global settings changes reach every node through here.
+  node.coverageRev = (node.coverageRev||0) + 1;
   node.coverageDirty = true;
   if(redraw && node.coverageRendered && node.coverageOn){
     dimNodeCoverage(node.id);
@@ -2410,6 +2426,11 @@ async function computeNodeCoverage(id, _fromBatch = false){
     if(btn){ btn.disabled = true; btn.textContent = '…'; }
     await _computeNodeCoverageImpl(node);
   }catch(err){
+    if(err?.coverageCancelled){
+      dlog(`  ⨯ coverage cancelled: ${err.message}`);
+      toast(`${node?.name||'Node'}: ${err.message}`, 3000);
+      return;
+    }
     console.error('Coverage compute failed', err);
     toast(`Coverage compute failed: ${err.message||err}`, 5000);
   }finally{
@@ -2421,7 +2442,13 @@ async function computeNodeCoverage(id, _fromBatch = false){
 }
 
 async function _computeNodeCoverageImpl(node){
-  const revision=S.modelRevision||0;
+  const revision=node.coverageRev||0;
+  const checkCurrent=()=>{
+    if((node.coverageRev||0)===revision && S.nodes.includes(node)) return;
+    const err=new Error(S.nodes.includes(node)?'settings changed; recompute coverage.':'node removed.');
+    err.coverageCancelled=true;
+    throw err;
+  };
   const g = globalRf();
   const rf = effectiveRf(node);
   const receiverRadio=effectiveRf(null);
@@ -2510,7 +2537,7 @@ async function _computeNodeCoverageImpl(node){
   }
 
   const computeRay = async az => {
-    if((S.modelRevision||0)!==revision)throw new Error('Settings changed; recompute coverage.');
+    checkCurrent();
     toast(`${node.name}: computing bearing ${az.toFixed(1)}°…`);
 
     // Sample terrain along this ray (tiles are lazy-loaded; first hit may pull a few tiles)
@@ -2536,7 +2563,7 @@ async function _computeNodeCoverageImpl(node){
     if(clutterH)clutterH.forEach((h,i)=>addClutterImpact(clutterImpact,h,dists[i],points[i],az));
     elevs[0]=node.groundM??node.elev;
     const margins=await solveCoverageWorker({...modelOptions(),dists,elevs,clutter:clutterH,guess},effectiveRf(node),receiver,g.margin);
-    if((S.modelRevision||0)!==revision)throw new Error('Settings changed; recompute coverage.');
+    checkCurrent();
     const raySamples=points.map((latlng,i)=>({dist:dists[i],latlng,marginDb:margins[i]}));
     let farthestIdx=0;
     for(let i=1;i<margins.length;i++) if(margins[i]>=0) farthestIdx=i;
@@ -2565,7 +2592,17 @@ async function _computeNodeCoverageImpl(node){
   }
   heatRays.sort((a,b)=>a.az-b.az); reach.sort((a,b)=>a.az-b.az);
   const widest=Math.max(...heatRays.map((r,i)=>(heatRays[(i+1)%heatRays.length].az-r.az+360)%360));
-  node.coverageQuality=`${heatRays.length} rays; maximum spacing ${(maxRange*widest*Math.PI/180).toFixed(0)} m at outer edge; radial ${(maxRange/samples).toFixed(0)} m. ${terrainProvenance(node.lat,node.lng)}; ${clutter?.source|| (g.clutterOn?'clutter unavailable':'clutter disabled')}. ${g.mode}.`;
+  // Plain-language resolution report shown under the node's COVERAGE row:
+  // how many bearings were traced, how far apart neighbouring rays end up at
+  // the search limit (what sets wedge blockiness), and the along-ray step.
+  const fmtM=m=>m>=1000?`${(m/1000).toFixed(1)} km`:`${m.toFixed(0)} m`;
+  const gapM=maxRange*widest*Math.PI/180;
+  const capped=g.adaptive && heatRays.length>=maxRays && gapM>g.angularTarget;
+  node.coverageQuality=`Traced ${heatRays.length} bearings${g.adaptive?` (adaptive, from ${rays})`:''}. `
+    +`Rays are up to ${fmtM(gapM)} apart at the ${fmtM(maxRange)} limit`
+    +(capped?` — ${maxRays}-ray cap hit before the ${fmtM(g.angularTarget)} target`:'')
+    +`; sampled every ${fmtM(maxRange/samples)} along each ray. `
+    +`Terrain: ${terrainProvenance(node.lat,node.lng)}. Clutter: ${clutter?.source|| (g.clutterOn?'unavailable':'off')}. Mode: ${g.mode}.`;
   node.coverageRays = reach;
   node.coverageHeatRays = heatRays;
   node.coverageMaxRange = maxRange;
