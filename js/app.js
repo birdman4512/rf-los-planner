@@ -366,9 +366,16 @@ function initMapLayers(){
   // The budget closes but the direct line is blocked (signal diffracts over
   // terrain): same status colour, short dashes so it reads differently from a
   // clear path at a glance.
+  // Dash lengths scale with line-width, so these get their own slimmer widths;
+  // a selected one is emphasised by a soft solid halo rather than fat dashes.
+  S.map.addLayer({ id:'edges-line-obstructed-halo', type:'line', source:'edges-src',
+    filter: ['all', ['get','obstructed'], ['get','selected']],
+    paint: { 'line-color': edgeLinePaint['line-color'], 'line-width': 9,
+      'line-opacity': ['case', ['get','hidden'], 0, 0.22] } });
   S.map.addLayer({ id:'edges-line-obstructed', type:'line', source:'edges-src',
     filter: ['get','obstructed'],
-    paint: { ...edgeLinePaint, 'line-dasharray': [1.6, 1.1] } });
+    paint: { ...edgeLinePaint, 'line-width': ['case', ['get','selected'], 3.5, 2.5],
+      'line-dasharray': [2, 1.4] } });
   // The stretch of the selected link the terrain profile is zoomed to.
   S.map.addSource('profile-window-src', { type:'geojson', data: emptyFC() });
   S.map.addLayer({ id:'profile-window', type:'line', source:'profile-window-src',
