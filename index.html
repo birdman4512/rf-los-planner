@@ -431,6 +431,19 @@ details.hint p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--text)}
 .chart-resize:hover::after,.chart-resize:focus-visible::after,.chart-resize.dragging::after{background:var(--accent)}
 .chart-panel.collapsed .chart-resize{display:none}
 .mob-only{display:none}
+/* Canopy tile check */
+.canopy-modal{max-width:640px}
+.canopy-report{font-size:13px;line-height:1.5}
+.canopy-report p{margin:0 0 8px}
+.canopy-report a{color:var(--accent)}
+.canopy-report .good{color:var(--green)}
+.canopy-report .bad{color:var(--orange)}
+.canopy-report .muted{color:var(--muted);font-size:12px}
+.qk-list{font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg);border:1px solid var(--border);color:var(--accent);padding:8px;margin:0 0 8px;word-break:break-word;user-select:all}
+.canopy-table{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}
+.canopy-table th{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--muted);text-align:left;padding:4px;border-bottom:1px solid var(--border)}
+.canopy-table td{padding:4px;border-bottom:1px solid rgba(30,45,66,.6);vertical-align:top}
+.canopy-table td:first-child{font-family:'Share Tech Mono',monospace}
 /* Phones: the side panel docks under the map as a bottom sheet. */
 @media(max-width:700px){
   header{padding:6px 10px;gap:8px}
@@ -505,6 +518,18 @@ details.hint p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--text)}
     </p>
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn primary" id="btnHelpClose" type="button">GOT IT</button>
+    </div>
+  </div>
+</div>
+
+<!-- Canopy tile check -->
+<div class="modal-bg" id="canopyModal" role="dialog" aria-modal="true" aria-labelledby="canopyTitle">
+  <div class="modal canopy-modal">
+    <h2 id="canopyTitle">🌲 Canopy tiles for this map</h2>
+    <div id="canopyReport" class="canopy-report" aria-live="polite"></div>
+    <div class="modal-actions">
+      <button class="btn" id="btnCanopyCopy" type="button" hidden>COPY MISSING QUADKEYS</button>
+      <button class="btn primary" id="btnCanopyClose" type="button">CLOSE</button>
     </div>
   </div>
 </div>
@@ -776,7 +801,7 @@ details.hint p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--text)}
     <div class="hdr-tag hdr-rf">RF</div>
     <h1>Clear<em>Path</em></h1>
     <div class="hdr-right">
-      <span class="hdr-tag hdr-build" title="Build 20261004-03">BUILD 20261004-03</span>
+      <span class="hdr-tag hdr-build" title="Build 20261004-04">BUILD 20261004-04</span>
       <button class="btn" id="btnHelp" type="button" aria-label="Help">? <span class="btn-txt">HELP</span></button>
       <button class="btn" id="btnSettings" type="button" aria-label="Settings">⚙ <span class="btn-txt">SETTINGS</span></button>
       <button class="btn share" id="btnShare" type="button" aria-label="Share">⇪ <span class="btn-txt">SHARE</span></button>
@@ -784,6 +809,7 @@ details.hint p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--text)}
         <button class="btn" id="btnMore" type="button" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="moreMenu">⋯</button>
         <div class="menu" id="moreMenu" role="menu" hidden>
           <button class="menu-item" id="btnDebug" type="button" role="menuitem" title="Clutter loading, link budgets and per-link results">🐛 Calculation log</button>
+          <button class="menu-item" id="btnCanopyCheck" type="button" role="menuitem" title="Which measured-canopy tiles this map needs, and which are missing">🌲 Check canopy tiles</button>
           <button class="menu-item danger" id="btnClearAll" type="button" role="menuitem">✕ Clear all</button>
         </div>
       </div>
@@ -926,11 +952,11 @@ details.hint p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--text)}
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="js/share-codec.js?v=20261004-03"></script>
-<script src="js/rf-model.js?v=20261004-03"></script>
-<script src="js/rf-data.js?v=20261004-03"></script>
-<script src="js/canopy-cog.js?v=20261004-03"></script>
-<script src="js/app.js?v=20261004-03"></script>
-<script src="js/accuracy.js?v=20261004-03"></script>
+<script src="js/share-codec.js?v=20261004-04"></script>
+<script src="js/rf-model.js?v=20261004-04"></script>
+<script src="js/rf-data.js?v=20261004-04"></script>
+<script src="js/canopy-cog.js?v=20261004-04"></script>
+<script src="js/app.js?v=20261004-04"></script>
+<script src="js/accuracy.js?v=20261004-04"></script>
 </body>
 </html>

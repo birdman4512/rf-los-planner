@@ -78,8 +78,12 @@ R2's free tier is 10 GB-month of Standard storage, 1 M Class A (write) and
 
 Actions → **Build canopy tiles** → *Run workflow*:
 
-- **tiles**: quadkeys separated by spaces or commas, for example the ones
-  ClearPath logs as `Canopy: tile 311213001 not published`. Use `all` to
+- **tiles**: quadkeys separated by spaces or commas. In ClearPath, open
+  **⋯ → Check canopy tiles**. It lists every tile the current map reads (link
+  boxes, coverage sweeps at their search range, and each node's 5 km sun-view
+  surroundings), marks which are published, and copies the missing ones ready
+  to paste here. It needs no analysis run first. The calculation log also
+  names missing tiles (`Canopy: tile 311213001 not published`). Use `all` to
   rebuild every published tile.
 - **factor**: `4` by default (see below).
 

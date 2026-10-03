@@ -25,6 +25,7 @@ async function setup(page){
 
 test('obstructed but workable links use the dashed layer', async ({ page }) => {
   await setup(page);
+  await page.waitForFunction(() => S.map.getSource('edges-src').serialize().data.features?.length > 0);
   const props = await page.evaluate(() => S.map.getSource('edges-src').serialize().data.features[0].properties);
   expect(props.obstructed).toBe(true);
   expect(await page.evaluate(() => S.map.getLayer('edges-line-obstructed').filter)).toEqual(['get', 'obstructed']);

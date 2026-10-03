@@ -98,3 +98,30 @@ test('canopy COG: empty (open-sea) tiles count as covered', async ({ page }) => 
   expect(r.inEmpty).toBeNaN();
   expect(log.length).toBeGreaterThan(0);
 });
+
+test('canopy check lists the tiles the map needs and copies the missing ones', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  let missingQk = '', seaQk = '';
+  await mockStore(page, { publish: qk => qk !== missingQk, empty: qk => qk === seaQk });
+  await page.goto('/index.html');
+  await page.waitForFunction(() => S._ready);
+  const need = await page.evaluate(() => {
+    closeHelp(); fetchElev = async () => {};
+    const a = addNode(-27.14, 152.93), b = addNode(-27.30, 153.05);
+    addEdge(a.id, b.id); setNodeCoverageOn(a.id, true);
+    return [...canopyTilesForMap().keys()].sort();
+  });
+  expect(need.length).toBeGreaterThan(2);
+  missingQk = need[0]; seaQk = need[1];
+  await page.locator('#btnMore').click();
+  await page.locator('#btnCanopyCheck').click();
+  const report = page.locator('#canopyReport');
+  await expect(report).toContainText(`${need.length} canopy tiles`);
+  await expect(report).toContainText('1 missing');
+  await expect(report).toContainText('1 open sea');
+  await expect(page.locator('.qk-list')).toHaveText(missingQk);
+  await page.locator('#btnCanopyCopy').click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(missingQk);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#canopyModal')).not.toHaveClass(/open/);
+});

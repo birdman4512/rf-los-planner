@@ -1595,6 +1595,7 @@ document.addEventListener('keydown',e=>{
   if(document.getElementById('shareModal')?.classList.contains('open')){closeShare();return;}
   if(document.getElementById('pathModal')?.classList.contains('open')){closePathModal();return;}
   if(document.getElementById('helpModal')?.classList.contains('open')){closeHelp();return;}
+  if(document.getElementById('canopyModal')?.classList.contains('open')){closeCanopyCheck();return;}
   const t=e.target;
   if(t&&(t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA'||t.isContentEditable)) return;
   if(S.activeView) clearActiveView();
@@ -2466,7 +2467,7 @@ async function _computeNodeCoverageImpl(node){
   const rf = effectiveRf(node);
   const receiverRadio=effectiveRf(null);
   const allowedLoss=RFModel.budget(rf,receiverRadio,0).marginDb-g.margin;
-  const friisRange = friisRangeMeters(allowedLoss,0,0,0,g.freq,0);
+  const friisRange = coverageFriisRange(node);
   if(!friisRange){ toast(`${node.name}: link budget too low — no coverage`, 3000); return; }
   // Cap to user-configured search radius so we don't fetch tiles forever, but
   // also honour the free-space RF link budget. The smaller one is the search
@@ -4687,6 +4688,9 @@ function initStaticHandlers(){
   on('btnShare','click',openShare);
   on('btnClearAll','click',()=>{ closeMoreMenu(); clearAllUndoable(); });
   on('btnDebug','click',()=>{ closeMoreMenu(); toggleDebug(); });
+  on('btnCanopyCheck','click',()=>{ closeMoreMenu(); openCanopyCheck(); });
+  on('btnCanopyClose','click',closeCanopyCheck);
+  on('btnCanopyCopy','click',copyMissingCanopyTiles);
   on('btnMore','click',ev=>{ ev.stopPropagation(); toggleMoreMenu(); });
   document.addEventListener('click',ev=>{ if(!ev.target.closest('.menu-wrap')) closeMoreMenu(); });
   on('btnAddMode','click',()=>setMode(S.mode==='add'?null:'add'));
@@ -5174,4 +5178,93 @@ function onMapMoveForProfile(){
   if(!S.followMap || !S.activeView || !S.redrawProfile) return;
   cancelAnimationFrame(_followFrame);
   _followFrame = requestAnimationFrame(() => S.redrawProfile?.());
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CANOPY TILE CHECK  —  what this map needs vs what's published
+// ═══════════════════════════════════════════════════════════
+const CANOPY_WORKFLOW_URL = 'https://github.com/birdman4512/rf-los-planner/actions/workflows/build-canopy.yml';
+
+// Free-space range at which a node's directional budget still meets the
+// required margin (the coverage sweep's range before the search cap).
+function coverageFriisRange(node){
+  const g = globalRf();
+  const allowedLoss = RFModel.budget(effectiveRf(node), effectiveRf(null), 0).marginDb - g.margin;
+  return friisRangeMeters(allowedLoss, 0, 0, 0, g.freq, 0);
+}
+
+// Every z9 canopy tile the current map reads, with what reads it: link boxes
+// (as Analyse pads them), coverage sweeps of coverage-enabled nodes at their
+// search range, and each node's sun/skyline surroundings.
+function canopyTilesForMap(){
+  const need = new Map();
+  const add = (minLat, minLng, maxLat, maxLng, use) => {
+    const tl = lonLatToTile(minLng, maxLat, CANOPY_TILE_Z), br = lonLatToTile(maxLng, minLat, CANOPY_TILE_Z);
+    for(let x = tl.x; x <= br.x; x++) for(let y = tl.y; y <= br.y; y++){
+      const qk = tileToQuadKey(x, y, CANOPY_TILE_Z);
+      if(!need.has(qk)) need.set(qk, new Set());
+      need.get(qk).add(use);
+    }
+  };
+  const byId = nodeByIdMap(), pad = 0.005;
+  S.edges.forEach(e => {
+    const a = byId.get(e.aId), b = byId.get(e.bId);
+    if(a && b) add(Math.min(a.lat, b.lat) - pad, Math.min(a.lng, b.lng) - pad, Math.max(a.lat, b.lat) + pad, Math.max(a.lng, b.lng) + pad, `link ${a.name} ↔ ${b.name}`);
+  });
+  const cap = globalRf().maxKm * 1000;
+  S.nodes.forEach(n => {
+    if(n.coverageOn){
+      const r = Math.min(coverageFriisRange(n) || 0, cap);
+      if(r > 0){ const d = metresToDegrees(n.lat, r); add(n.lat - d.dLat, n.lng - d.dLng, n.lat + d.dLat, n.lng + d.dLng, `coverage ${n.name}`); }
+    }
+    const d = metresToDegrees(n.lat, NI_CLUTTER_RANGE);
+    add(n.lat - d.dLat, n.lng - d.dLng, n.lat + d.dLat, n.lng + d.dLng, `sun view ${n.name}`);
+  });
+  return need;
+}
+
+let _canopyMissingList = [];
+async function openCanopyCheck(){
+  const modal = document.getElementById('canopyModal'), report = document.getElementById('canopyReport');
+  const copy = document.getElementById('btnCanopyCopy');
+  modal.classList.add('open');
+  copy.hidden = true;
+  _canopyMissingList = [];
+  const need = canopyTilesForMap();
+  if(!need.size){ report.innerHTML = '<p>Add some nodes first; the check lists the tiles their links, coverage and surroundings need.</p>'; focusModal('canopyModal'); return; }
+  report.innerHTML = '<p>Checking the canopy store…</p>';
+  _canopyFailedAt = 0;                       // a manual check always tries the store
+  const manifest = await loadCanopyManifest(true);
+  if(!manifest){ report.innerHTML = '<p class="bad">Couldn’t reach the canopy store (canopy.nbird.com.au). Check your connection and try again.</p>'; focusModal('canopyModal'); return; }
+  const rows = [...need].map(([qk, uses]) => {
+    const t = manifest.tiles?.[qk];
+    return { qk, uses: [...uses], status: !t ? 'missing' : t.empty ? 'empty' : 'published' };
+  }).sort((a, b) => (a.status === 'missing' ? 0 : 1) - (b.status === 'missing' ? 0 : 1) || a.qk.localeCompare(b.qk));
+  const missing = rows.filter(r => r.status === 'missing');
+  const count = st => rows.filter(r => r.status === st).length;
+  _canopyMissingList = missing.map(r => r.qk);
+  const notes = [];
+  if(!clutterEnabled()) notes.push('Surface clutter is off, so canopy isn’t used at all until you turn it on (Settings → Model).');
+  else if(!canopyEnabled() && S.nodes.some(n => n.coverageOn)) notes.push('“Measured canopy in coverage” is off, so coverage sweeps use flat Forest(m) whatever is published (Settings → Model).');
+  const label = { published: '<span class="tag ok">PUBLISHED</span>', empty: '<span class="tag ok">OPEN SEA</span>', missing: '<span class="tag warn">MISSING</span>' };
+  const usesText = u => escHtml(u.length > 3 ? `${u.slice(0, 3).join(', ')} +${u.length - 3} more` : u.join(', '));
+  report.innerHTML = `
+    <p>This map reads <strong>${rows.length}</strong> canopy tile${rows.length === 1 ? '' : 's'}:
+      ${count('published')} published${count('empty') ? `, ${count('empty')} open sea` : ''}, <strong class="${missing.length ? 'bad' : 'good'}">${missing.length} missing</strong>.</p>
+    ${missing.length ? `
+      <p>Areas touching a missing tile use the flat Forest(m) height. Build them with
+        <a href="${CANOPY_WORKFLOW_URL}" target="_blank" rel="noopener">Actions → Build canopy tiles</a>, pasting:</p>
+      <div class="qk-list">${missing.map(r => r.qk).join(' ')}</div>
+      <p class="muted">Tiles over open sea are detected by the workflow and published as empty.</p>` : '<p class="good">Everything this map needs is published.</p>'}
+    ${notes.map(n => `<p class="muted">${n}</p>`).join('')}
+    <table class="canopy-table"><thead><tr><th>Tile</th><th>Status</th><th>Used by</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td>${r.qk}</td><td>${label[r.status]}</td><td>${usesText(r.uses)}</td></tr>`).join('')}
+    </tbody></table>`;
+  copy.hidden = !missing.length;
+  focusModal('canopyModal');
+}
+function closeCanopyCheck(){ document.getElementById('canopyModal').classList.remove('open'); }
+function copyMissingCanopyTiles(){
+  const text = _canopyMissingList.join(' ');
+  navigator.clipboard?.writeText(text).then(() => toast('Missing quadkeys copied.', 2000), () => toast('Copy failed — select the list and copy it.', 3000));
 }

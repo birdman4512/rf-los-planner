@@ -69,8 +69,8 @@ test('terrain profile resizes and floating controls follow it', async ({ page })
   const h = await page.evaluate(() => document.querySelector('.chart-panel').offsetHeight);
   expect(h).toBeGreaterThan(280);
   expect(await page.evaluate(() => +localStorage.getItem('clearpathChartH'))).toBe(h);
-  const fabBottom = await page.evaluate(() => getComputedStyle(document.querySelector('.fab-group')).bottom);
-  expect(Math.abs(parseFloat(fabBottom) - (h + 10))).toBeLessThan(1.5);
+  // The floating buttons slide (0.15 s transition); wait for them to settle.
+  await expect.poll(async () => Math.abs(parseFloat(await page.evaluate(() => getComputedStyle(document.querySelector('.fab-group')).bottom)) - (h + 10))).toBeLessThan(1.5);
 });
 
 test('results show which canopy source a link used', async ({ page }) => {
