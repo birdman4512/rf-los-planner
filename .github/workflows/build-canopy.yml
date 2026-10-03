@@ -78,8 +78,13 @@ jobs:
           used=$(printf '%s\n' "$listing" | awk '/Total Size/ {print $3}')
           src=0
           for t in $(printf '%s' "$json" | tr -d '[]"' | tr ',' ' '); do
-            n=$(curl -fsSI "https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/$t.tif" | tr -d '\r' | awk 'tolower($1)=="content-length:" {print $2}')
-            [ -n "$n" ] || { echo "::error::source tile $t not found upstream"; exit 1; }
+            url="https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/$t.tif"
+            if [ "$(curl -s -o /dev/null -I -w '%{http_code}' "$url")" = 404 ]; then
+              echo "::notice::$t has no source (open sea / no data); it will be published as an empty tile"
+              continue
+            fi
+            n=$(curl -fsSI "$url" | tr -d '\r' | awk 'tolower($1)=="content-length:" {print $2}')
+            [ -n "$n" ] || { echo "::error::could not read the size of source tile $t"; exit 1; }
             src=$((src + n))
           done
           awk -v used="${used:-0}" -v src="$src" -v r="$ratio" -v budget="$BUDGET_GB" 'BEGIN {
@@ -113,6 +118,14 @@ jobs:
           TILE: ${{ matrix.tile }}
         run: |
           set -eu
+          if [ "$(jq -r '.empty // false' "out/$TILE.json")" = true ]; then
+            # No source: publish just the entry, so the app knows this tile is
+            # deliberately empty rather than not built yet.
+            aws s3 cp "out/$TILE.json" "s3://$R2_BUCKET/meta/$TILE.json" --endpoint-url "$R2_ENDPOINT" \
+              --content-type application/json --cache-control no-cache --only-show-errors
+            jq -c . "out/$TILE.json"
+            exit 0
+          fi
           key=$(jq -r .path "out/$TILE.json")
           # Hard stop: never upload past the budget, whatever the estimate said.
           listing=$(aws s3 ls "s3://$R2_BUCKET" --recursive --summarize --endpoint-url "$R2_ENDPOINT")

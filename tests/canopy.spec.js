@@ -34,14 +34,14 @@ function cogFor(qk){
   return cogs.get(qk);
 }
 
-async function mockStore(page, { publish = () => true } = {}){
+async function mockStore(page, { publish = () => true, empty = () => false } = {}){
   const log = [];
   await page.route('https://canopy.nbird.com.au/**', async route => {
     const url = new URL(route.request().url());
     const cors = { 'access-control-allow-origin': '*' };
     if(url.pathname === '/manifest.json'){
       const tiles = {};
-      for(const qk of NEARBY) if(publish(qk)) tiles[qk] = { path: `tiles/${qk}/20261003T000000Z.tif`, build: 'max4-ovrms-u8' };
+      for(const qk of NEARBY) if(publish(qk)) tiles[qk] = empty(qk) ? { quadkey: qk, empty: true } : { path: `tiles/${qk}/20261003T000000Z.tif`, build: 'max4-ovrms-u8' };
       return route.fulfill({ json: { format: 'cog-u8', generated: 'g1', tiles }, headers: cors });
     }
     const m = /^\/tiles\/([0-3]{9})\//.exec(url.pathname);
@@ -82,4 +82,19 @@ test('canopy COG: an unpublished tile falls back to flat Forest(m)', async ({ pa
   await mockStore(page, { publish: qk => qk !== '311213001' });
   await page.goto('/index.html');
   expect(await grid(page, 2, 20)).toBeNull();
+});
+
+test('canopy COG: empty (open-sea) tiles count as covered', async ({ page }) => {
+  const log = await mockStore(page, { empty: qk => qk !== '311213001' });
+  await page.goto('/index.html');
+  const r = await page.evaluate(async () => {
+    const lat = -27.14, lng = 152.93, d = metresToDegrees(lat, 50000);
+    const g = await buildCanopyGrid(lat - d.dLat, lng - d.dLng, lat + d.dLat, lng + d.dLng, 20);
+    return g && { tiles: g.tiles, centre: g.heightAt(lat, lng), inEmpty: g.heightAt(lat, lng + 0.45) };
+  });
+  expect(r).not.toBeNull();
+  expect(r.tiles).toBe(1);
+  expect(r.centre).toBe(52);
+  expect(r.inEmpty).toBeNaN();
+  expect(log.length).toBeGreaterThan(0);
 });

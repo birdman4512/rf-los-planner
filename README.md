@@ -103,7 +103,8 @@ to a Cloudflare R2 bucket, served at `https://canopy.nbird.com.au`:
 
 - `manifest.json`: which z9 tiles are published, and how each was built
 - `tiles/<quadkey>/<build stamp>.tif`: one immutable COG per tile
-- `meta/<quadkey>.json`: each tile's manifest entry
+- `meta/<quadkey>.json`: each tile's manifest entry. Open-sea quadkeys, where
+  Meta has no source, are entries marked `"empty": true` with no file.
 
 The browser reads these directly with HTTP Range requests
 ([`js/canopy-cog.js`](js/canopy-cog.js)). There is no tile server. Where a tile

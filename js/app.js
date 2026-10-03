@@ -2104,6 +2104,9 @@ async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
         dlog(`Canopy: tile ${qk} not published — using flat Forest(m); run the "Build canopy tiles" workflow for ${qk} to enable measured canopy here`,'warn');
         continue;
       }
+      // Meta has no data there (open sea): covered, with nothing to read.
+      // heightAt returns NaN, so WorldCover's class (water) decides.
+      if(manifest.tiles[qk]?.empty) continue;
       plan.push({ qk, bbox: { west, south, east, north } });
     }
   }

@@ -46,6 +46,18 @@ else
   P=/work
 fi
 
+# Meta publishes no tile where there is no land (open sea). A 404 (and only a
+# 404, so an outage is never mistaken for one) is recorded as an empty tile:
+# a manifest entry with no file, which the app treats as covered, no canopy.
+STATUS=$(curl -s -o /dev/null -I -w '%{http_code}' "$SRC_URL")
+if [ "$STATUS" = 404 ]; then
+  echo "No source for $TILE (open sea / no data): recording it as an empty tile"
+  cat > "$OUT_DIR/$TILE.json" <<EOF
+{"quadkey": "$TILE", "empty": true, "generated": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")", "sourceUrl": "$SRC_URL"}
+EOF
+  exit 0
+fi
+
 # Read the upstream headers BEFORE downloading, so the recorded ETag can never
 # describe a newer object than the bytes actually built.
 HEADERS=$(curl -fsSI "$SRC_URL")

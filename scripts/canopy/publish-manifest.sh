@@ -36,7 +36,7 @@ if ! aws s3api put-bucket-cors --bucket "$R2_BUCKET" --cors-configuration "file:
   echo "::warning::Couldn't set the bucket CORS policy with this token; keep it set in the R2 dashboard"
 fi
 
-jq -r '.tiles[].path' "$WORK/manifest.json" | sort > "$WORK/keep"
+jq -r '.tiles[] | select(.path) | .path' "$WORK/manifest.json" | sort > "$WORK/keep"
 s3 ls "s3://$R2_BUCKET/tiles/" --recursive | awk '{print $4}' | sort > "$WORK/have"
 comm -13 "$WORK/keep" "$WORK/have" | while read -r key; do
   echo "Pruning superseded $key"

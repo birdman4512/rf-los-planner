@@ -134,6 +134,13 @@ the build step.
 - Keeps decoded tiles in memory, and keeps the raw header and tile bytes in the
   Cache API (`clearpath-canopy-v1`). Revisiting an area costs no network at all.
 
+Meta publishes no source where there is no land (open sea). The workflow
+records such a quadkey as an **empty** tile: a manifest entry with
+`"empty": true` and no file. The app treats it as covered with nothing to
+read, so WorldCover (water) decides there. Coastal coverage sweeps that touch
+open sea can still use measured canopy over land. Build them like any other
+tile; the workflow detects the missing source itself (a 404, and only a 404).
+
 If any tile touched by an area is missing or fails, the whole area uses the
 flat Forest(m) height. That avoids a result that is half measured and half
 guessed. A store that can't be reached is retried after 90 s.
