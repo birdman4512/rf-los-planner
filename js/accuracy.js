@@ -24,7 +24,7 @@ function applySiteClutter(h,dists,a,b,guess=null){
 }
 function solveCoverageWorker(profile,a,b,margin){
   if(typeof Worker==='undefined') return Promise.resolve(RFModel.coverageRay(profile,a,b,margin));
-  if(!coverageWorker) coverageWorker=new Worker('js/rf-worker.js?v=20261003-02');
+  if(!coverageWorker) coverageWorker=new Worker('js/rf-worker.js?v=20261004-01');
   const worker=coverageWorker,id=++workerSequence;
   return new Promise((resolve,reject)=>{
     const cleanup=()=>{worker.removeEventListener('message',message);worker.removeEventListener('error',error);};

@@ -265,6 +265,10 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 #profileCanvas{display:block;width:100%}
 .chart-min{font-family:'Share Tech Mono',monospace;font-size:13px;line-height:1;flex-shrink:0;width:22px;height:20px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
 .chart-min:hover{border-color:var(--accent);color:var(--accent)}
+.chart-btn{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;flex-shrink:0;height:20px;padding:0 7px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;white-space:nowrap}
+.chart-btn:hover{border-color:var(--accent);color:var(--accent)}
+.chart-btn[aria-pressed="true"]{border-color:#ff2bd6;color:#ff2bd6}
+#profileCanvas{touch-action:pan-y;cursor:crosshair}
 .chart-panel.collapsed{height:auto}
 .chart-panel.collapsed #profileCanvas{display:none}
 
@@ -470,7 +474,7 @@ details.hint p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--text)}
       <li><strong>Coverage</strong> — tick the <em>COVERAGE</em> box on a node and click <em>COMPUTE</em>, or <strong>▣ COVERAGE</strong> at the bottom of the side panel for every ticked node. A terrain-aware coverage area is drawn in that node's colour.</li>
     </ol>
     <p style="font-size:12px;color:var(--muted);line-height:1.5">
-      <strong style="color:var(--green)">✓ BUDGET OK</strong> — predicted signal meets the required margin in both directions.
+      <strong style="color:var(--green)">✓ BUDGET OK</strong> — predicted signal meets the required margin in both directions. A <strong>short-dashed</strong> line means the budget closes but the direct path is blocked by terrain, so the signal relies on diffraction over it (long grey dashes = not yet analysed).
       <strong style="color:var(--orange)">⚠ LOW MARGIN</strong> — predicted reception has less reserve than requested.
       <strong style="color:var(--red)">✕ BELOW SENSITIVITY</strong> — at least one direction is below sensitivity, or strict LOS excludes the path. Geometry (surface LOS/Fresnel) and observed reception are reported separately. These are estimates, not service guarantees.
     </p>
@@ -496,7 +500,7 @@ details.hint p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--text)}
       Solar position uses the NOAA low-precision model (~0.01° accuracy); sunlight is treated as a straight ray (no atmospheric refraction), so times near the horizon are approximate.
     </p>
     <p style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.5">
-      Tips: your map is saved in this browser and restored next visit, and deletes can be undone from the message that appears. Drag the top edge of the terrain profile to resize it. Terrain is AWS Open Terrain Tiles (~30 m, no key, cached in memory). Open <strong>⋯ → Calculation log</strong> to see exactly what each calculation used — link budgets, clutter loading, and per-link results. Use <strong>⇪ SHARE</strong> to copy a URL containing your full setup. Modelling is approximate (Bullington component, effective Earth radius and empirical clutter). Measurements and terrain imports are available under Settings → Measurements. See source resolution and height-sensitivity scenarios in each result. Use measured validation for engineered links.
+      Tips: your map is saved in this browser and restored next visit, and deletes can be undone from the message that appears. Drag the top edge of the terrain profile to resize it. On the profile, scroll or pinch to zoom, drag across a stretch to zoom to it, double-click (or ⤢ FULL) to reset; <strong>⇔ FOLLOW MAP</strong> shows only the part of the link visible on the map. Terrain is AWS Open Terrain Tiles (~30 m, no key, cached in memory). Open <strong>⋯ → Calculation log</strong> to see exactly what each calculation used — link budgets, clutter loading, and per-link results. Use <strong>⇪ SHARE</strong> to copy a URL containing your full setup. Modelling is approximate (Bullington component, effective Earth radius and empirical clutter). Measurements and terrain imports are available under Settings → Measurements. See source resolution and height-sensitivity scenarios in each result. Use measured validation for engineered links.
     </p>
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn primary" id="btnHelpClose" type="button">GOT IT</button>
@@ -771,7 +775,7 @@ details.hint p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--text)}
     <div class="hdr-tag hdr-rf">RF</div>
     <h1>Clear<em>Path</em></h1>
     <div class="hdr-right">
-      <span class="hdr-tag hdr-build" title="Build 20261003-02">BUILD 20261003-02</span>
+      <span class="hdr-tag hdr-build" title="Build 20261004-01">BUILD 20261004-01</span>
       <button class="btn" id="btnHelp" type="button" aria-label="Help">? <span class="btn-txt">HELP</span></button>
       <button class="btn" id="btnSettings" type="button" aria-label="Settings">⚙ <span class="btn-txt">SETTINGS</span></button>
       <button class="btn share" id="btnShare" type="button" aria-label="Share">⇪ <span class="btn-txt">SHARE</span></button>
@@ -910,6 +914,8 @@ details.hint p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--text)}
         <div class="chart-header">
           <div class="chart-title" id="chartTitle">TERRAIN PROFILE</div>
           <div class="chart-tabs" id="chartTabs"></div>
+          <button class="chart-btn" id="btnProfileFull" type="button" hidden title="Show the whole link (or double-click the profile)">⤢ FULL</button>
+          <button class="chart-btn" id="btnFollowMap" type="button" aria-pressed="false" title="Show only the part of the link that is visible on the map">⇔ FOLLOW MAP</button>
           <button class="chart-min" id="btnChartMin" type="button" title="Minimise terrain profile" aria-label="Minimise terrain profile">–</button>
         </div>
         <canvas id="profileCanvas"></canvas>
@@ -919,11 +925,11 @@ details.hint p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--text)}
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="js/share-codec.js?v=20261003-02"></script>
-<script src="js/rf-model.js?v=20261003-02"></script>
-<script src="js/rf-data.js?v=20261003-02"></script>
-<script src="js/canopy-cog.js?v=20261003-02"></script>
-<script src="js/app.js?v=20261003-02"></script>
-<script src="js/accuracy.js?v=20261003-02"></script>
+<script src="js/share-codec.js?v=20261004-01"></script>
+<script src="js/rf-model.js?v=20261004-01"></script>
+<script src="js/rf-data.js?v=20261004-01"></script>
+<script src="js/canopy-cog.js?v=20261004-01"></script>
+<script src="js/app.js?v=20261004-01"></script>
+<script src="js/accuracy.js?v=20261004-01"></script>
 </body>
 </html>

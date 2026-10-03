@@ -256,6 +256,7 @@ function initMap() {
   // canvas for the duration of the drag instead.
   S.map.on('dragstart', () => { S._dragging = true; S.map.getCanvas().style.cursor = 'move'; });
   S.map.on('dragend', () => { S._dragging = false; S.map.getCanvas().style.cursor = ''; });
+  S.map.on('move', onMapMoveForProfile);
   setTimeout(() => S.map.resize(), 150);
   setTimeout(() => S.map.resize(), 500);
 }
@@ -360,8 +361,19 @@ function initMapLayers(){
     filter: ['!', ['get','analysed']],
     paint: { ...edgeLinePaint, 'line-dasharray': [5,4] } });
   S.map.addLayer({ id:'edges-line-analysed', type:'line', source:'edges-src',
-    filter: ['get','analysed'],
+    filter: ['all', ['get','analysed'], ['!', ['get','obstructed']]],
     paint: edgeLinePaint });
+  // The budget closes but the direct line is blocked (signal diffracts over
+  // terrain): same status colour, short dashes so it reads differently from a
+  // clear path at a glance.
+  S.map.addLayer({ id:'edges-line-obstructed', type:'line', source:'edges-src',
+    filter: ['get','obstructed'],
+    paint: { ...edgeLinePaint, 'line-dasharray': [1.6, 1.1] } });
+  // The stretch of the selected link the terrain profile is zoomed to.
+  S.map.addSource('profile-window-src', { type:'geojson', data: emptyFC() });
+  S.map.addLayer({ id:'profile-window', type:'line', source:'profile-window-src',
+    layout: { 'line-cap':'round' },
+    paint: { 'line-color':'#ff2bd6', 'line-width':10, 'line-opacity':0.35 } });
   // The hidden filter matters even though the hit line is always invisible:
   // without it, a hidden edge stays fully interactive (pointer cursor,
   // click-select, context menu) along its invisible geometry -- the old
@@ -648,6 +660,7 @@ function syncEdgesSource(){
           id:e.id,
           status: !e.result ? 'unanalysed' : e.result.status==='error' ? 'error' : e.result.status,
           analysed: !!e.result,
+          obstructed: !!e.result && e.result.geometry === 'obstructed' && (e.result.status === 'clear' || e.result.status === 'marginal'),
           selected,
           hidden: !visible
         },
@@ -879,6 +892,7 @@ function selectEdgeView(id, opts={}){
   if(!edge) return;
   if(!opts.force&&S.activeView?.type==='edge'&&S.activeView.id===id){clearActiveView();return;}
   S.activeView={type:'edge',id};
+  S.profileZoom=null;
   setChartCollapsed(false);
   if(edge.profile) showEdgeProfile(id);
   else{
@@ -898,6 +912,7 @@ function selectPathView(id, opts={}){
   if(!path) return;
   if(!opts.force&&S.activeView?.type==='path'&&S.activeView.id===id){clearActiveView();return;}
   S.activeView={type:'path',id};
+  S.profileZoom=null;
   setChartCollapsed(false);
   if(pathHasAnalysedProfiles(path)) showPathProfile(id);
   else{
@@ -1554,6 +1569,7 @@ function isSelectionControlTarget(target){
     '.path-row',
     '.hop-card',
     '.chart-tab',
+    '#profileCanvas',
     '.maplibregl-marker',
     'button',
     'input',
@@ -3141,27 +3157,27 @@ function renderChartTabs(){
 // ═══════════════════════════════════════════════════════════
 //  PROFILE DRAWING — SINGLE EDGE
 // ═══════════════════════════════════════════════════════════
-function showEdgeProfile(edgeId){
+function showEdgeProfile(edgeId, opts={}){
   const e=S.edges.find(x=>x.id===edgeId);
   if(!e?.profile) return;
-  S.redrawProfile=()=>showEdgeProfile(edgeId);
+  S.redrawProfile=()=>showEdgeProfile(edgeId,{redrawOnly:true});
   const{elevs,dists,dist,aH,bH,a,b,freq,K,N,clutterH,clutterClass}=e.profile;
   const r=e.result;
   const diffTxt=(r&&r.marginDb!=null)?`  |  Margin: ${fmtDb(r.marginDb)}${r.snrDb!=null?`  |  SNR: ${fmtDb(r.snrDb)}`:''}  |  Loss: ${r.excessLossDb.toFixed(1)} dB`:'';
   const title=`${a.name} ↔ ${b.name}  |  ${(dist/1000).toFixed(2)} km  |  GND+ANT: ${aH.toFixed(1)}m → ${bH.toFixed(1)}m${diffTxt}`;
   document.getElementById('chartTitle').textContent=title;
   drawProfile({elevs,dists,dist,aH,bH,freq,K,N,clutterH,clutterClass,result:r,labels:[a.name,b.name]});
-  highlightActiveMapView();
+  if(!opts.redrawOnly) highlightActiveMapView();
 }
 
 // ═══════════════════════════════════════════════════════════
 //  PROFILE DRAWING — PATH (multi-hop)
 // ═══════════════════════════════════════════════════════════
-function showPathProfile(pathId){
+function showPathProfile(pathId, opts={}){
   const path=S.paths.find(p=>p.id===pathId);
   if(!path) return;
-  S.redrawProfile=()=>showPathProfile(pathId);
-  highlightActiveMapView();
+  S.redrawProfile=()=>showPathProfile(pathId,{redrawOnly:true});
+  if(!opts.redrawOnly) highlightActiveMapView();
 
   // Collect edges in order — each consecutive pair of nodeIds
   const nodesById=nodeByIdMap();
@@ -3211,9 +3227,10 @@ function drawProfile({elevs,dists,dist,aH,bH,freq,K,N,clutterH,clutterClass,resu
   const PAD={l:46,r:12,t:14,b:22};
   const pw=W-PAD.l-PAD.r,ph=H-PAD.t-PAD.b;
   const activeEdge=S.activeView?.type==='edge'?S.edges.find(e=>e.id===S.activeView.id):null;
-  if(activeEdge?.profile){
-    S.profileHover={PAD,totalDist:dist,segments:[{start:0,dist,a:activeEdge.profile.a,b:activeEdge.profile.b}]};
-  }
+  const segments=activeEdge?.profile?[{start:0,dist,a:activeEdge.profile.a,b:activeEdge.profile.b}]:null;
+  const [w0,w1]=profileWindow(dist,segments);
+  S.profileHover=segments?{PAD,totalDist:dist,w0,w1,segments}:null;
+  showProfileWindowOnMap(segments,w0,w1,dist);
 
   // Per-sample series: earth-bulge-corrected terrain, the LOS line, and the
   // upper edge of the Fresnel zone (endpoints have zero Fresnel radius).
@@ -3222,16 +3239,26 @@ function drawProfile({elevs,dists,dist,aH,bH,freq,K,N,clutterH,clutterClass,resu
   const fz1=s=>(s===0||s===N)?0:fresnel1(dists[s],dist-dists[s],freq);
   // Fit the vertical axis to everything we draw (terrain, endpoints, Fresnel top)
   // with a little headroom (-5 m below, +15 m above) so nothing clips the panel.
-  const allVals=[...eff,aH,bH];
-  for(let s=1;s<N;s++) allVals.push(losH(s)+fz1(s));
-  // Tall canopy/buildings can sit above the Fresnel ceiling — fit to them too.
-  if(clutterH) for(let s=0;s<=N;s++) allVals.push(eff[s]+(clutterH[s]||0));
+  // Only what's inside the distance window counts, so a zoomed view fills
+  // the panel height with the terrain actually shown.
+  const allVals=[aH+(bH-aH)*w0/dist, aH+(bH-aH)*w1/dist];
+  if(w0<=0) allVals.push(aH);
+  if(w1>=dist) allVals.push(bH);
+  for(let s=0;s<=N;s++){
+    if(dists[s]<w0||dists[s]>w1) continue;
+    allVals.push(eff[s]);
+    if(s>0&&s<N) allVals.push(losH(s)+fz1(s));
+    // Tall canopy/buildings can sit above the Fresnel ceiling — fit to them too.
+    if(clutterH) allVals.push(eff[s]+(clutterH[s]||0));
+  }
   const minV=Math.min(...allVals)-5,maxV=Math.max(...allVals)+15,rng=maxV-minV||1;
-  // Sample index → x pixel; elevation value → y pixel (canvas y grows downward).
-  const xp=s=>PAD.l+(s/N)*pw, yp=v=>PAD.t+ph-((v-minV)/rng)*ph;
+  // Sample index → x pixel (by its distance, within the window); elevation → y pixel.
+  const xp=s=>PAD.l+((dists[s]-w0)/(w1-w0))*pw, yp=v=>PAD.t+ph-((v-minV)/rng)*ph;
 
   ctx.fillStyle='#0b0f17';ctx.fillRect(0,0,W,H);
   drawGrid(ctx,PAD,pw,ph,W,H,minV,rng);
+  ctx.save();
+  ctx.beginPath();ctx.rect(PAD.l,0,pw,H);ctx.clip();
   drawFresnel(ctx,N,xp,yp,losH,fz1,'#00c8f0');
   drawTerrain(ctx,N,xp,yp,eff,H);
   // Surface clutter band sits on the terrain, beneath the bare-LOS blocked tint.
@@ -3246,7 +3273,8 @@ function drawProfile({elevs,dists,dist,aH,bH,freq,K,N,clutterH,clutterClass,resu
   const losCol=result?(result.status==='clear'?'#2ecc71':result.status==='marginal'?'#f39c12':'#e74c3c'):'#00c8f0';
   drawLosLine(ctx,xp,yp,0,N,aH,bH,losCol);
   drawEndpoints(ctx,xp,yp,0,N,aH,bH,losCol,labels[0],labels[1]);
-  drawXAxis(ctx,PAD,pw,H,dist);
+  ctx.restore();
+  drawXAxis(ctx,PAD,pw,H,w0,w1,dist);
   drawClutterLegend(ctx,PAD,clutterClassesPresent);
 }
 
@@ -3280,14 +3308,19 @@ function drawPathProfile(hops,names){
     }
     cumDist+=dist;
   });
-  S.profileHover={PAD,totalDist,segments:hoverSegments};
+  const [w0,w1]=profileWindow(totalDist,hoverSegments);
+  S.profileHover={PAD,totalDist,w0,w1,segments:hoverSegments};
+  showProfileWindowOnMap(hoverSegments,w0,w1,totalDist);
 
-  const allVals=samples.flatMap(s=>[s.eff,s.los,s.eff+s.clutterH]);
+  const shown=samples.filter(s=>s.cumDist>=w0&&s.cumDist<=w1);
+  const allVals=(shown.length?shown:samples).flatMap(s=>[s.eff,s.los,s.eff+s.clutterH]);
   const minV=Math.min(...allVals)-5,maxV=Math.max(...allVals)+15,rng=maxV-minV||1;
-  const xp=d=>PAD.l+(d/totalDist)*pw, yp=v=>PAD.t+ph-((v-minV)/rng)*ph;
+  const xp=d=>PAD.l+((d-w0)/(w1-w0))*pw, yp=v=>PAD.t+ph-((v-minV)/rng)*ph;
 
   ctx.fillStyle='#0b0f17';ctx.fillRect(0,0,W,H);
   drawGrid(ctx,PAD,pw,ph,W,H,minV,rng);
+  ctx.save();
+  ctx.beginPath();ctx.rect(PAD.l,0,pw,H);ctx.clip();
 
   // Fresnel per hop
   hops.forEach((h,hi)=>{
@@ -3379,8 +3412,9 @@ function drawPathProfile(hops,names){
     ctx.fillText(name,xp(cumW)+(wi===0?5:wi===names.length-1?-5:0),PAD.t-2);
     if(wi<names.length-1) cumW+=hops[wi].e.profile.dist;
   });
+  ctx.restore();
 
-  drawXAxis(ctx,PAD,pw,H,totalDist);
+  drawXAxis(ctx,PAD,pw,H,w0,w1,totalDist);
   drawClutterLegend(ctx,PAD,pathClutterClasses);
 }
 
@@ -3434,9 +3468,25 @@ function drawEndpoints(ctx,xp,yp,s0,sN,aH,bH,color,nameA,nameB){
     ctx.fillText(nm,xp(s)+(s===s0?6:-6),yp(h)-7);
   });
 }
-function drawXAxis(ctx,PAD,pw,H,totalDist){
-  ctx.fillStyle='rgba(74,98,120,.9)';ctx.font='9px "Share Tech Mono"';
-  [0,.25,.5,.75,1].forEach(t=>{ctx.textAlign='center';ctx.fillText(((totalDist/1000)*t).toFixed(1)+'km',PAD.l+pw*t,H-5);});
+function drawXAxis(ctx,PAD,pw,H,w0,w1,total){
+  const span=w1-w0;
+  // Step from 1/2/5 × 10^n so labels land on round distances, ~6 per panel.
+  const raw=span/Math.max(2,Math.floor(pw/90)), mag=10**Math.floor(Math.log10(raw));
+  const step=[1,2,5,10].map(m=>m*mag).find(v=>v>=raw)||10*mag;
+  const dp=step>=1000?(step%1000?1:0):step>=100?1:2;
+  ctx.font='10px "Share Tech Mono"';ctx.textAlign='center';
+  for(let d=Math.ceil(w0/step)*step; d<=w1+1e-6; d+=step){
+    const x=PAD.l+((d-w0)/span)*pw;
+    ctx.strokeStyle='rgba(0,200,240,.07)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(x,PAD.t);ctx.lineTo(x,H-PAD.b);ctx.stroke();
+    ctx.fillStyle='rgba(74,98,120,.9)';
+    ctx.fillText((d/1000).toFixed(dp)+'km',x,H-5);
+  }
+  if(span<total-1){
+    const rp=Math.min(2,dp+1);
+    const txt=`${(w0/1000).toFixed(rp)}–${(w1/1000).toFixed(rp)} km of ${(total/1000).toFixed(rp)}`;
+    ctx.textAlign='left';ctx.fillStyle='#ff2bd6';ctx.fillText(txt,PAD.l+6,PAD.t+10);
+  }
 }
 function hexAlpha(hex,alpha){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return `rgba(${r},${g},${b},${alpha})`;}
 
@@ -4040,10 +4090,10 @@ function handleProfileHover(ev){
   const canvas=document.getElementById('profileCanvas');
   const rect=canvas.getBoundingClientRect();
   const x=ev.clientX-rect.left;
-  const {PAD,totalDist,segments}=S.profileHover;
+  const {PAD,w0,w1,segments}=S.profileHover;
   const pw=canvas.offsetWidth-PAD.l-PAD.r;
   if(x<PAD.l||x>PAD.l+pw){hideProfileHoverMarker();return;}
-  const dist=((x-PAD.l)/pw)*totalDist;
+  const dist=w0+((x-PAD.l)/pw)*(w1-w0);
   const seg=segments.find(s=>dist>=s.start&&dist<=s.start+s.dist)||segments[segments.length-1];
   if(!seg) return;
   const t=Math.max(0,Math.min(1,(dist-seg.start)/seg.dist));
@@ -4058,9 +4108,10 @@ function drawProfileCursorAtDistance(dist){
   S.redrawProfile();
   const canvas=document.getElementById('profileCanvas');
   const ctx=canvas.getContext('2d');
-  const {PAD,totalDist}=S.profileHover;
+  const {PAD,w0,w1}=S.profileHover;
+  if(dist<w0||dist>w1) return;
   const pw=canvas.offsetWidth-PAD.l-PAD.r;
-  const x=PAD.l+(Math.max(0,Math.min(totalDist,dist))/totalDist)*pw;
+  const x=PAD.l+((dist-w0)/(w1-w0))*pw;
   ctx.save();
   ctx.strokeStyle='#ff2bd6';
   ctx.lineWidth=2;
@@ -4128,6 +4179,7 @@ function initProfileHover(){
   canvas.dataset.hoverBound='1';
   canvas.addEventListener('mousemove',handleProfileHover);
   canvas.addEventListener('mouseleave',hideProfileHoverMarker);
+  initProfileZoom(canvas);
 }
 
 function clearCanvas(){
@@ -4692,6 +4744,8 @@ function initStaticHandlers(){
     document.getElementById('btnSidebarExpand')?.classList.remove('show');
   });
   // Minimise / restore the terrain profile chart
+  on('btnProfileFull','click',()=>setProfileZoom(null));
+  on('btnFollowMap','click',()=>setFollowMap(!S.followMap));
   on('btnChartMin','click',()=>setChartCollapsed(!document.querySelector('.chart-panel').classList.contains('collapsed')));
   // Phones start with the profile minimised so the map gets the room; it
   // opens when a link or path is selected.
@@ -4938,4 +4992,181 @@ function setChartCollapsed(collapsed){
   btn.setAttribute('aria-label', btn.title);
   S.map?.resize();
   if(!collapsed) requestAnimationFrame(redrawActiveView);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PROFILE ZOOM  —  a distance window [w0,w1] over the profile
+// ═══════════════════════════════════════════════════════════
+// Scroll/pinch zooms about the pointer, dragging selects a stretch (touch:
+// pans when zoomed), double-click resets. "Follow map" instead shows only
+// the part of the link inside the map view and tracks pans and zooms.
+const PROFILE_MIN_SPAN = 200;   // m
+const FOLLOW_KEY = 'clearpathFollowMap';
+try{ S.followMap = localStorage.getItem(FOLLOW_KEY) === '1'; }catch{ S.followMap = false; }
+
+function profileViewKey(){ return S.activeView ? `${S.activeView.type}:${S.activeView.id}` : ''; }
+
+// Window for a profile of length total; segments map distance to lat/lng.
+function profileWindow(total, segments){
+  let w = null;
+  if(S.followMap && segments) w = mapVisibleRange(segments, total);
+  else if(S.profileZoom && S.profileZoom.key === profileViewKey()) w = [S.profileZoom.w0, S.profileZoom.w1];
+  updateProfileControls(!!w && (w[1] - w[0]) < total - 1);
+  if(!w) return [0, total];
+  const span = Math.min(total, Math.max(PROFILE_MIN_SPAN, w[1] - w[0]));
+  const w0 = Math.max(0, Math.min(total - span, w[0]));
+  return [w0, w0 + span];
+}
+
+// Distance range of the segments that lies inside the map view (screen-space
+// Liang–Barsky clip of each straight segment against the viewport).
+function mapVisibleRange(segments, total){
+  if(!S.map) return null;
+  const c = S.map.getCanvas(), W = c.clientWidth, Hh = c.clientHeight;
+  let lo = Infinity, hi = -Infinity;
+  for(const seg of segments){
+    const p0 = S.map.project([seg.a.lng, seg.a.lat]), p1 = S.map.project([seg.b.lng, seg.b.lat]);
+    let t0 = 0, t1 = 1;
+    const dx = p1.x - p0.x, dy = p1.y - p0.y;
+    const clip = (p, q) => {
+      if(p === 0) return q >= 0;
+      const r = q / p;
+      if(p < 0){ if(r > t1) return false; if(r > t0) t0 = r; }
+      else { if(r < t0) return false; if(r < t1) t1 = r; }
+      return true;
+    };
+    if(clip(-dx, p0.x) && clip(dx, W - p0.x) && clip(-dy, p0.y) && clip(dy, Hh - p0.y)){
+      lo = Math.min(lo, seg.start + t0 * seg.dist);
+      hi = Math.max(hi, seg.start + t1 * seg.dist);
+    }
+  }
+  if(!(hi > lo)) return null;
+  return (hi - lo) >= total - 1 ? null : [lo, hi];
+}
+
+function setProfileZoom(w){
+  S.profileZoom = w ? { key: profileViewKey(), w0: w[0], w1: w[1] } : null;
+  if(w && S.followMap) setFollowMap(false, true);
+  S.redrawProfile?.();
+}
+function setFollowMap(on, quiet){
+  S.followMap = !!on;
+  try{ localStorage.setItem(FOLLOW_KEY, on ? '1' : '0'); }catch{}
+  document.getElementById('btnFollowMap')?.setAttribute('aria-pressed', on ? 'true' : 'false');
+  if(on) S.profileZoom = null;
+  if(!quiet) S.redrawProfile?.();
+}
+function updateProfileControls(zoomed){
+  const full = document.getElementById('btnProfileFull');
+  if(full) full.hidden = !zoomed || S.followMap;
+  document.getElementById('btnFollowMap')?.setAttribute('aria-pressed', S.followMap ? 'true' : 'false');
+}
+
+// Highlight the zoomed stretch on the map (not when following the map,
+// where it would just be everything visible).
+let _profileWindowKey = '';
+function showProfileWindowOnMap(segments, w0, w1, total){
+  const zoomed = segments && !S.followMap && (w1 - w0) < total - 1;
+  const key = zoomed ? `${profileViewKey()}:${w0.toFixed(0)}:${w1.toFixed(0)}` : '';
+  if(key === _profileWindowKey) return;
+  _profileWindowKey = key;
+  whenMapLayersReady(() => {
+    const features = [];
+    if(zoomed){
+      for(const seg of segments){
+        const a = Math.max(w0, seg.start), b = Math.min(w1, seg.start + seg.dist);
+        if(b <= a) continue;
+        const [la0, ln0] = interpLatLng(seg.a, seg.b, (a - seg.start) / seg.dist);
+        const [la1, ln1] = interpLatLng(seg.a, seg.b, (b - seg.start) / seg.dist);
+        features.push({ type:'Feature', properties:{}, geometry:{ type:'LineString', coordinates:[[ln0, la0], [ln1, la1]] } });
+      }
+    }
+    S.map.getSource('profile-window-src')?.setData({ type:'FeatureCollection', features });
+  });
+}
+
+function initProfileZoom(canvas){
+  const plot = () => {
+    const p = S.profileHover; if(!p) return null;
+    const rect = canvas.getBoundingClientRect(), pw = canvas.offsetWidth - p.PAD.l - p.PAD.r;
+    return { ...p, rect, pw, distAt: clientX => p.w0 + ((clientX - rect.left - p.PAD.l) / pw) * (p.w1 - p.w0) };
+  };
+  const zoomAbout = (anchor, factor) => {
+    const p = plot(); if(!p) return;
+    const span = Math.min(p.totalDist, Math.max(PROFILE_MIN_SPAN, (p.w1 - p.w0) * factor));
+    const t = (anchor - p.w0) / (p.w1 - p.w0);
+    setProfileZoom(span >= p.totalDist - 1 ? null : [anchor - t * span, anchor - t * span + span]);
+  };
+  canvas.addEventListener('wheel', ev => {
+    const p = plot(); if(!p) return;
+    ev.preventDefault();
+    if(ev.shiftKey || Math.abs(ev.deltaX) > Math.abs(ev.deltaY)){   // horizontal scroll pans
+      const d = (ev.deltaX || ev.deltaY) / p.pw * (p.w1 - p.w0);
+      if(p.w1 - p.w0 < p.totalDist - 1) setProfileZoom([p.w0 + d, p.w1 + d]);
+      return;
+    }
+    zoomAbout(p.distAt(ev.clientX), ev.deltaY > 0 ? 1.25 : 0.8);
+  }, { passive: false });
+  canvas.addEventListener('dblclick', () => setProfileZoom(null));
+
+  // Pointer gestures: mouse drag selects a stretch; one finger pans a zoomed
+  // view; two fingers pinch-zoom.
+  const pts = new Map();
+  let drag = null, pinch = null;
+  canvas.addEventListener('pointerdown', ev => {
+    const p = plot(); if(!p) return;
+    pts.set(ev.pointerId, ev.clientX);
+    canvas.setPointerCapture(ev.pointerId);
+    if(pts.size === 2){
+      const [x0, x1] = [...pts.values()];
+      pinch = { gap: Math.abs(x1 - x0) || 1, w0: p.w0, w1: p.w1, mid: p.distAt((x0 + x1) / 2) };
+      drag = null;
+    } else {
+      drag = { x: ev.clientX, w0: p.w0, w1: p.w1, touch: ev.pointerType !== 'mouse', moved: false };
+    }
+  });
+  canvas.addEventListener('pointermove', ev => {
+    if(!pts.has(ev.pointerId)) return;
+    pts.set(ev.pointerId, ev.clientX);
+    const p = plot(); if(!p) return;
+    if(pinch && pts.size === 2){
+      const [x0, x1] = [...pts.values()];
+      const span = (pinch.w1 - pinch.w0) * pinch.gap / (Math.abs(x1 - x0) || 1);
+      const t = (pinch.mid - pinch.w0) / (pinch.w1 - pinch.w0);
+      setProfileZoom(span >= p.totalDist - 1 ? null : [pinch.mid - t * span, pinch.mid - t * span + span]);
+      return;
+    }
+    if(!drag || Math.abs(ev.clientX - drag.x) < 6) return;
+    drag.moved = true;
+    if(drag.touch){                                             // pan
+      if(drag.w1 - drag.w0 >= p.totalDist - 1) return;
+      const d = -(ev.clientX - drag.x) / p.pw * (drag.w1 - drag.w0);
+      setProfileZoom([drag.w0 + d, drag.w1 + d]);
+    } else {                                                    // rubber-band selection
+      S.redrawProfile?.();
+      const ctx = canvas.getContext('2d'), x0 = Math.min(drag.x, ev.clientX) - p.rect.left, x1 = Math.max(drag.x, ev.clientX) - p.rect.left;
+      ctx.save(); ctx.fillStyle = 'rgba(255,43,214,.15)'; ctx.strokeStyle = '#ff2bd6';
+      ctx.fillRect(x0, p.PAD.t, x1 - x0, canvas.offsetHeight - p.PAD.t - p.PAD.b);
+      ctx.strokeRect(x0, p.PAD.t, x1 - x0, canvas.offsetHeight - p.PAD.t - p.PAD.b); ctx.restore();
+    }
+  });
+  const end = ev => {
+    pts.delete(ev.pointerId);
+    if(pts.size < 2) pinch = null;
+    if(drag && drag.moved && !drag.touch && ev.type === 'pointerup'){
+      const p = plot();
+      if(p){ const a = p.distAt(drag.x), b = p.distAt(ev.clientX); setProfileZoom([Math.min(a, b), Math.max(a, b)]); }
+    }
+    drag = null;
+  };
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+}
+
+// Follow the map: redraw on pan/zoom (at most once a frame).
+let _followFrame = 0;
+function onMapMoveForProfile(){
+  if(!S.followMap || !S.activeView || !S.redrawProfile) return;
+  cancelAnimationFrame(_followFrame);
+  _followFrame = requestAnimationFrame(() => S.redrawProfile?.());
 }
