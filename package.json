@@ -12,6 +12,6 @@
     "test": "npm run check:js && npm run test:model && npm run test:smoke"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1"
+    "@playwright/test": "^1.63.0"
   }
 }
