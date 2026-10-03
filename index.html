@@ -54,16 +54,16 @@ header h1 em{color:var(--accent);font-style:normal}
 .btn.share:hover{background:#9b59b6;color:#fff}
 
 /* ── BODY ── */
-.body-row{flex:1;display:flex;min-height:0;overflow:hidden;position:relative}
+.body-row{--chart-h:200px;flex:1;display:flex;min-height:0;overflow:hidden;position:relative}
 
 /* ── SIDEBAR ── */
 .sidebar{width:300px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
 .sb-section{padding:9px 11px;border-top:1px solid rgba(0,200,240,.14);border-bottom:1px solid rgba(74,98,120,.55);background:linear-gradient(180deg,rgba(255,255,255,.025),rgba(0,0,0,0));flex-shrink:0}
 .sidebar>.sb-section:first-child{border-top:none}
-.section-label{font-family:'Share Tech Mono',monospace;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text);margin-bottom:5px}
+.section-label{font-family:'Share Tech Mono',monospace;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text);margin-bottom:5px}
 .sb-toggle{cursor:pointer;user-select:none}
 .sb-toggle:hover{color:var(--accent)}
-.sb-chev{display:inline-block;font-size:9px;color:var(--muted);transition:transform .15s;width:9px;margin-right:5px;text-align:center}
+.sb-chev{display:inline-block;font-size:10px;color:var(--muted);transition:transform .15s;width:9px;margin-right:5px;text-align:center}
 .sb-toggle.collapsed .sb-chev{transform:rotate(-90deg)}
 .title-actions{display:flex;align-items:center;gap:5px;margin-left:auto}
 .title-action{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;padding:5px 9px;min-height:29px;border:1px solid var(--border);border-radius:5px;background:rgba(11,15,23,.65);color:var(--muted);cursor:pointer}
@@ -93,9 +93,9 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .wp-collapse .chev{display:inline-block;transition:transform .15s}
 .wp-card.collapsed .wp-collapse .chev{transform:rotate(-90deg)}
 .wp-card.collapsed .wp-body{display:none}
-.wp-summary{display:none;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:.5px;padding:1px 0 1px 19px}
+.wp-summary{display:none;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.5px;padding:1px 0 1px 19px}
 .wp-card.collapsed .wp-summary{display:block}
-.wp-num{width:17px;height:17px;border-radius:50%;border:2px solid;font-family:'Share Tech Mono',monospace;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.wp-num{width:17px;height:17px;border-radius:50%;border:2px solid;font-family:'Share Tech Mono',monospace;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .wp-color{width:18px;height:18px;flex-shrink:0;padding:0;border:1px solid var(--border);border-radius:3px;background:none;cursor:pointer}
 .wp-color::-webkit-color-swatch-wrapper{padding:1px}
 .wp-color::-webkit-color-swatch{border:none;border-radius:2px}
@@ -106,15 +106,15 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .wp-del:hover{color:var(--red)}
 
 .wp-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:4px}
-.wp-field label{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);display:block;margin-bottom:2px}
+.wp-field label{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);display:block;margin-bottom:2px}
 .wp-field input{width:100%;font-size:10px;padding:3px 4px}
 
 .wp-bottom{display:flex;align-items:center;gap:6px}
-.wp-bottom label{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted)}
+.wp-bottom label{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted)}
 .wp-bottom input{width:52px;font-size:10px;padding:3px 4px}
-.wp-elev{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);margin-left:auto}
+.wp-elev{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);margin-left:auto}
 .wp-elev span{color:var(--accent)}
-.wp-amsl{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);margin-left:4px}
+.wp-amsl{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);margin-left:4px}
 .wp-amsl span{color:#f39c12}
 
 /* ── EDGES / PATHS ── */
@@ -126,11 +126,11 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .edge-row.hidden,.path-row.hidden{opacity:.48}
 .edge-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .edge-label{flex:1;color:var(--text)}
-.edge-status{font-family:'Share Tech Mono',monospace;font-size:9px}
+.edge-status{font-family:'Share Tech Mono',monospace;font-size:10px}
 .edge-del,.edge-vis,.edge-only,.path-vis,.path-only{background:rgba(11,15,23,.55);border:1px solid var(--border);border-radius:5px;color:var(--muted);cursor:pointer;font-size:11px;min-height:27px;padding:4px 8px;flex-shrink:0}
 .edge-del:hover{color:var(--red)}
 .edge-vis:hover,.edge-only:hover,.path-vis:hover,.path-only:hover{color:var(--accent)}
-.edge-only,.path-only,.edge-vis,.path-vis{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px}
+.edge-only,.path-only,.edge-vis,.path-vis{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px}
 
 /* ── PATHS LIST ── */
 .paths-panel{border-top:1px solid var(--border);border-bottom:2px solid rgba(0,200,240,.12);overflow-y:auto}
@@ -139,7 +139,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .path-row{display:flex;flex-direction:column;align-items:stretch;gap:5px;padding:6px 10px;border-bottom:1px solid rgba(30,45,66,.5);font-size:11px;cursor:pointer}
 .path-row:hover{background:rgba(0,200,240,.05)}
 .path-row.active{background:rgba(0,200,240,.08)}
-.deselect-btn{background:none;border:1px solid var(--accent);color:var(--accent);cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:8px;padding:1px 5px;letter-spacing:1px;margin-right:3px}
+.deselect-btn{background:none;border:1px solid var(--accent);color:var(--accent);cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:10px;padding:1px 5px;letter-spacing:1px;margin-right:3px}
 .deselect-btn:hover{background:var(--accent);color:#000}
 .path-label{color:var(--text);line-height:1.35;word-break:break-word}
 .path-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;flex-wrap:wrap}
@@ -151,25 +151,25 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 /* ── PATH BUILDER MODAL ── */
 .pb-cols{display:flex;gap:14px}
 .pb-col{flex:1;min-width:0;display:flex;flex-direction:column}
-.pb-col-label{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.pb-col-label{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
 .pb-list{height:280px;overflow-y:auto;border:1px solid var(--border);background:var(--bg)}
 .pb-list::-webkit-scrollbar{width:3px}
 .pb-list::-webkit-scrollbar-thumb{background:var(--border)}
-.pb-num{width:17px;height:17px;border-radius:50%;border:2px solid;font-family:'Share Tech Mono',monospace;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.pb-num{width:17px;height:17px;border-radius:50%;border:2px solid;font-family:'Share Tech Mono',monospace;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .pb-node{display:flex;align-items:center;gap:7px;padding:6px 9px;border-bottom:1px solid rgba(30,45,66,.5);cursor:pointer;font-size:13px;color:var(--text)}
 .pb-node:hover{background:rgba(0,200,240,.08);color:#fff}
 .pb-node span{flex:1}
 .pb-node.added{opacity:.4;cursor:default}
 .pb-node.added:hover{background:none;color:var(--text)}
-.pb-tag{flex:0!important;font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);letter-spacing:1px}
+.pb-tag{flex:0!important;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px}
 .pb-seq-item{display:flex;align-items:center;gap:6px;padding:6px 9px;border-bottom:1px solid rgba(30,45,66,.5);font-size:13px;color:var(--text)}
 .pb-arrows{display:flex;flex-direction:column;line-height:1}
-.pb-arrows button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:8px;padding:0 2px}
+.pb-arrows button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 2px}
 .pb-arrows button:hover:not(:disabled){color:var(--accent)}
 .pb-arrows button:disabled{opacity:.25;cursor:default}
 .pb-rm{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 2px}
 .pb-rm:hover{color:var(--red)}
-.pb-link{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;padding:1px 0 1px 9px}
+.pb-link{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;padding:1px 0 1px 9px}
 .pb-link.ok{color:var(--green)}
 .pb-link.bad{color:var(--red)}
 .pb-warn{min-height:16px;color:var(--red);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:.5px;margin-top:10px;line-height:1.4}
@@ -178,16 +178,15 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 
 /* ── ANALYSE BUTTON ── */
 .analyse-wrap{padding:7px 9px;border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:6px}
-.analyse-wrap .btn{flex:1;min-width:0;font-size:11px;letter-spacing:1px;padding:7px 6px;white-space:nowrap;text-align:center}
+.analyse-wrap .btn{flex:1;min-width:0;font-size:13px;letter-spacing:1px;padding:9px 6px;white-space:nowrap;text-align:center}
 #btnComputeAllCov{background:var(--green);border-color:var(--green)}
 #btnComputeAllCov:hover{opacity:.85}
-.analyse-wrap .btn{width:100%;font-size:13px;padding:9px}
 
 /* ── DEBUG LOG PANEL ── */
 .debug-panel{position:fixed;right:12px;bottom:12px;width:440px;max-width:calc(100vw - 24px);height:360px;max-height:62vh;background:rgba(11,15,23,.97);border:1px solid var(--border);border-radius:6px;display:none;flex-direction:column;z-index:4000;box-shadow:0 10px 34px rgba(0,0,0,.55)}
 .debug-panel.open{display:flex}
 .debug-head{display:flex;align-items:center;gap:5px;padding:6px 8px;border-bottom:1px solid var(--border);flex-shrink:0}
-.debug-head .btn{font-size:9px;padding:3px 7px;min-height:0}
+.debug-head .btn{font-size:10px;padding:3px 7px;min-height:0}
 .debug-title{flex:1;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--accent);letter-spacing:1px}
 .debug-body{flex:1;overflow:auto;padding:6px 9px;font-family:'Share Tech Mono',monospace;font-size:10px;line-height:1.5;color:#cfe3ee;white-space:pre-wrap;word-break:break-word}
 .debug-body .dl-time{color:var(--muted)}
@@ -196,24 +195,24 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .debug-body .dl-err{color:var(--red)}
 
 /* ── NODE INFO / SUN EXPOSURE PANEL ── */
-/* Sits above the elevation-profile panel (200px) like the FABs; drops down with it when the chart is collapsed. */
-.ni-panel{position:fixed;right:12px;bottom:210px;width:640px;max-width:calc(100vw - 24px);max-height:calc(100vh - 230px);overflow-y:auto;background:rgba(11,15,23,.97);border:1px solid var(--border);border-radius:6px;display:none;flex-direction:column;z-index:3500;box-shadow:0 10px 34px rgba(0,0,0,.55);transition:bottom .15s}
+/* Sits above the elevation-profile panel (--chart-h) like the FABs; drops down with it when the chart is collapsed. */
+.ni-panel{position:fixed;right:12px;bottom:calc(var(--chart-h) + 10px);width:640px;max-width:calc(100vw - 24px);max-height:calc(100vh - var(--chart-h) - 30px);overflow-y:auto;background:rgba(11,15,23,.97);border:1px solid var(--border);border-radius:6px;display:none;flex-direction:column;z-index:3500;box-shadow:0 10px 34px rgba(0,0,0,.55);transition:bottom .15s}
 .map-col.chart-collapsed .ni-panel{bottom:40px;max-height:calc(100vh - 60px)}
 .ni-panel.open{display:flex}
 .ni-head{display:flex;align-items:center;gap:5px;padding:6px 8px;border-bottom:1px solid var(--border)}
 .ni-title{flex:1;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--accent);letter-spacing:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ni-head .btn{font-size:9px;padding:3px 7px;min-height:0}
+.ni-head .btn{font-size:10px;padding:3px 7px;min-height:0}
 .ni-body{padding:8px 10px;display:flex;flex-direction:column;gap:8px}
 .ni-facts{font-size:11px;color:var(--text);line-height:1.45;display:grid;grid-template-columns:auto 1fr;gap:1px 10px}
 .ni-facts b{color:var(--muted);font-weight:400}
 .ni-links{display:flex;flex-direction:column;gap:3px}
-.ni-links-title{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:1px}
+.ni-links-title{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px}
 .ni-link{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:4px 8px;cursor:pointer}
 .ni-link:hover{border-color:var(--accent)}
 .ni-link.active{border-color:var(--accent);background:rgba(0,200,240,.08)}
 .ni-link-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ni-link-meta{font-family:'Share Tech Mono',monospace;color:var(--accent);flex-shrink:0}
-.ni-link-status{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;flex-shrink:0}
+.ni-link-status{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;flex-shrink:0}
 .ni-views{display:flex;gap:8px;align-items:stretch}
 .ni-pano-wrap{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;background:#070b12;border:1px solid var(--border);border-radius:4px;cursor:grab;touch-action:pan-x}
 .ni-pano-wrap.dragging{cursor:grabbing}
@@ -240,7 +239,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .hop-card.active-hop{background:rgba(0,200,240,.05)}
 .hop-top{display:flex;align-items:center;gap:5px;margin-bottom:3px}
 .hop-name{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--accent);flex:1}
-.badge{font-family:'Share Tech Mono',monospace;font-size:9px;font-weight:700;padding:1px 5px;border-radius:2px;border:1px solid;letter-spacing:1px}
+.badge{font-family:'Share Tech Mono',monospace;font-size:10px;font-weight:700;padding:1px 5px;border-radius:2px;border:1px solid;letter-spacing:1px}
 .badge.clear{color:var(--green);border-color:var(--green);background:rgba(46,204,113,.1)}
 .badge.marginal{color:var(--orange);border-color:var(--orange);background:rgba(243,156,18,.1)}
 .badge.blocked{color:var(--red);border-color:var(--red);background:rgba(231,76,60,.1)}
@@ -255,13 +254,13 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 #map{flex:1;min-height:0}
 
 /* ── CHART PANEL ── */
-.chart-panel{flex-shrink:0;height:200px;background:var(--panel);border-top:2px solid var(--border);position:relative}
+.chart-panel{flex-shrink:0;height:var(--chart-h);background:var(--panel);border-top:2px solid var(--border);position:relative}
 .chart-header{display:flex;align-items:center;gap:8px;padding:4px 10px;border-bottom:1px solid var(--border)}
 .chart-title{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:1px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chart-tabs{display:flex;gap:3px;overflow-x:auto;flex-shrink:0;max-width:60%}
 .chart-tabs::-webkit-scrollbar{height:2px}
 .chart-tabs::-webkit-scrollbar-thumb{background:var(--border)}
-.chart-tab{font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;letter-spacing:1px;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.chart-tab{font-family:'Share Tech Mono',monospace;font-size:10px;padding:2px 8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;letter-spacing:1px;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}
 .chart-tab.active{border-color:var(--accent);color:var(--accent)}
 #profileCanvas{display:block;width:100%}
 .chart-min{font-family:'Share Tech Mono',monospace;font-size:13px;line-height:1;flex-shrink:0;width:22px;height:20px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
@@ -270,7 +269,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .chart-panel.collapsed #profileCanvas{display:none}
 
 /* ── SIDEBAR / CHART MINIMISE ── */
-.sb-min{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--muted);background:transparent;border:none;border-bottom:1px solid var(--border);cursor:pointer;text-align:left;padding:5px 11px;flex-shrink:0}
+.sb-min{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--muted);background:transparent;border:none;border-bottom:1px solid var(--border);cursor:pointer;text-align:left;padding:5px 11px;flex-shrink:0}
 .sb-min:hover{color:var(--accent)}
 .sidebar.collapsed{width:0;border-right:none}
 .sidebar.collapsed > *{display:none}
@@ -279,7 +278,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .sb-expand.show{display:flex}
 
 /* ── FLOATING BUTTONS ── */
-.fab-group{position:absolute;bottom:210px;right:10px;z-index:600;display:flex;flex-direction:column;gap:6px;align-items:flex-end;transition:bottom .15s}
+.fab-group{position:absolute;bottom:calc(var(--chart-h) + 10px);right:10px;z-index:600;display:flex;flex-direction:column;gap:6px;align-items:flex-end;transition:bottom .15s}
 /* Follow the chart panel down when it is minimised to just its header. */
 .map-col.chart-collapsed .fab-group{bottom:40px}
 .fab{width:40px;height:40px;border-radius:50%;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 2px 8px rgba(0,0,0,.5);transition:all .15s}
@@ -287,7 +286,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .fab.loc{font-size:14px}
 
 /* ── TOAST & HINT ── */
-#toast{position:absolute;bottom:210px;left:50%;transform:translateX(-50%);font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:1px;background:rgba(11,15,23,.92);border:1px solid var(--accent);color:var(--accent);padding:5px 14px;z-index:900;white-space:nowrap;display:none}
+#toast{position:absolute;bottom:calc(var(--chart-h) + 10px);left:50%;transform:translateX(-50%);font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:1px;background:rgba(11,15,23,.92);border:1px solid var(--accent);color:var(--accent);padding:5px 14px;z-index:900;white-space:nowrap;display:none}
 #mapHint{position:absolute;top:8px;left:50%;transform:translateX(-50%);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;background:rgba(11,15,23,.85);border:1px solid var(--border);color:var(--muted);padding:4px 12px;z-index:500;pointer-events:none}
 
 /* ── SHARE MODAL ── */
@@ -337,21 +336,21 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 
 /* ── COVERAGE ── */
 .wp-cov{display:flex;align-items:center;gap:5px;margin-top:4px;padding-top:4px;border-top:1px dashed rgba(74,98,120,.35)}
-.wp-cov label{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);letter-spacing:1px}
+.wp-cov label{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px}
 .wp-cov input[type=checkbox]{accent-color:var(--accent);width:11px;height:11px;margin:0;cursor:pointer}
-.wp-cov-btn{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;padding:4px 8px;min-height:25px;border:1px solid var(--border);border-radius:5px;background:rgba(11,15,23,.55);color:var(--text);cursor:pointer;text-transform:uppercase}
+.wp-cov-btn{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;padding:4px 8px;min-height:25px;border:1px solid var(--border);border-radius:5px;background:rgba(11,15,23,.55);color:var(--text);cursor:pointer;text-transform:uppercase}
 .wp-cov-btn:hover{border-color:var(--accent);color:var(--accent)}
 .wp-cov-btn.dirty{border-color:var(--orange);color:var(--orange)}
 .wp-cov-btn.ok{border-color:var(--green);color:var(--green)}
 .wp-cov-btn:disabled{opacity:.4;cursor:wait}
-.wp-cov-status{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);margin-left:auto}
-.wp-rf-toggle{font-family:'Share Tech Mono',monospace;font-size:8px;letter-spacing:1px;color:var(--muted);cursor:pointer;user-select:none;padding:3px 0 1px;border-top:1px dashed rgba(74,98,120,.35);margin-top:4px}
+.wp-cov-status{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);margin-left:auto}
+.wp-rf-toggle{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--muted);cursor:pointer;user-select:none;padding:3px 0 1px;border-top:1px dashed rgba(74,98,120,.35);margin-top:4px}
 .wp-rf-toggle:hover{color:var(--accent)}
-.wp-rf-toggle .chev{display:inline-block;width:8px;font-size:8px;transition:transform .15s}
+.wp-rf-toggle .chev{display:inline-block;width:8px;font-size:10px;transition:transform .15s}
 .wp-rf-toggle.open .chev{transform:rotate(90deg)}
 .wp-rf-body{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:3px}
 .wp-rf-body input{width:100%;font-size:10px;padding:3px 4px}
-.wp-rf-body label{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--muted);display:block;margin-bottom:1px}
+.wp-rf-body label{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);display:block;margin-bottom:1px}
 .cov-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px}
 .cov-row label{font-size:11px;color:var(--muted)}
 .cov-btn-row{display:flex;gap:5px;margin-top:6px}
@@ -381,24 +380,94 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 .link-details {font-size:12px;line-height:1.5;margin:8px 0;overflow-wrap:anywhere}.link-details table {width:100%;border-collapse:collapse}.link-details th,.link-details td {padding:4px;text-align:left;border-bottom:1px solid #26384a}
 .link-details summary,.site-details summary {cursor:pointer}.data-panel {font-size:12px;line-height:1.5}.data-panel label {display:block;margin:10px 0}.data-panel textarea {width:100%;box-sizing:border-box;min-height:110px;background:#111c29;color:#dde8f0}.data-panel pre {white-space:pre-wrap;overflow-wrap:anywhere}.data-actions {display:flex;gap:6px;flex-wrap:wrap}
 @media(max-width:600px){.modal-bg{padding:12px}.modal{min-width:0!important;max-width:100%!important;width:100%;box-sizing:border-box;padding:14px}.field-row{flex-wrap:wrap}.field-row select{max-width:100%}.data-panel input[type=file]{max-width:100%}.wp-rf-body{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* ── UI additions ── */
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.accent{color:var(--accent)}
+.grow{flex:1;min-width:0}
+.w-sm{width:64px}
+.w-md{width:86px}
+.btn-small{font-size:10px;padding:5px 10px;min-height:29px}
+.sb-summary{padding:8px 11px}
+.sb-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 11px}
+.sb-head .section-label{margin:0}
+.help-modal{max-width:560px}
+.path-modal{min-width:520px;max-width:620px}
+.settings-modal{min-width:500px;max-width:600px}
+.settings-tabs{overflow-x:auto;scrollbar-width:thin}
+.settings-tab{padding:7px 12px;white-space:nowrap}
+.settings-group .field-row{margin-bottom:6px}
+.settings-group .field-row:last-of-type{margin-bottom:0}
+.field-row label.check{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text)}
+.cov-btn-row select{flex:1;min-width:0}
+details.hint{margin-top:8px}
+details.hint summary{cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--accent);text-transform:uppercase}
+details.hint p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--text)}
+.tag{display:inline-block;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;padding:1px 6px;border:1px solid;border-radius:3px;margin:2px 0}
+.tag.ok{color:var(--green);border-color:rgba(46,204,113,.5)}
+.tag.warn{color:var(--orange);border-color:rgba(243,156,18,.5)}
+/* Header overflow menu */
+.menu-wrap{position:relative}
+.menu{position:absolute;right:0;top:calc(100% + 6px);min-width:210px;padding:5px;background:var(--panel);border:1px solid var(--border);border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.6);z-index:3000;display:flex;flex-direction:column}
+.menu-item{display:block;width:100%;text-align:left;background:none;border:none;border-radius:5px;color:var(--text);font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:600;padding:8px 12px;cursor:pointer}
+.menu-item:hover,.menu-item:focus-visible{background:rgba(0,200,240,.08);color:#fff}
+.menu-item.danger{color:var(--red)}
+.menu-item.danger:hover{background:rgba(231,76,60,.1)}
+/* Tap-to-add / tap-to-link modes */
+.fab[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#000}
+.mode-bar{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:700;display:flex;align-items:center;gap:10px;max-width:calc(100% - 24px);padding:5px 6px 5px 12px;background:rgba(11,15,23,.94);border:1px solid var(--accent);border-radius:6px;color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:1px}
+.map-col.mode-add #map canvas{cursor:crosshair}
+.node-marker-icon.picked{filter:drop-shadow(0 0 5px var(--accent)) drop-shadow(0 0 2px #fff)}
+/* Toast action (Undo / Start fresh) */
+#toast .toast-act{margin-left:12px;font-family:inherit;font-size:11px;letter-spacing:1px;background:var(--accent);color:#000;border:none;border-radius:3px;padding:3px 9px;cursor:pointer;font-weight:700}
+/* Resizable terrain profile */
+.chart-resize{position:absolute;top:-5px;left:0;right:0;height:10px;cursor:ns-resize;z-index:5;touch-action:none}
+.chart-resize::after{content:'';position:absolute;left:50%;top:3px;width:42px;height:4px;margin-left:-21px;border-radius:2px;background:var(--border)}
+.chart-resize:hover::after,.chart-resize:focus-visible::after,.chart-resize.dragging::after{background:var(--accent)}
+.chart-panel.collapsed .chart-resize{display:none}
+.mob-only{display:none}
+/* Phones: the side panel docks under the map as a bottom sheet. */
+@media(max-width:700px){
+  header{padding:6px 10px;gap:8px}
+  .btn-txt,.hdr-build,.hdr-rf{display:none}
+  .hdr-right .btn{padding:7px 10px}
+  .desk-only{display:none}
+  .mob-only{display:inline}
+  .body-row{flex-direction:column-reverse}
+  .sidebar{width:100%;height:42vh;border-right:none;border-top:2px solid var(--border);overflow-y:auto;overscroll-behavior:contain}
+  /* One scrolling column instead of the desktop's split, fixed-height lists. */
+  .sidebar>*{flex-shrink:0}
+  .wp-scroll,.edges-panel,.paths-panel,.results-area{flex:none!important;overflow:visible}
+  [data-sb-body]{flex:none}
+  .analyse-wrap{position:sticky;bottom:0;background:var(--panel);z-index:2}
+  .sidebar.collapsed{height:0;border-top:none}
+  .sb-min{text-align:center}
+  .sb-expand{top:auto;left:10px;bottom:calc(var(--chart-h) + 10px);transform:none;width:40px;height:40px;border:1px solid var(--border);border-radius:50%;font-size:16px}
+  .body-row{--chart-h:170px}
+  .body-row.chart-collapsed .sb-expand{bottom:40px}
+  .settings-modal,.path-modal{min-width:0}
+  .pb-cols{flex-direction:column}
+  .pb-list{height:180px}
+  #mapHint{display:none}
+}
 </style>
 </head>
 <body>
 
 <!-- Context Menu -->
-<div id="ctxMenu"><div class="ctx-header" id="ctxTitle">MAP</div></div>
+<div id="ctxMenu" role="menu"><div class="ctx-header" id="ctxTitle">MAP</div></div>
 
 <!-- Help Modal -->
-<div class="modal-bg" id="helpModal">
-  <div class="modal" style="max-width:560px">
-    <h2>📡 Getting Started</h2>
+<div class="modal-bg" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+  <div class="modal help-modal">
+    <h2 id="helpTitle">📡 Getting Started</h2>
     <ol style="line-height:1.65;font-size:13px;color:var(--text);padding-left:22px;margin-bottom:14px">
-      <li><strong>Add nodes</strong> — right-click anywhere on the map → "Add node here". Each node is a transmitter or receiver. Click the ◎ button to centre on your current location first.</li>
+      <li><strong>Add nodes</strong> — tap <strong>＋</strong> (bottom right of the map) then tap the map, or right-click / long-press the map → "Add node here". Each node is a transmitter or receiver. ◎ centres the map on your location.</li>
       <li><strong>Set antenna height</strong> — in the sidebar, edit each node's <em>ANT HT</em> (metres above ground). Tweak the colour swatch to recolour a node; the ▾ chevron collapses a card.</li>
-      <li><strong>Link nodes</strong> — right-click a node marker → "Connect to …" to add a radio link. Right-click a link to hide, isolate, or delete it. Each link becomes its own path; use <strong>+ NEW PATH</strong> to chain several into a multi-hop route.</li>
+      <li><strong>Link nodes</strong> — tap <strong>↔</strong> then tap two nodes, or right-click a node marker → "Connect to …". Right-click a link to hide, isolate, or delete it. Each link becomes its own path; use <strong>+ NEW PATH</strong> to chain several into a multi-hop route.</li>
       <li><strong>Pick a band</strong> — open <strong>⚙ SETTINGS</strong> and choose a radio preset (Meshtastic AU 915 MHz by default) or enter a custom frequency; TX/gain/RX/margin live here too.</li>
       <li><strong>Analyse</strong> — click <strong>▶ ANALYSE</strong> (bottom of the sidebar). Terrain is fetched along each link and the line-of-sight + 1st Fresnel zone are drawn below the map.</li>
-      <li><strong>Coverage</strong> — tick the <em>COVERAGE</em> box on a node and click <em>COMPUTE</em> (or <em>COMPUTE ALL</em> in Settings). A terrain-aware coverage area is drawn in that node's colour.</li>
+      <li><strong>Coverage</strong> — tick the <em>COVERAGE</em> box on a node and click <em>COMPUTE</em>, or <strong>▣ COVERAGE</strong> at the bottom of the side panel for every ticked node. A terrain-aware coverage area is drawn in that node's colour.</li>
     </ol>
     <p style="font-size:12px;color:var(--muted);line-height:1.5">
       <strong style="color:var(--green)">✓ BUDGET OK</strong> — predicted signal meets the required margin in both directions.
@@ -427,18 +496,18 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       Solar position uses the NOAA low-precision model (~0.01° accuracy); sunlight is treated as a straight ray (no atmospheric refraction), so times near the horizon are approximate.
     </p>
     <p style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.5">
-      Tips: terrain is AWS Open Terrain Tiles (~30 m, no key, cached in memory). Open <strong>🐛 LOG</strong> to see exactly what each calculation used — link budgets, clutter loading, and per-link results. Use <strong>⇪ SHARE</strong> to copy a URL containing your full setup. Modelling is approximate (Bullington component, effective Earth radius and empirical clutter). Measurements and terrain imports are available under Settings → Measurements. See source resolution and height-sensitivity scenarios in each result. Use measured validation for engineered links.
+      Tips: your map is saved in this browser and restored next visit, and deletes can be undone from the message that appears. Drag the top edge of the terrain profile to resize it. Terrain is AWS Open Terrain Tiles (~30 m, no key, cached in memory). Open <strong>⋯ → Calculation log</strong> to see exactly what each calculation used — link budgets, clutter loading, and per-link results. Use <strong>⇪ SHARE</strong> to copy a URL containing your full setup. Modelling is approximate (Bullington component, effective Earth radius and empirical clutter). Measurements and terrain imports are available under Settings → Measurements. See source resolution and height-sensitivity scenarios in each result. Use measured validation for engineered links.
     </p>
     <div class="modal-actions" style="margin-top:16px">
-      <button class="btn primary" id="btnHelpClose">GOT IT</button>
+      <button class="btn primary" id="btnHelpClose" type="button">GOT IT</button>
     </div>
   </div>
 </div>
 
 <!-- Share Modal -->
-<div class="modal-bg" id="shareModal">
+<div class="modal-bg" id="shareModal" role="dialog" aria-modal="true" aria-labelledby="shareTitle">
   <div class="modal">
-    <h2>📡 Share This Map</h2>
+    <h2 id="shareTitle">📡 Share This Map</h2>
     <div class="modal-url" id="shareUrl"></div>
     <div class="modal-actions" style="margin-bottom:18px">
       <button class="btn" id="btnShareNative" hidden>SHARE…</button>
@@ -456,8 +525,8 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- Path Builder Modal -->
-<div class="modal-bg" id="pathModal">
-  <div class="modal" style="min-width:520px;max-width:620px">
+<div class="modal-bg" id="pathModal" role="dialog" aria-modal="true" aria-labelledby="pathModalTitle">
+  <div class="modal path-modal">
     <h2 id="pathModalTitle">Build Path</h2>
     <div class="pb-cols">
       <div class="pb-col">
@@ -477,101 +546,208 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
   </div>
 </div>
 
-<!-- Settings Modal (RF Parameters + Coverage) -->
-<div class="modal-bg" id="settingsModal">
-  <div class="modal" style="min-width:500px;max-width:560px">
-    <h2>⚙ RF + Coverage Settings</h2>
+<!-- Settings Modal -->
+<div class="modal-bg" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="modal settings-modal">
+    <h2 id="settingsTitle">⚙ Settings</h2>
 
-    <div class="settings-tabs">
-      <button class="settings-tab active" data-stab="rf" type="button">RF</button>
-      <button class="settings-tab" data-stab="coverage" type="button">Coverage</button>
-      <button class="settings-tab" data-stab="data" type="button">Measurements</button>
+    <div class="settings-tabs" role="tablist">
+      <button class="settings-tab active" data-stab="rf" type="button" role="tab" aria-selected="true">RF</button>
+      <button class="settings-tab" data-stab="model" type="button" role="tab" aria-selected="false">Model</button>
+      <button class="settings-tab" data-stab="coverage" type="button" role="tab" aria-selected="false">Coverage</button>
+      <button class="settings-tab" data-stab="display" type="button" role="tab" aria-selected="false">Display</button>
+      <button class="settings-tab" data-stab="data" type="button" role="tab" aria-selected="false">Measurements</button>
     </div>
 
-    <div class="settings-panel" data-spanel="rf">
-    <div class="settings-group">
-      <div class="settings-label">RF Parameters</div>
-      <div class="field-row" style="margin-bottom:6px">
-        <label>Preset</label>
-        <select id="inpPreset" style="flex:1;min-width:0">
-          <option value="915">Meshtastic AU/US (915 MHz)</option>
-          <option value="868">Meshtastic EU (868 MHz)</option>
-          <option value="433">Meshtastic Asia (433 MHz)</option>
-          <option value="146">2m VHF (146 MHz)</option>
-          <option value="438">70cm UHF (438 MHz)</option>
-          <option value="2400">2.4 GHz Wi-Fi</option>
-          <option value="5800">5.8 GHz Wi-Fi</option>
-          <option value="">Custom</option>
-        </select>
+    <div class="settings-panel" data-spanel="rf" role="tabpanel">
+      <div class="settings-group">
+        <div class="settings-label">Radio</div>
+        <div class="field-row">
+          <label for="inpPreset">Preset</label>
+          <select id="inpPreset" class="grow">
+            <option value="915">Meshtastic AU/US (915 MHz)</option>
+            <option value="868">Meshtastic EU (868 MHz)</option>
+            <option value="433">Meshtastic Asia (433 MHz)</option>
+            <option value="146">2m VHF (146 MHz)</option>
+            <option value="438">70cm UHF (438 MHz)</option>
+            <option value="2400">2.4 GHz Wi-Fi</option>
+            <option value="5800">5.8 GHz Wi-Fi</option>
+            <option value="">Custom</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label for="inpFreq">Freq (MHz)</label>
+          <input type="number" id="inpFreq" value="915" min="1" class="w-md">
+          <label for="inpTx">TX (dBm)</label>
+          <input type="number" id="inpTx" value="22" step="0.5" class="w-sm">
+          <label for="inpGain">Gain (dBi)</label>
+          <input type="number" id="inpGain" value="2" step="0.5" class="w-sm">
+        </div>
+        <div class="field-row">
+          <label for="inpModem">LoRa modem</label>
+          <select id="inpModem" class="grow" title="Meshtastic modem preset. Sets RX sensitivity from its bandwidth and SNR floor, and lets link results show predicted SNR the way a Meshtastic traceroute reports it. None for non-LoRa radios.">
+            <option value="">None (not LoRa)</option>
+            <option value="ShortTurbo">ShortTurbo (SF7/500)</option>
+            <option value="ShortFast">ShortFast (SF7/250)</option>
+            <option value="ShortSlow">ShortSlow (SF8/250)</option>
+            <option value="MediumFast">MediumFast (SF9/250)</option>
+            <option value="MediumSlow">MediumSlow (SF10/250)</option>
+            <option value="LongTurbo">LongTurbo (SF11/500)</option>
+            <option value="LongFast" selected>LongFast (SF11/250)</option>
+            <option value="LongModerate">LongModerate (SF11/125)</option>
+            <option value="LongSlow">LongSlow (SF12/125)</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label for="inpRx">RX Sens (dBm)</label>
+          <input type="number" id="inpRx" value="-131.5" step="0.5" class="w-md">
+          <label for="inpMargin">Margin (dB)</label>
+          <input type="number" id="inpMargin" value="6" step="0.5" class="w-sm" title="Reserve above receiver sensitivity required in both directions for BUDGET OK. Geometry and observations are reported separately.">
+        </div>
       </div>
-      <div class="field-row" style="margin-bottom:6px">
-        <label>Freq (MHz)</label>
-        <input type="number" id="inpFreq" value="915" min="1" style="width:78px">
-        <label>K-Factor</label>
-        <select id="inpK" style="width:64px">
-          <option value="1.333">4/3</option>
-          <option value="1.0">1.0</option>
-          <option value="0.667">2/3</option>
-        </select>
-      </div>
-      <div class="field-row" style="margin-bottom:6px">
-        <label>TX (dBm)</label>
-        <input type="number" id="inpTx" value="22" step="0.5" style="width:60px">
-        <label>Gain (dBi)</label>
-        <input type="number" id="inpGain" value="2" step="0.5" style="width:60px">
-      </div>
-      <div class="field-row" style="margin-bottom:6px">
-        <label>LoRa modem</label>
-        <select id="inpModem" style="flex:1;min-width:0" title="Meshtastic modem preset. Sets RX sensitivity from its bandwidth and SNR floor, and lets link results show predicted SNR the way a Meshtastic traceroute reports it. None for non-LoRa radios.">
-          <option value="">None (not LoRa)</option>
-          <option value="ShortTurbo">ShortTurbo (SF7/500)</option>
-          <option value="ShortFast">ShortFast (SF7/250)</option>
-          <option value="ShortSlow">ShortSlow (SF8/250)</option>
-          <option value="MediumFast">MediumFast (SF9/250)</option>
-          <option value="MediumSlow">MediumSlow (SF10/250)</option>
-          <option value="LongTurbo">LongTurbo (SF11/500)</option>
-          <option value="LongFast" selected>LongFast (SF11/250)</option>
-          <option value="LongModerate">LongModerate (SF11/125)</option>
-          <option value="LongSlow">LongSlow (SF12/125)</option>
-        </select>
-      </div>
-      <div class="field-row">
-        <label>RX Sens (dBm)</label>
-        <input type="number" id="inpRx" value="-131.5" step="0.5" style="width:68px">
-        <label>Margin (dB)</label>
-        <input type="number" id="inpMargin" value="6" step="0.5" style="width:60px" title="Reserve above receiver sensitivity required in both directions for BUDGET OK. Geometry and observations are reported separately.">
-      </div>
-    <div class="settings-group">
-      <div class="field-row"><label>Cable loss (dB)</label><input id="inpCable" type="number" value="0" min="0" max="100" step="0.1" style="width:65px"><label>Noise figure (dB)</label><input id="inpNoiseFigure" type="number" value="6" min="0" max="30" step="0.1" style="width:65px"></div>
-      <div class="field-row"><label>Measured noise (dBm)</label><input id="inpNoiseFloor" type="number" placeholder="Estimate" min="-200" max="0" style="width:85px"></div>
-      <p class="quality-note">Leave measured noise blank to estimate thermal noise + noise figure. Sensitivity remains editable for your hardware. Node overrides support separate radio and cable settings.</p>
-      <div class="field-row"><label>Propagation</label><select id="inpPropagation"><option value="bullington">Bullington terrain diffraction</option><option value="knife">Single knife edge (comparison)</option><option value="los">Strict surface LOS</option></select></div>
-      <div class="field-row"><label>Clutter treatment</label><select id="inpClutterMode"><option value="geometry">Geometric + empirical attenuation</option><option value="terminal">Terminal correction (30–3000 MHz)</option></select></div>
-      <div class="field-row"><label>Terrain scenario ±m</label><input id="inpTerrainError" type="number" value="5" min="0" max="100" style="width:60px"><label>Clutter ±m</label><input id="inpClutterError" type="number" value="5" min="0" max="100" style="width:60px"></div>
-      <p class="quality-note">Height scenarios show sensitivity, not a confidence interval. Bullington is the P.526 §4.5.1 component, not the full delta-Bullington/spherical-earth model. Predictions need field validation.</p>
-    </div>
-
-    </div>
-
-    <div class="settings-group">
-      <div class="settings-label">Display</div>
-      <div class="display-toggles">
-        <label class="display-toggle"><input type="checkbox" id="inpShowLinks" checked> SHOW LINKS</label>
-        <label class="display-toggle"><input type="checkbox" id="inpShowPaths" checked> SHOW PATHS</label>
-      </div>
-      <div class="field-row" style="margin-top:8px">
-        <label>Basemap</label>
-        <select id="inpBasemap" title="Map background. The OpenFreeMap styles are crisp vector maps (Bright has bolder, easier-to-read roads); OpenStreetMap and Esri Topo are raster alternatives.">
-          <option value="openfreemap">OpenFreeMap Liberty</option>
-          <option value="ofmbright">OpenFreeMap Bright</option>
-          <option value="carto">OpenStreetMap</option>
-          <option value="esri">Esri Topo</option>
-        </select>
+      <div class="settings-group">
+        <div class="settings-label">Losses &amp; noise</div>
+        <div class="field-row">
+          <label for="inpCable">Cable loss (dB)</label><input id="inpCable" type="number" value="0" min="0" max="100" step="0.1" class="w-sm">
+          <label for="inpNoiseFigure">Noise figure (dB)</label><input id="inpNoiseFigure" type="number" value="6" min="0" max="30" step="0.1" class="w-sm">
+        </div>
+        <div class="field-row">
+          <label for="inpNoiseFloor">Measured noise (dBm)</label><input id="inpNoiseFloor" type="number" placeholder="Estimate" min="-200" max="0" class="w-md">
+        </div>
+        <details class="hint"><summary>About noise &amp; sensitivity</summary>
+          <p>Leave measured noise blank to estimate thermal noise + noise figure. Sensitivity remains editable for your hardware. Node overrides support separate radio and cable settings.</p>
+        </details>
       </div>
     </div>
-    </div><!-- /rf panel -->
 
-    <div class="settings-panel data-panel" data-spanel="data" hidden>
+    <div class="settings-panel" data-spanel="model" role="tabpanel" hidden>
+      <div class="settings-group">
+        <div class="settings-label">Propagation</div>
+        <div class="field-row">
+          <label for="inpPropagation">Method</label>
+          <select id="inpPropagation" class="grow"><option value="bullington">Bullington terrain diffraction</option><option value="knife">Single knife edge (comparison)</option><option value="los">Strict surface LOS</option></select>
+        </div>
+        <div class="field-row">
+          <label for="inpK">K-factor</label>
+          <select id="inpK" class="w-sm">
+            <option value="1.333">4/3</option>
+            <option value="1.0">1.0</option>
+            <option value="0.667">2/3</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label for="inpTerrainError">Terrain scenario ±m</label><input id="inpTerrainError" type="number" value="5" min="0" max="100" class="w-sm">
+          <label for="inpClutterError">Clutter ±m</label><input id="inpClutterError" type="number" value="5" min="0" max="100" class="w-sm">
+        </div>
+        <details class="hint"><summary>About the model</summary>
+          <p>Height scenarios show sensitivity, not a confidence interval. Bullington is the P.526 §4.5.1 component, not the full delta-Bullington/spherical-earth model. Predictions need field validation.</p>
+        </details>
+      </div>
+      <div class="settings-group">
+        <div class="settings-label">Surface clutter</div>
+        <div class="field-row">
+          <label class="check"><input type="checkbox" id="inpClutterOn" title="Use land cover and canopy to estimate surface obstruction and loss. Strict LOS mode excludes obstructed paths; diffraction modes estimate additional loss."> Surface clutter (land cover)</label>
+        </div>
+        <div class="field-row">
+          <label class="check"><input type="checkbox" id="inpCanopyOn" title="Coverage sweeps: use measured Meta/WRI canopy heights instead of the flat Forest(m) value. Falls back to flat Forest(m) where no canopy tile is published. Links always try measured canopy, whatever this setting."> Measured canopy in coverage</label>
+        </div>
+        <div class="field-row">
+          <label for="inpClutterMode">Treatment</label>
+          <select id="inpClutterMode" class="grow"><option value="geometry">Geometric + empirical attenuation</option><option value="terminal">Terminal correction (30–3000 MHz)</option></select>
+        </div>
+        <div class="field-row">
+          <label for="inpClutterForest">Forest (m)</label>
+          <input type="number" id="inpClutterForest" value="15" step="1" min="0" class="w-sm" title="Clutter height added over tree-cover / mangrove land.">
+          <label for="inpClutterUrban">Urban (m)</label>
+          <input type="number" id="inpClutterUrban" value="8" step="1" min="0" class="w-sm" title="Clutter height added over built-up land.">
+          <label for="inpClutterExclude">Site clear &lt;(m)</label>
+          <input type="number" id="inpClutterExclude" value="0" step="10" min="0" class="w-sm" title="Verified clearing radius at each endpoint. Default zero. Override per site only when the area is known to be clear.">
+        </div>
+        <div class="field-row">
+          <label for="inpClutterAtten">Atten @915 (dB/m)</label>
+          <input type="number" id="inpClutterAtten" value="0.10" step="0.01" min="0" max="1" class="w-sm" title="Reference clutter attenuation in dB per metre at 915 MHz. The app scales this by frequency.">
+          <label for="inpClutterCap">Cap (dB)</label>
+          <input type="number" id="inpClutterCap" value="45" step="5" min="0" max="200" class="w-sm" title="Maximum total clutter attenuation per path (dB). Caps how heavily dense canopy/buildings can penalise a link, so clutter never acts as an infinite wall. Default 45.">
+        </div>
+        <details class="hint"><summary>About surface clutter</summary>
+          <p>Surface clutter combines ESA WorldCover class heights with measured Meta/WRI canopy height where a canopy tile is published. Attenuation is per metre of clutter the ray passes through, scaled by frequency and capped per path. Results show which canopy source each link used.</p>
+        </details>
+      </div>
+    </div>
+
+    <div class="settings-panel" data-spanel="coverage" role="tabpanel" hidden>
+      <div class="settings-group">
+        <div class="settings-label">Coverage <span id="covCount" class="accent">0</span> active</div>
+        <div class="field-row">
+          <label for="inpRxAntH">RX Ant (m)</label>
+          <input type="number" id="inpRxAntH" value="2" step="0.5" min="0" class="w-sm">
+          <label for="inpCovMaxKm">Search cap (km)</label>
+          <input type="number" id="inpCovMaxKm" value="50" step="1" min="1" max="100" class="w-sm" title="Maximum distance to test, not guaranteed coverage. Terrain, Fresnel clearance, and link budget can stop coverage sooner.">
+        </div>
+        <div class="field-row">
+          <label for="inpCovRays">Rays</label>
+          <select id="inpCovRays" class="w-md" title="More rays = smoother polygon. Diminishing returns past 180 (DEM is ~30 m).">
+            <option value="24">24 (15°)</option>
+            <option value="36">36 (10°)</option>
+            <option value="72">72 (5°)</option>
+            <option value="144">144 (2.5°)</option>
+            <option value="360" selected>360 (1°)</option>
+          </select>
+          <label for="inpCovSamples">Samples / ray</label>
+          <select id="inpCovSamples" class="w-sm" title="Minimum samples per ray (floor). The sweep auto-samples terrain at ~40 m steps to resolve near hills, so raising this only matters for very short ranges.">
+            <option value="30">30</option>
+            <option value="50" selected>50</option>
+            <option value="80">80</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label class="check"><input id="inpAdaptive" type="checkbox" checked> Adaptive rays</label>
+          <label for="inpAngularTarget">Target spacing (m)</label><input id="inpAngularTarget" type="number" min="25" max="5000" value="250" class="w-sm">
+        </div>
+        <div class="field-row">
+          <label for="inpCovFresnel">Fresnel clearance</label>
+          <select id="inpCovFresnel" class="w-md" title="Geometry reporting threshold only. Diffraction loss and fade margin are calculated independently. 0 checks surface LOS; 60% is a common clearance target.">
+            <option value="0">0 (LOS only)</option>
+            <option value="0.4" selected>40%</option>
+            <option value="0.6">60%</option>
+            <option value="1">100%</option>
+          </select>
+        </div>
+        <div class="cov-btn-row">
+          <button class="btn" id="btnCovAllOn" type="button">ALL ON</button>
+          <button class="btn" id="btnCovAllOff" type="button">ALL OFF</button>
+          <button class="btn" id="btnCovOverlap" type="button" title="Outline where node coverage footprints overlap.">⧉ OVERLAP</button>
+          <select id="overlapMode" aria-label="Overlap mode" title="Show where at least 2 sites overlap, or only where every coverage-enabled site overlaps.">
+            <option value="2">2 or more</option>
+            <option value="all">All sites</option>
+          </select>
+        </div>
+        <details class="hint"><summary>About coverage</summary>
+          <p>Coverage is shown in each node's colour: more opaque means more predicted margin, fading out to the coverage edge, blank where the link won't close (e.g. terrain shadow). Adaptive rays refine wide sectors and changing margins, up to 720 rays; the result reports the spacing actually reached. The remote radio uses the global settings and RX antenna height. Run it with <strong>▣ COVERAGE</strong> at the bottom of the side panel, or per node with <em>COMPUTE</em>.</p>
+        </details>
+      </div>
+    </div>
+
+    <div class="settings-panel" data-spanel="display" role="tabpanel" hidden>
+      <div class="settings-group">
+        <div class="settings-label">Display</div>
+        <div class="display-toggles">
+          <label class="display-toggle"><input type="checkbox" id="inpShowLinks" checked> SHOW LINKS</label>
+          <label class="display-toggle"><input type="checkbox" id="inpShowPaths" checked> SHOW PATHS</label>
+        </div>
+        <div class="field-row">
+          <label for="inpBasemap">Basemap</label>
+          <select id="inpBasemap" class="grow" title="Map background. The OpenFreeMap styles are crisp vector maps (Bright has bolder, easier-to-read roads); OpenStreetMap and Esri Topo are raster alternatives.">
+            <option value="openfreemap">OpenFreeMap Liberty</option>
+            <option value="ofmbright">OpenFreeMap Bright</option>
+            <option value="carto">OpenStreetMap</option>
+            <option value="esri">Esri Topo</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-panel data-panel" data-spanel="data" role="tabpanel" hidden>
       <p>Import timestamped directed observations or traceroutes as JSON. SNR is not path loss. Match node names exactly, or supply a <code>nodeNameMap</code>. Data stays in this browser session; download a project to retain it.</p>
       <label>Observations / traceroute JSON <input id="observationFile" type="file" accept=".json,application/json"></label>
       <textarea id="measurementInput" aria-label="Measurement JSON" placeholder='{"observations":[{"from":"SunBird","to":"Monsoon Moon Server","timestamp":"2026-09-29T00:00:00Z","success":true,"snrDb":-4.5,"modem":"LongFast","frequencyMHz":915,"split":"validation"}]}'></textarea>
@@ -584,116 +760,39 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <label>Restore project <input id="projectFile" type="file" accept=".json,application/json"></label><button class="btn" id="btnExportProject">Download project + measurements + DEM</button>
       <p>Share URLs contain model settings and sites only. Imported measurements and DEM data travel only in the project file.</p><p id="dataMessage" role="status"></p>
     </div>
-    <div class="settings-panel" data-spanel="coverage" hidden>
-    <div class="settings-group">
-      <div class="settings-label">Coverage <span id="covCount" style="color:var(--accent)">0</span> active</div>
-      <div class="field-row" style="margin-bottom:6px">
-        <label>RX Ant (m)</label>
-        <input type="number" id="inpRxAntH" value="2" step="0.5" min="0" style="width:58px">
-        <label>Search cap (km)</label>
-        <input type="number" id="inpCovMaxKm" value="50" step="1" min="1" max="100" style="width:58px" title="Maximum distance to test, not guaranteed coverage. Terrain, Fresnel clearance, and link budget can stop coverage sooner.">
-      </div>
-      <div class="field-row" style="margin-bottom:6px">
-        <label>Rays</label>
-        <select id="inpCovRays" style="width:90px" title="More rays = smoother polygon. Diminishing returns past 180 (DEM is ~30 m).">
-          <option value="24">24 (15°)</option>
-          <option value="36">36 (10°)</option>
-          <option value="72">72 (5°)</option>
-          <option value="144">144 (2.5°)</option>
-          <option value="360" selected>360 (1°)</option>
-        </select>
-        <label>Samples / ray</label>
-        <select id="inpCovSamples" style="width:60px" title="Minimum samples per ray (floor). The sweep auto-samples terrain at ~40 m steps to resolve near hills, so raising this only matters for very short ranges.">
-          <option value="30">30</option>
-          <option value="50" selected>50</option>
-          <option value="80">80</option>
-        </select>
-      </div>
-      <div class="field-row"><label><input id="inpAdaptive" type="checkbox" checked> Adaptive coverage rays</label><label>Target spacing (m)</label><input id="inpAngularTarget" type="number" min="25" max="5000" value="250" style="width:65px"></div>
-      <p class="quality-note">Refines wide sectors and changing signal margins, up to 720 rays. The result reports actual spacing; the target may not be reached at the cap. Coverage uses global settings for the remote radio.</p>
-      <div class="field-row">
-        <label>Fresnel clearance</label>
-        <select id="inpCovFresnel" style="width:120px" title="Geometry reporting threshold only. Diffraction loss and fade margin are calculated independently. 0 checks surface LOS; 60% is a common clearance target.">
-          <option value="0">0 (LOS only)</option>
-          <option value="0.4" selected>40%</option>
-          <option value="0.6">60%</option>
-          <option value="1">100%</option>
-        </select>
-      </div>
-      <div class="field-row" style="margin-top:6px">
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
-          <input type="checkbox" id="inpClutterOn" title="Use land cover and canopy to estimate surface obstruction and loss. Strict LOS mode excludes obstructed paths; diffraction modes estimate additional loss.">
-          Surface clutter (land cover)
-        </label>
-      </div>
-      <div class="field-row" style="margin-top:8px;margin-bottom:8px">
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
-          <input type="checkbox" id="inpCanopyOn" title="Coverage sweeps: use measured Meta/WRI canopy heights instead of the flat Forest(m) value. Falls back to flat Forest(m) where no canopy tile is published. Links always try measured canopy, whatever this setting.">
-          Measured canopy in coverage
-        </label>
-      </div>
-      <div class="field-row" style="margin-bottom:6px">
-        <label>Forest (m)</label>
-        <input type="number" id="inpClutterForest" value="15" step="1" min="0" style="width:52px" title="Clutter height added over tree-cover / mangrove land.">
-        <label>Urban (m)</label>
-        <input type="number" id="inpClutterUrban" value="8" step="1" min="0" style="width:52px" title="Clutter height added over built-up land.">
-        <label>Site clear &lt;(m)</label>
-        <input type="number" id="inpClutterExclude" value="0" step="10" min="0" style="width:58px" title="Verified clearing radius at each endpoint. Default zero. Override per site only when the area is known to be clear.">
-      </div>
-      <div class="field-row" style="margin-bottom:6px">
-        <label>Atten @915</label>
-        <input type="number" id="inpClutterAtten" value="0.10" step="0.01" min="0" max="1" style="width:62px" title="Reference clutter attenuation in dB per metre at 915 MHz. The app scales this by frequency.">
-        <span style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted)">dB/m, freq-scaled</span>
-        <label>Cap</label>
-        <input type="number" id="inpClutterCap" value="45" step="5" min="0" max="200" style="width:52px" title="Maximum total clutter attenuation per path (dB). Caps how heavily dense canopy/buildings can penalise a link, so clutter never acts as an infinite wall. Default 45.">
-        <span style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted)">dB max</span>
-      </div>
-      <div class="cov-btn-row" style="margin-top:10px">
-        <button class="btn" id="btnCovAllOn">ALL ON</button>
-        <button class="btn" id="btnCovAllOff">ALL OFF</button>
-        <button class="btn primary" id="btnCovComputeAll">▶ COMPUTE ALL</button>
-      </div>
-      <div class="cov-btn-row" style="margin-top:6px">
-        <button class="btn" id="btnCovOverlap" title="Outline where node coverage footprints overlap.">⧉ OVERLAP</button>
-        <select id="overlapMode" title="Show where at least 2 sites overlap, or only where every coverage-enabled site overlaps.">
-          <option value="2">2 or more</option>
-          <option value="all">All sites</option>
-        </select>
-      </div>
-      <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:1px;line-height:1.4">
-        Coverage is shown in each node's colour; more opaque = stronger signal, fading out to the coverage edge, blank where the link won't close (e.g. terrain shadow). Surface clutter (optional) adds Meta/WRI canopy height where available plus ESA WorldCover land-cover loss. Compute downloads terrain tiles (AWS Open Terrain, ~30 m global).
-      </div>
-    </div>
-    </div><!-- /coverage panel -->
-
-    <div class="modal-actions" style="margin-top:14px">
-      <button class="btn primary" id="btnSettingsClose">CLOSE</button>
+    <div class="modal-actions">
+      <button class="btn primary" id="btnSettingsClose" type="button">CLOSE</button>
     </div>
   </div>
 </div>
 
 <div id="app">
   <header>
-    <div class="hdr-tag">RF</div>
+    <div class="hdr-tag hdr-rf">RF</div>
     <h1>Clear<em>Path</em></h1>
     <div class="hdr-right">
-      <button class="btn" id="btnHelp">? HELP</button>
-      <button class="btn" id="btnSettings">⚙ SETTINGS</button>
-      <button class="btn share" id="btnShare">⇪ SHARE</button>
-      <button class="btn danger" id="btnClearAll">CLEAR ALL</button>
-      <button class="btn" id="btnDebug" title="Show the calculation log (clutter loading, link budgets, etc.)">🐛 LOG</button>
-      <span class="hdr-tag" title="Build 20261003-01">BUILD 20261003-01</span>
+      <span class="hdr-tag hdr-build" title="Build 20261003-02">BUILD 20261003-02</span>
+      <button class="btn" id="btnHelp" type="button" aria-label="Help">? <span class="btn-txt">HELP</span></button>
+      <button class="btn" id="btnSettings" type="button" aria-label="Settings">⚙ <span class="btn-txt">SETTINGS</span></button>
+      <button class="btn share" id="btnShare" type="button" aria-label="Share">⇪ <span class="btn-txt">SHARE</span></button>
+      <div class="menu-wrap">
+        <button class="btn" id="btnMore" type="button" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="moreMenu">⋯</button>
+        <div class="menu" id="moreMenu" role="menu" hidden>
+          <button class="menu-item" id="btnDebug" type="button" role="menuitem" title="Clutter loading, link budgets and per-link results">🐛 Calculation log</button>
+          <button class="menu-item danger" id="btnClearAll" type="button" role="menuitem">✕ Clear all</button>
+        </div>
+      </div>
     </div>
   </header>
 
   <div class="body-row">
     <div class="sidebar">
 
-      <button class="sb-min" id="btnSidebarMin" title="Minimise side panel">« MINIMISE</button>
+      <button class="sb-min" id="btnSidebarMin" type="button" title="Minimise side panel"><span class="desk-only">« MINIMISE</span><span class="mob-only">▾ HIDE PANEL</span></button>
 
       <!-- Compact summary bar (open SETTINGS for RF + coverage controls) -->
-      <div class="sb-section" style="padding:8px 11px">
-        <div class="settings-summary" id="settingsSummary" title="Click to open RF + Coverage settings">
+      <div class="sb-section sb-summary">
+        <div class="settings-summary" id="settingsSummary" role="button" tabindex="0" title="Open settings">
           <span class="ss-band" id="ssBand">915 MHz</span>
           <span class="ss-sep">·</span>
           <span class="ss-budget" id="ssBudget">22 dBm / +2 dBi</span>
@@ -704,8 +803,8 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       </div>
 
       <!-- Nodes -->
-      <div class="sb-section" style="display:flex;align-items:center;justify-content:space-between;padding:6px 11px">
-        <div class="section-label sb-toggle" data-sb="nodes" style="margin:0"><span class="sb-chev">▾</span>NODES <span id="wpCount" style="color:var(--accent)">0</span></div>
+      <div class="sb-section sb-head">
+        <div class="section-label sb-toggle" data-sb="nodes" role="button" tabindex="0"><span class="sb-chev">▾</span>NODES <span id="wpCount" style="color:var(--accent)">0</span></div>
         <div class="title-actions">
           <button class="title-action" id="btnNodesCollapse" title="Collapse all nodes">COLLAPSE</button>
           <button class="title-action" id="btnNodesExpand" title="Expand all nodes">EXPAND</button>
@@ -714,8 +813,8 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <div class="wp-scroll" id="wpList" data-sb-body="nodes"></div>
 
       <!-- Edges -->
-      <div class="sb-section" style="display:flex;align-items:center;gap:6px;padding:5px 11px">
-        <div class="section-label sb-toggle" data-sb="links" style="margin-bottom:0"><span class="sb-chev">▾</span>LINKS <span id="edgeCount" style="color:var(--accent)">0</span></div>
+      <div class="sb-section sb-head">
+        <div class="section-label sb-toggle" data-sb="links" role="button" tabindex="0"><span class="sb-chev">▾</span>LINKS <span id="edgeCount" style="color:var(--accent)">0</span></div>
         <div class="title-actions">
           <button class="title-action" id="btnLinksAll" title="Show all links">ALL</button>
           <button class="title-action" id="btnLinksNone" title="Hide all links">NONE</button>
@@ -724,19 +823,19 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <div class="edges-panel" id="edgesPanel" data-sb-body="links"><div class="no-data">No links yet.</div></div>
 
       <!-- Paths -->
-      <div class="sb-section" style="display:flex;align-items:center;justify-content:space-between;padding:5px 11px">
-        <div class="section-label sb-toggle" data-sb="paths" style="margin:0"><span class="sb-chev">▾</span>PATHS <span id="pathCount" style="color:var(--accent)">0</span></div>
-        <div style="display:flex;align-items:center;gap:4px">
+      <div class="sb-section sb-head">
+        <div class="section-label sb-toggle" data-sb="paths" role="button" tabindex="0"><span class="sb-chev">▾</span>PATHS <span id="pathCount" style="color:var(--accent)">0</span></div>
+        <div class="title-actions">
           <button class="title-action" id="btnPathsAll" title="Show all paths">ALL</button>
           <button class="title-action" id="btnPathsNone" title="Hide all paths">NONE</button>
-          <button class="btn" id="btnNewPath" style="font-size:10px;padding:5px 10px;min-height:29px">+ NEW PATH</button>
+          <button class="btn btn-small" id="btnNewPath" type="button">+ NEW PATH</button>
         </div>
       </div>
       <div class="paths-panel" id="pathsPanel" data-sb-body="paths"><div class="no-data">No paths defined.</div></div>
 
       <!-- Results -->
-      <div class="sb-section" style="padding:5px 11px">
-        <div class="section-label sb-toggle" data-sb="results" style="margin-bottom:0"><span class="sb-chev">▾</span>RESULTS</div>
+      <div class="sb-section sb-head">
+        <div class="section-label sb-toggle" data-sb="results" role="button" tabindex="0"><span class="sb-chev">▾</span>RESULTS</div>
       </div>
       <div class="results-area" id="resultsArea" data-sb-body="results">
         <div class="no-data">Add nodes, links, then analyse.</div>
@@ -751,13 +850,17 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
     </div><!-- /sidebar -->
 
     <!-- Shown only when the sidebar is minimised -->
-    <button class="sb-expand" id="btnSidebarExpand" title="Show side panel">»</button>
+    <button class="sb-expand" id="btnSidebarExpand" type="button" title="Show side panel" aria-label="Show side panel"><span class="desk-only">»</span><span class="mob-only">☰</span></button>
 
     <!-- MAP + CHART -->
     <div class="map-col">
-      <div id="mapHint">Right-click map to add node · Drag markers · Right-click marker for options</div>
+      <div id="mapHint">Tap ＋ or right-click the map to add a node · Drag markers · Right-click / long-press a marker for options</div>
+      <div class="mode-bar" id="modeBar" role="status" hidden>
+        <span id="modeText"></span>
+        <button class="btn primary btn-small" id="btnModeDone" type="button">DONE</button>
+      </div>
       <div id="map"></div>
-      <div id="toast"></div>
+      <div id="toast" role="status" aria-live="polite"></div>
 
       <!-- Debug log panel -->
       <div class="debug-panel" id="debugPanel">
@@ -765,7 +868,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
           <span class="debug-title">🐛 CALCULATION LOG</span>
           <button class="btn" id="btnDebugCopy">COPY</button>
           <button class="btn" id="btnDebugClear">CLEAR</button>
-          <button class="btn" id="btnDebugClose">✕</button>
+          <button class="btn" id="btnDebugClose" type="button" aria-label="Close log">✕</button>
         </div>
         <div class="debug-body" id="debugBody"></div>
       </div>
@@ -774,7 +877,7 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
       <div class="ni-panel" id="nodeInfoPanel">
         <div class="ni-head">
           <span class="ni-title" id="niTitle">NODE INFO</span>
-          <button class="btn" id="niClose" title="Close">✕</button>
+          <button class="btn" id="niClose" type="button" title="Close" aria-label="Close node info">✕</button>
         </div>
         <div class="ni-body">
           <div class="ni-facts" id="niFacts"></div>
@@ -797,14 +900,17 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 
       <!-- Floating buttons -->
       <div class="fab-group">
-        <button class="fab loc" id="btnLocate" title="Go to my location">◎</button>
+        <button class="fab" id="btnAddMode" type="button" aria-pressed="false" title="Add nodes: tap the map to place them" aria-label="Add nodes">＋</button>
+        <button class="fab" id="btnConnectMode" type="button" aria-pressed="false" title="Link nodes: tap two nodes to connect them" aria-label="Link nodes">↔</button>
+        <button class="fab loc" id="btnLocate" type="button" title="Go to my location" aria-label="Go to my location">◎</button>
       </div>
 
       <div class="chart-panel">
+        <div class="chart-resize" id="chartResize" role="separator" aria-orientation="horizontal" aria-label="Resize terrain profile" tabindex="0" title="Drag to resize"></div>
         <div class="chart-header">
           <div class="chart-title" id="chartTitle">TERRAIN PROFILE</div>
           <div class="chart-tabs" id="chartTabs"></div>
-          <button class="chart-min" id="btnChartMin" title="Minimise terrain profile">–</button>
+          <button class="chart-min" id="btnChartMin" type="button" title="Minimise terrain profile" aria-label="Minimise terrain profile">–</button>
         </div>
         <canvas id="profileCanvas"></canvas>
       </div>
@@ -813,11 +919,11 @@ input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border
 </div>
 
 <!-- ?v= mirrors the build tag above; bump both together to bust the asset cache. -->
-<script src="js/share-codec.js?v=20261003-01"></script>
-<script src="js/rf-model.js?v=20261003-01"></script>
-<script src="js/rf-data.js?v=20261003-01"></script>
-<script src="js/canopy-cog.js?v=20261003-01"></script>
-<script src="js/app.js?v=20261003-01"></script>
-<script src="js/accuracy.js?v=20261003-01"></script>
+<script src="js/share-codec.js?v=20261003-02"></script>
+<script src="js/rf-model.js?v=20261003-02"></script>
+<script src="js/rf-data.js?v=20261003-02"></script>
+<script src="js/canopy-cog.js?v=20261003-02"></script>
+<script src="js/app.js?v=20261003-02"></script>
+<script src="js/accuracy.js?v=20261003-02"></script>
 </body>
 </html>

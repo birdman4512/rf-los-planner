@@ -85,7 +85,7 @@ test('mobile settings and project download/restore preserve data',async({page})=
     importObservations({observations:[{from:'Homing',to:'SunBird',timestamp:'2026-09-29T00:00:00Z',success:false}]});
     openSettings();
   });
-  await page.getByRole('button',{name:'Measurements',exact:true}).click();
+  await page.getByRole('tab',{name:'Measurements',exact:true}).click();
   const bounds=await page.locator('#settingsModal .modal').boundingBox();
   expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(391);
   const downloadPromise=page.waitForEvent('download');

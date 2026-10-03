@@ -243,9 +243,10 @@ function initMap() {
     else { const ll = S.map.unproject(point); showMapCtx(x, y, { lat: ll.lat, lng: ll.lng }); }
   }, 550);
   S.map.on('mousedown', closeCtx);
-  S.map.on('click', () => {
+  S.map.on('click', e => {
     if(S._clickConsumed){ S._clickConsumed = false; return; }
     closeCtx();
+    if(S.mode === 'add'){ addNode(e.lngLat.lat, e.lngLat.lng); return; }
     if(S.activeView) clearActiveView();
   });
   // Windows/Chrome can fail to render Chrome's bundled grab/grabbing cursors
@@ -442,6 +443,7 @@ function makeMarker(node) {
   el.addEventListener('click', e => {
     e.stopPropagation();
     if(S._clickConsumed){ S._clickConsumed = false; return; }
+    if(S.mode === 'connect'){ connectTap(node); return; }
     selectNodeView(node.id);
   });
   attachLongPress(el, (x, y) => { S._clickConsumed = true; showNodeCtx(x, y, node); });
@@ -877,6 +879,7 @@ function selectEdgeView(id, opts={}){
   if(!edge) return;
   if(!opts.force&&S.activeView?.type==='edge'&&S.activeView.id===id){clearActiveView();return;}
   S.activeView={type:'edge',id};
+  setChartCollapsed(false);
   if(edge.profile) showEdgeProfile(id);
   else{
     clearCanvas();
@@ -895,6 +898,7 @@ function selectPathView(id, opts={}){
   if(!path) return;
   if(!opts.force&&S.activeView?.type==='path'&&S.activeView.id===id){clearActiveView();return;}
   S.activeView={type:'path',id};
+  setChartCollapsed(false);
   if(pathHasAnalysedProfiles(path)) showPathProfile(id);
   else{
     clearCanvas();
@@ -1130,7 +1134,7 @@ function pathHasAnalysedProfiles(path,edgesByPair=edgeByNodePairMap()){
 function renderNodeList() {
   syncShareUrl();
   const list = document.getElementById('wpList');
-  if (S.nodes.length === 0) { list.innerHTML = '<div class="no-data">Right-click map to add nodes.</div>'; return; }
+  if (S.nodes.length === 0) { list.innerHTML = '<div class="no-data">Tap ＋ on the map, or right-click / long-press it, to add nodes.</div>'; return; }
   list.innerHTML = '';
   S.nodes.forEach((node, idx) => {
     const c = nodeColorFor(node);
@@ -1146,11 +1150,11 @@ function renderNodeList() {
     card.classList.toggle('collapsed', !!node.collapsed);
     card.innerHTML = `
       <div class="wp-row1">
-        <button class="wp-collapse" title="Collapse / expand"><span class="chev">▾</span></button>
-        <div class="wp-num" style="color:${c};border-color:${c}">${idx+1}</div>
-        <input class="wp-color" type="color" value="${c}" title="Node colour"/>
-        <input class="wp-name" value="${escHtml(node.name)}"/>
-        <button class="wp-del">✕</button>
+        <button class="wp-collapse" type="button" title="Collapse / expand" aria-label="Collapse or expand ${escHtml(node.name)}" aria-expanded="${node.collapsed?'false':'true'}"><span class="chev">▾</span></button>
+        <div class="wp-num" style="color:${c};border-color:${c}" aria-hidden="true">${idx+1}</div>
+        <input class="wp-color" type="color" value="${c}" title="Node colour" aria-label="Colour of ${escHtml(node.name)}"/>
+        <input class="wp-name" value="${escHtml(node.name)}" aria-label="Node name"/>
+        <button class="wp-del" type="button" title="Delete node" aria-label="Delete ${escHtml(node.name)}">✕</button>
       </div>
       <div class="wp-summary">${node.lat.toFixed(4)}, ${node.lng.toFixed(4)} · AMSL ${amsl}${node.coverageOn?' · COV':''}</div>
       <div class="wp-body">
@@ -1178,6 +1182,7 @@ function renderNodeList() {
         <label for="cov_${node.id}" style="cursor:pointer">COVERAGE</label>
         <button class="wp-cov-btn ${covBtnClass}" id="covBtn_${node.id}">${covBtnLabel}</button>
         <span class="wp-cov-status" id="covStat_${node.id}">${coverageStatusText(node)}</span>
+        ${node.coverageComputed?canopyTag(node.coverageCanopy):''}
         ${node.coverageQuality?`<small class="quality-note">${escHtml(node.coverageQuality)}</small>`:""}
       </div>
       <div class="wp-rf-toggle ${node.rfOverride?'open':''}">
@@ -1200,7 +1205,7 @@ function renderNodeList() {
     q('.wp-collapse').addEventListener('click', () => toggleNodeCollapse(node.id));
     q('.wp-color').addEventListener('change', ev => setNodeColor(node.id, ev.currentTarget.value));
     q('.wp-name').addEventListener('change', ev => renameNode(node.id, ev.currentTarget.value));
-    q('.wp-del').addEventListener('click', () => removeNode(node.id));
+    q('.wp-del').addEventListener('click', () => deleteNodeUndoable(node.id));
     q(`#lat_${node.id}`).addEventListener('change', ev => setNodeCoord(node.id, 'lat', ev.currentTarget.value));
     q(`#lng_${node.id}`).addEventListener('change', ev => setNodeCoord(node.id, 'lng', ev.currentTarget.value));
     q('.wp-anth').addEventListener('change', ev => setNodeAntH(node.id, ev.currentTarget.value));
@@ -1277,12 +1282,12 @@ function renderEdgesPanel() {
       ${deselectBtn}
       <button class="edge-only" title="Show only this link">ONLY</button>
       <button class="edge-vis" title="${e.hidden?'Show link':'Hide link'}">${e.hidden?'SHOW':'HIDE'}</button>
-      <button class="edge-del">✕</button>`;
+      <button class="edge-del" type="button" title="Delete link" aria-label="Delete link ${escHtml(a.name)} to ${escHtml(b.name)}">✕</button>`;
     const dsel = row.querySelector('.deselect-btn');
     if(dsel) dsel.addEventListener('click', ev => { ev.stopPropagation(); clearActiveView(); });
     row.querySelector('.edge-only').addEventListener('click', ev => { ev.stopPropagation(); showOnlyEdge(e.id); });
     row.querySelector('.edge-vis').addEventListener('click', ev => { ev.stopPropagation(); setEdgeHidden(e.id, !e.hidden); });
-    row.querySelector('.edge-del').addEventListener('click', () => removeEdge(e.id));
+    row.querySelector('.edge-del').addEventListener('click', ev => { ev.stopPropagation(); deleteEdgeUndoable(e.id); });
     row.style.cursor='pointer';
     row.addEventListener('click', ev => {
       if (ev.target.classList.contains('edge-del')) return;
@@ -1317,15 +1322,15 @@ function renderPathsPanel() {
         ${deselectBtn}
         <button class="path-only" title="Show only this path">ONLY</button>
         <button class="path-vis" title="${p.hidden?'Show path':'Hide path'}">${p.hidden?'SHOW':'HIDE'}</button>
-        <button class="path-edit" title="Edit path (add/remove/reorder nodes)">✎</button>
-        <button class="path-del">✕</button>
+        <button class="path-edit" type="button" title="Edit path (add/remove/reorder nodes)" aria-label="Edit path ${escHtml(names)}">✎</button>
+        <button class="path-del" type="button" title="Delete path" aria-label="Delete path ${escHtml(names)}">✕</button>
       </div>`;
     const dsel = row.querySelector('.deselect-btn');
     if(dsel) dsel.addEventListener('click', ev => { ev.stopPropagation(); clearActiveView(); });
     row.querySelector('.path-only').addEventListener('click', ev => { ev.stopPropagation(); showOnlyPath(p.id); });
     row.querySelector('.path-vis').addEventListener('click', ev => { ev.stopPropagation(); setPathHidden(p.id, !p.hidden); });
     row.querySelector('.path-edit').addEventListener('click', ev => { ev.stopPropagation(); editPath(p.id); });
-    row.querySelector('.path-del').addEventListener('click', ev => { ev.stopPropagation(); removePath(p.id); });
+    row.querySelector('.path-del').addEventListener('click', ev => { ev.stopPropagation(); deletePathUndoable(p.id); });
     row.addEventListener('click', () => {
       if (p.hidden) { setPathHidden(p.id, false); return; }
       selectPathView(p.id);
@@ -1429,6 +1434,7 @@ function buildCtx(title, items) {
     else{
       const el=document.createElement('div');
       el.className='ctx-item'+(item.danger?' danger':'');
+      el.setAttribute('role','menuitem');
       const icon=document.createElement('span');
       icon.className='ctx-icon';
       icon.textContent=item.icon;
@@ -1455,7 +1461,7 @@ function closeCtx(){ctxMenu.style.display='none';}
 function showMapCtx(cx,cy,latlng){
   const items=[{icon:'＋',label:'Add node here',action:()=>addNode(latlng.lat,latlng.lng)}];
   if(S.edges.length>=1){items.push('sep');items.push({icon:'▶',label:'Re-analyse',action:runAnalysis});}
-  if(S.nodes.length>0){items.push('sep');items.push({icon:'✕',label:'Clear all',danger:true,action:clearAll});}
+  if(S.nodes.length>0){items.push('sep');items.push({icon:'✕',label:'Clear all',danger:true,action:clearAllUndoable});}
   buildCtx('MAP',items); posCtx(cx,cy);
 }
 
@@ -1474,7 +1480,7 @@ function showNodeCtx(cx,cy,node){
     {icon:'↑',label:'Insert node before',action:()=>insertNodeAt(idx)},
     {icon:'↓',label:'Insert node after', action:()=>insertNodeAt(idx+1)},
     'sep',
-    {icon:'🗑',label:`Delete "${node.name}"`,danger:true,action:()=>removeNode(node.id)},
+    {icon:'🗑',label:`Delete "${node.name}"`,danger:true,action:()=>deleteNodeUndoable(node.id)},
   ];
   buildCtx(`NODE ${idx+1}`,items); posCtx(cx,cy);
 }
@@ -1485,7 +1491,7 @@ function showEdgeCtx(cx,cy,edge){
     {icon:edge.hidden?'◌':'●',label:edge.hidden?'Show link':'Hide link',action:()=>setEdgeHidden(edge.id,!edge.hidden)},
     {icon:'◉',label:'Show only this link',action:()=>showOnlyEdge(edge.id)},
     'sep',
-    {icon:'🗑',label:`Delete link ${a?.name||'?'} ↔ ${b?.name||'?'}`,danger:true,action:()=>removeEdge(edge.id)},
+    {icon:'🗑',label:`Delete link ${a?.name||'?'} ↔ ${b?.name||'?'}`,danger:true,action:()=>deleteEdgeUndoable(edge.id)},
   ];
   buildCtx('LINK',items); posCtx(cx,cy);
 }
@@ -1497,7 +1503,7 @@ function showPathCtx(cx,cy,path){
     {icon:'◉',label:'Show only this path',action:()=>showOnlyPath(path.id)},
     'sep',
     {icon:'✎',label:'Edit path',action:()=>editPath(path.id)},
-    {icon:'🗑',label:`Delete path ${names}`,danger:true,action:()=>removePath(path.id)},
+    {icon:'🗑',label:`Delete path ${names}`,danger:true,action:()=>deletePathUndoable(path.id)},
   ];
   buildCtx('PATH',items); posCtx(cx,cy);
 }
@@ -1567,6 +1573,8 @@ document.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{
   if(e.key!=='Escape') return;
   if(ctxMenu.style.display==='block'){closeCtx();return;}
+  if(!document.getElementById('moreMenu')?.hidden){closeMoreMenu(true);return;}
+  if(S.mode){setMode(null);return;}
   if(document.getElementById('settingsModal')?.classList.contains('open')){closeSettings();return;}
   if(document.getElementById('shareModal')?.classList.contains('open')){closeShare();return;}
   if(document.getElementById('pathModal')?.classList.contains('open')){closePathModal();return;}
@@ -2493,6 +2501,7 @@ async function _computeNodeCoverageImpl(node){
     // Terrascope outage doesn't also take down the (unrelated) canopy store,
     // and vice versa.
     let canopySrc = null;
+    node.coverageCanopy = 'flat';
     const canopyPromise = canopyEnabled()
       ? (toast(`${node.name}: loading canopy…`),
          buildCanopyGrid(node.lat - dLat, node.lng - dLng, node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M))
@@ -2504,6 +2513,7 @@ async function _computeNodeCoverageImpl(node){
     ]);
     if(cg){
       canopySrc = cg;
+      node.coverageCanopy = 'measured';
       dlog(`  Canopy: grid loaded over ${cg.tiles} source tile(s)`,'ok');
     } else if(canopyEnabled()){
       dlog('  Canopy: unavailable — using flat Forest(m)','warn');
@@ -2519,6 +2529,7 @@ async function _computeNodeCoverageImpl(node){
     toast(clutter ? `${node.name}: land cover loaded.`
                   : `${node.name}: land cover unavailable — using bare terrain.`, 3500);
   } else {
+    node.coverageCanopy = 'off';
     dlog('  Clutter OFF (bare-earth terrain only)');
   }
 
@@ -2940,7 +2951,7 @@ async function runAnalysis(){
       // Meta/WRI canopy (see blendClutter). The solver handles both endpoints;
       // the profile draws the raw clutter heights separately from predictions.
       let rawClutterH=null, clutterClass=null, guess=null;
-      let clutterSource='Disabled',fallbackHeights=0;
+      let clutterSource='Disabled',fallbackHeights=0,canopyState='off';
       if(clutterOn){
         const pad=0.005;
         // WorldCover and canopy are independent sources — fetch both so a
@@ -2958,6 +2969,7 @@ async function runAnalysis(){
         ]);
         if(canopySrc) dlog(`  Canopy: grid loaded over ${canopySrc.tiles} source tile(s)`,'ok');
         clutterSource=clutterProvenance(wc,canopySrc);
+        canopyState=canopySrc?'measured':'flat';
         if(wc || canopySrc){
           // Parallel land-cover class per sample (0 where none) so the profile
           // can colour the clutter band by type — see drawClutterBand.
@@ -2984,7 +2996,7 @@ async function runAnalysis(){
       const pathLossRange=[result.pathLossDb,...scenarios.map(r=>r.pathLossDb)];
       const marginRange=pathLossRange.map(loss=>linkBudgetFor(a,b,loss).marginDb).sort((x,y)=>x-y);
       const status=linkStatus(budget.marginDb,requiredMarginDb);
-      e.result={...result,...budget,status,requiredMarginDb,marginRange,pathLossRange,
+      e.result={...result,...budget,status,requiredMarginDb,marginRange,pathLossRange,canopy:canopyState,
         provenance:terrainProvenance(a.lat,a.lng)+'; '+clutterSource+`; ${fallbackHeights} unmeasured tree-height samples`,
         terrainError:g.terrainError,clutterError:g.clutterError,computedAt:new Date().toISOString()};
       e.profile={elevs,dists,dist,aH,bH,a,b,freq,K,N,clutterH:rawClutterH,clutterClass};
@@ -3079,7 +3091,7 @@ function renderResults(){
         <span class="hop-name">${escHtml(a.name)} ↔ ${escHtml(b.name)}</span>
         <span class="badge ${r.status}" title="${escHtml(linkStatusTitle(r))}">${r.status==='clear'?'✓ BUDGET OK':r.status==='marginal'?'⚠ LOW MARGIN':'✕ BELOW SENSITIVITY'}</span>
       </div>
-      <div class="quality-note">Geometry: ${escHtml(r.geometry)} · ${escHtml(r.model)}</div>
+      <div class="quality-note">Geometry: ${escHtml(r.geometry)} · ${escHtml(r.model)} ${canopyTag(r.canopy)}</div>
       <div class="hop-stats">
         <div class="hop-stat"><span class="lbl">Dist: </span><span class="val">${(r.dist/1000).toFixed(2)}km</span></div>
         <div class="hop-stat" title="Received power above RX sensitivity, weaker direction. Required: ${r.requiredMarginDb} dB."><span class="lbl">Margin: </span><span class="val" style="color:${linkStatusColor(r.status)}">${fmtDb(r.marginDb)}</span></div>
@@ -4164,6 +4176,7 @@ function openShare(){
   const nativeBtn=document.getElementById('btnShareNative');
   if(nativeBtn) nativeBtn.hidden=!navigator.share;
   document.getElementById('shareModal').classList.add('open');
+  focusModal('shareModal');
 }
 
 // Keep the address bar in sync with the current map so the URL is always a
@@ -4177,8 +4190,9 @@ function syncShareUrl(){
     try{
       const base=window.location.pathname+window.location.search;
       // Empty map → strip the hash entirely rather than encode nothing.
-      const url=S.nodes.length ? base+'#'+buildShareHash() : base;
-      history.replaceState(null,'',url);
+      const hash=S.nodes.length ? buildShareHash() : '';
+      history.replaceState(null,'',hash ? base+'#'+hash : base);
+      saveSession(hash);
     }catch(err){ console.warn('URL sync failed',err); }
   },400);
 }
@@ -4190,6 +4204,7 @@ function openSettings(){
   if(links) links.checked=S.showLinks;
   if(paths) paths.checked=S.showPaths;
   document.getElementById('settingsModal').classList.add('open');
+  focusModal('settingsModal');
 }
 function closeSettings(){ document.getElementById('settingsModal').classList.remove('open'); refreshSettingsSummary(); }
 function refreshSettingsSummary(){
@@ -4252,13 +4267,13 @@ function pasteShareLink(){
 // ═══════════════════════════════════════════════════════════
 //  HELP
 // ═══════════════════════════════════════════════════════════
-function openHelp(){document.getElementById('helpModal').classList.add('open');}
+function openHelp(){document.getElementById('helpModal').classList.add('open');focusModal('helpModal');}
 function closeHelp(){
   document.getElementById('helpModal').classList.remove('open');
   try{localStorage.setItem('rfLosHelpSeen','1');}catch{}
 }
 function maybeShowHelp(){
-  if(!window.location.hash.slice(1).trim()) openHelp();
+  if(!window.location.hash.slice(1).trim() && !S.nodes.length) openHelp();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -4461,7 +4476,7 @@ function parseSharedHash(hash) {
   return normaliseLegacyHash(JSON.parse(decodeURIComponent(atob(hash))));
 }
 
-function loadFromHash(hashStr){
+function loadFromHash(hashStr, opts={}){
   const hash=(hashStr!=null?hashStr:window.location.hash.slice(1));
   if(!hash) return;
   try{
@@ -4516,9 +4531,9 @@ function loadFromHash(hashStr){
       document.getElementById('mapHint').style.display='none';
       let minLat=90,maxLat=-90,minLng=180,maxLng=-180;
       S.nodes.forEach(n=>{ minLat=Math.min(minLat,n.lat); maxLat=Math.max(maxLat,n.lat); minLng=Math.min(minLng,n.lng); maxLng=Math.max(maxLng,n.lng); });
-      S.map.fitBounds([[minLng,minLat],[maxLng,maxLat]],{padding:40});
+      if(opts.fit!==false) S.map.fitBounds([[minLng,minLat],[maxLng,maxLat]],{padding:40});
     }
-    toast('Map loaded from shared link. Click Analyse to run.',4000);
+    if(!opts.quiet) toast('Map loaded from shared link. Click Analyse to run.',4000);
   }catch(err){
     console.warn('Failed to load from hash',err);
     toast('Shared link was rejected: invalid or unsafe data.',5000);
@@ -4542,6 +4557,18 @@ function toast(msg,duration){
   if(duration) _toastTimer=setTimeout(()=>el.style.display='none',duration);
 }
 function hideToast(){document.getElementById('toast').style.display='none';}
+// A toast with one action (Undo, Start fresh). Plain toasts replace it.
+function toastAction(msg, label, fn, duration=8000){
+  const el=document.getElementById('toast');
+  el.style.display='block';
+  el.textContent=msg;
+  const btn=document.createElement('button');
+  btn.type='button'; btn.className='toast-act'; btn.textContent=label;
+  btn.addEventListener('click',()=>{ hideToast(); fn(); });
+  el.appendChild(btn);
+  if(_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer=setTimeout(()=>el.style.display='none',duration);
+}
 
 // ═══════════════════════════════════════════════════════════
 //  DEBUG LOG  —  records the inputs/outputs of each calculation
@@ -4601,8 +4628,14 @@ function initStaticHandlers(){
   on('btnHelp','click',openHelp);
   on('btnSettings','click',openSettings);
   on('btnShare','click',openShare);
-  on('btnClearAll','click',clearAll);
-  on('btnDebug','click',()=>toggleDebug());
+  on('btnClearAll','click',()=>{ closeMoreMenu(); clearAllUndoable(); });
+  on('btnDebug','click',()=>{ closeMoreMenu(); toggleDebug(); });
+  on('btnMore','click',ev=>{ ev.stopPropagation(); toggleMoreMenu(); });
+  document.addEventListener('click',ev=>{ if(!ev.target.closest('.menu-wrap')) closeMoreMenu(); });
+  on('btnAddMode','click',()=>setMode(S.mode==='add'?null:'add'));
+  on('btnConnectMode','click',()=>setMode(S.mode==='connect'?null:'connect'));
+  on('btnModeDone','click',()=>setMode(null));
+  initChartResize();
   // Modals
   on('btnHelpClose','click',closeHelp);
   on('btnShareCopy','click',copyShareUrl);
@@ -4617,7 +4650,7 @@ function initStaticHandlers(){
   document.querySelectorAll('.settings-tab').forEach(tab=>{
     tab.addEventListener('click',()=>{
       const target=tab.dataset.stab;
-      document.querySelectorAll('.settings-tab').forEach(t=>t.classList.toggle('active', t===tab));
+      document.querySelectorAll('.settings-tab').forEach(t=>{ t.classList.toggle('active', t===tab); t.setAttribute('aria-selected', t===tab ? 'true' : 'false'); });
       document.querySelectorAll('.settings-panel').forEach(p=>{ p.hidden = p.dataset.spanel !== target; });
     });
   });
@@ -4635,11 +4668,11 @@ function initStaticHandlers(){
   on('inpBasemap','change',function(){ switchBasemap(this.value); });
   on('btnCovAllOn','click',()=>setAllCoverage(true));
   on('btnCovAllOff','click',()=>setAllCoverage(false));
-  on('btnCovComputeAll','click',computeAllCoverage);
   on('btnCovOverlap','click',toggleOverlap);
   on('overlapMode','change',e=>{ S.overlapMode = e.target.value; refreshOverlap(); });
   // Sidebar
   on('settingsSummary','click',openSettings);
+  on('settingsSummary','keydown',ev=>{ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); openSettings(); } });
   on('btnNodesCollapse','click',ev=>{ ev.stopPropagation(); setAllNodesCollapsed(true); });
   on('btnNodesExpand','click',ev=>{ ev.stopPropagation(); setAllNodesCollapsed(false); });
   on('btnLinksAll','click',ev=>{ ev.stopPropagation(); showAllLinks(); });
@@ -4659,14 +4692,10 @@ function initStaticHandlers(){
     document.getElementById('btnSidebarExpand')?.classList.remove('show');
   });
   // Minimise / restore the terrain profile chart
-  on('btnChartMin','click',function(){
-    const panel = document.querySelector('.chart-panel');
-    const collapsed = panel?.classList.toggle('collapsed');
-    // Drop the floating buttons down with the now-short chart panel.
-    panel?.closest('.map-col')?.classList.toggle('chart-collapsed', collapsed);
-    this.textContent = collapsed ? '▴' : '–';
-    this.title = collapsed ? 'Restore terrain profile' : 'Minimise terrain profile';
-  });
+  on('btnChartMin','click',()=>setChartCollapsed(!document.querySelector('.chart-panel').classList.contains('collapsed')));
+  // Phones start with the profile minimised so the map gets the room; it
+  // opens when a link or path is selected.
+  if(window.matchMedia('(max-width:700px)').matches) setChartCollapsed(true);
   // Map + debug panel
   on('btnLocate','click',goToMyLocation);
   on('btnDebugCopy','click',copyDebug);
@@ -4688,8 +4717,11 @@ function initCollapsibles(){
       });
     };
     apply(!!state[key]);
+    toggle.setAttribute('aria-expanded', state[key] ? 'false' : 'true');
+    toggle.addEventListener('keydown',ev=>{ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); toggle.click(); } });
     toggle.addEventListener('click',()=>{
       const next=!toggle.classList.contains('collapsed');
+      toggle.setAttribute('aria-expanded', next ? 'false' : 'true');
       state[key]=next;
       try{ localStorage.setItem('rfLosSidebar',JSON.stringify(state)); }catch{}
       apply(next);
@@ -4714,14 +4746,196 @@ window.addEventListener('load',()=>{
     // window where a user edit's syncShareUrl overwrites the pending shared
     // hash before it is ever read.
     loadFromHash();
+    if(!window.location.hash.slice(1).trim()) restoreSession();
     syncPresetFromFreq();refreshSettingsSummary();maybeShowHelp();S._ready=true;
+    if(S.nodes.length) syncShareUrl();
   },600);
 });
 window.addEventListener('resize',()=>{
   if(S.map) S.map.resize();
+  redrawActiveView();
+});
+function redrawActiveView(){
   if(S.activeView){
     if(S.activeView.type==='edge') showEdgeProfile(S.activeView.id);
     else if(S.activeView.type==='path') showPathProfile(S.activeView.id);
     else if(S.activeView.type==='node') highlightActiveMapView();
   }
-});
+}
+
+// ═══════════════════════════════════════════════════════════
+//  UNDO  —  deletes snapshot the shareable state first
+// ═══════════════════════════════════════════════════════════
+// The snapshot is the share hash (sites, links, paths, settings) plus imported
+// observations. Undo restores it; analysis results are re-run on demand.
+function withUndo(label, fn){
+  const snap = S.nodes.length ? { hash: buildShareHash(), obs: observations.slice() } : null;
+  fn();
+  if(!snap) return;
+  toastAction(label, 'UNDO', () => {
+    S.modelRevision = (S.modelRevision || 0) + 1;
+    clearAll();
+    loadFromHash(snap.hash, { quiet: true, fit: false });
+    observations = snap.obs;
+    renderValidation();
+    toast('Restored. Run Analyse to refresh results.', 3500);
+  });
+}
+const nodeName = id => S.nodes.find(n => n.id === id)?.name || 'node';
+function clearAllUndoable(){ withUndo('Map cleared', clearAll); }
+function deleteNodeUndoable(id){ const nm = nodeName(id); withUndo(`Deleted ${nm}`, () => removeNode(id)); }
+function deleteEdgeUndoable(id){ withUndo('Link deleted', () => removeEdge(id)); }
+function deletePathUndoable(id){ withUndo('Path deleted', () => removePath(id)); }
+
+// ═══════════════════════════════════════════════════════════
+//  SESSION  —  the current map survives a reload or a fresh visit
+// ═══════════════════════════════════════════════════════════
+const SESSION_KEY = 'clearpathSession';
+function saveSession(hash){
+  try{
+    if(hash) localStorage.setItem(SESSION_KEY, hash);
+    else localStorage.removeItem(SESSION_KEY);
+  }catch{}
+}
+function restoreSession(){
+  let hash = '';
+  try{ hash = localStorage.getItem(SESSION_KEY) || ''; }catch{}
+  if(!hash) return false;
+  try{ parseSharedHash(hash); }catch{ saveSession(''); return false; }
+  loadFromHash(hash, { quiet: true });
+  if(!S.nodes.length) return false;
+  toastAction('Restored your last session', 'START FRESH', clearAllUndoable, 7000);
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TAP MODES  —  add and link nodes without a right-click
+// ═══════════════════════════════════════════════════════════
+const MODE_TEXT = {
+  add: 'Tap the map to add a node',
+  connect: 'Tap the first node to link'
+};
+function setMode(mode){
+  S.mode = mode;
+  pickConnectNode(null);
+  document.getElementById('btnAddMode')?.setAttribute('aria-pressed', mode === 'add' ? 'true' : 'false');
+  document.getElementById('btnConnectMode')?.setAttribute('aria-pressed', mode === 'connect' ? 'true' : 'false');
+  document.querySelector('.map-col')?.classList.toggle('mode-add', mode === 'add');
+  const bar = document.getElementById('modeBar');
+  if(bar){ bar.hidden = !mode; document.getElementById('modeText').textContent = mode ? MODE_TEXT[mode] : ''; }
+  if(mode === 'connect' && S.nodes.length < 2) toast('Add at least two nodes to link.', 2500);
+  if(mode) closeCtx();
+}
+function pickConnectNode(node){
+  S.nodes.forEach(n => n.marker?.getElement().classList.remove('picked'));
+  S._connectFrom = node ? node.id : null;
+  if(node) node.marker?.getElement().classList.add('picked');
+  if(S.mode === 'connect'){
+    document.getElementById('modeText').textContent = node ? `Now tap the node to link with ${node.name}` : MODE_TEXT.connect;
+  }
+}
+function connectTap(node){
+  if(S._connectFrom == null || S._connectFrom === node.id){
+    pickConnectNode(S._connectFrom === node.id ? null : node);
+    return;
+  }
+  const from = S.nodes.find(n => n.id === S._connectFrom);
+  const before = S.edges.length;
+  addEdge(S._connectFrom, node.id);
+  if(S.edges.length > before) toast(`Linked ${from?.name || '?'} ↔ ${node.name}`, 2000);
+  pickConnectNode(null);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HEADER ⋯ MENU, MODAL FOCUS
+// ═══════════════════════════════════════════════════════════
+function toggleMoreMenu(){
+  const menu = document.getElementById('moreMenu');
+  if(!menu.hidden){ closeMoreMenu(); return; }
+  menu.hidden = false;
+  document.getElementById('btnMore').setAttribute('aria-expanded', 'true');
+  menu.querySelector('.menu-item')?.focus();
+}
+function closeMoreMenu(returnFocus){
+  const menu = document.getElementById('moreMenu');
+  if(!menu || menu.hidden) return;
+  menu.hidden = true;
+  const btn = document.getElementById('btnMore');
+  btn.setAttribute('aria-expanded', 'false');
+  if(returnFocus) btn.focus();
+}
+// Move keyboard focus into a just-opened dialog without scrolling it.
+function focusModal(id){
+  requestAnimationFrame(() => {
+    document.querySelector(`#${id} .modal`)?.querySelector('button, select, input, textarea, [tabindex="0"]')?.focus({ preventScroll: true });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CANOPY SOURCE TAG
+// ═══════════════════════════════════════════════════════════
+function canopyTag(state){
+  if(state === 'measured') return '<span class="tag ok" title="Tree heights from the Meta/WRI canopy-height model">CANOPY: MEASURED</span>';
+  if(state === 'flat') return `<span class="tag warn" title="No measured canopy here (tile not published, or measured canopy is off for coverage). Trees use the flat Forest(m) height.">CANOPY: FLAT ${escHtml(clutterHeightTable()[10])} m</span>`;
+  return '';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RESIZABLE TERRAIN PROFILE
+// ═══════════════════════════════════════════════════════════
+const CHART_H_KEY = 'clearpathChartH';
+function setChartHeight(px, save){
+  const row = document.querySelector('.body-row');
+  const h = Math.round(Math.max(110, Math.min(px, window.innerHeight * 0.6)));
+  row.style.setProperty('--chart-h', h + 'px');
+  if(save) try{ localStorage.setItem(CHART_H_KEY, String(h)); }catch{}
+  S.map?.resize();
+  redrawActiveView();
+}
+function initChartResize(){
+  const handle = document.getElementById('chartResize');
+  const panel = document.querySelector('.chart-panel');
+  let saved = 0;
+  try{ saved = +localStorage.getItem(CHART_H_KEY) || 0; }catch{}
+  if(saved) document.querySelector('.body-row').style.setProperty('--chart-h', Math.max(110, Math.min(saved, window.innerHeight * 0.6)) + 'px');
+  let startY = 0, startH = 0, frame = 0;
+  handle.addEventListener('pointerdown', ev => {
+    startY = ev.clientY; startH = panel.offsetHeight;
+    handle.setPointerCapture(ev.pointerId);
+    handle.classList.add('dragging');
+    ev.preventDefault();
+  });
+  handle.addEventListener('pointermove', ev => {
+    if(!handle.classList.contains('dragging')) return;
+    const h = startH - (ev.clientY - startY);
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => setChartHeight(h, false));
+  });
+  const end = ev => {
+    if(!handle.classList.contains('dragging')) return;
+    handle.classList.remove('dragging');
+    setChartHeight(panel.offsetHeight, true);
+  };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+  handle.addEventListener('keydown', ev => {
+    if(ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+    ev.preventDefault();
+    setChartHeight(panel.offsetHeight + (ev.key === 'ArrowUp' ? 20 : -20), true);
+  });
+}
+
+function setChartCollapsed(collapsed){
+  const panel = document.querySelector('.chart-panel');
+  if(!panel || panel.classList.contains('collapsed') === collapsed) return;
+  panel.classList.toggle('collapsed', collapsed);
+  // Drop the floating buttons down with the now-short chart panel.
+  panel.closest('.map-col')?.classList.toggle('chart-collapsed', collapsed);
+  document.querySelector('.body-row')?.classList.toggle('chart-collapsed', collapsed);
+  const btn = document.getElementById('btnChartMin');
+  btn.textContent = collapsed ? '▴' : '–';
+  btn.title = collapsed ? 'Restore terrain profile' : 'Minimise terrain profile';
+  btn.setAttribute('aria-label', btn.title);
+  S.map?.resize();
+  if(!collapsed) requestAnimationFrame(redrawActiveView);
+}

@@ -17,6 +17,9 @@ Meshtastic, amateur radio, and point-to-point Wi-Fi links.
 - Canopy/WorldCover modelling, zero default clearing radius and explicit data quality
 - Height-sensitivity scenarios, local DEM imports and traceroute/measurement validation
 - Shareable settings URLs and downloadable projects including local data
+- Measured Meta/WRI canopy read straight from static COGs on Cloudflare R2
+- Touch-friendly add/link modes, undo for deletes, and an auto-saved session
+- Phone layout with the side panel docked under the map, and a resizable profile
 
 ## Accuracy and limitations
 
@@ -78,6 +81,32 @@ runs for the first time.
 
 The v4 share-link format is single-sourced in `share-codec.js`, shared by the
 app and the finder.
+
+Repeater antenna heights come from the transmitter's `HEIGHT` on its ACMA
+licence (metres above ground). A height of 0 means none was recorded, and the
+finder then assumes 10 m.
+
+## Measured canopy
+
+Tree heights come from the Meta/WRI global canopy-height model. Its 1 m source
+tiles are too large to use directly, so the **Build canopy tiles** workflow
+([`.github/workflows/build-canopy.yml`](.github/workflows/build-canopy.yml))
+rebuilds each one into a peak-preserving Cloud-Optimised GeoTIFF and uploads it
+to a Cloudflare R2 bucket, served at `https://canopy.nbird.com.au`:
+
+- `manifest.json`: which z9 tiles are published, and how each was built
+- `tiles/<quadkey>/<build stamp>.tif`: one immutable COG per tile
+- `meta/<quadkey>.json`: each tile's manifest entry
+
+The browser reads these directly with HTTP Range requests
+([`js/canopy-cog.js`](js/canopy-cog.js)). There is no tile server. Where a tile
+isn't published, trees use the flat Forest(m) height, and results say which
+source each link used. The workflow keeps the bucket under a storage budget
+(`CANOPY_BUDGET_GB`, default 9 GB of R2's 10 GB free tier).
+
+The bucket's CORS policy only allows the live site, so a local
+`npm run serve` uses flat Forest(m). Setup, building tiles, storage limits and
+verification are in [docs/canopy.md](docs/canopy.md).
 
 ## Publishing
 

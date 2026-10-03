@@ -31,7 +31,10 @@ ClearPath browser
    *Object Read & Write*, scoped to that bucket. Note the access key ID, the
    secret, and your account ID.
 4. **Add them to the repo.** Settings → Secrets and variables → Actions:
-   - Secrets: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
+   - Secrets: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`.
+     `R2_ACCOUNT_ID` is the bare 32-character ID, not the endpoint URL. The
+     workflow builds `https://<id>.r2.cloudflarestorage.com` itself; a full URL
+     there fails with a DNS or TLS handshake error.
    - Variables: `R2_BUCKET` (the bucket name). Optionally set `CANOPY_ORIGINS`
      (comma-separated). It defaults to `https://dea.nbird.com.au`. Local `npm run serve`
      is deliberately not allowed, so local runs use flat Forest(m).
