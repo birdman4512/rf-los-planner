@@ -3482,10 +3482,12 @@ function drawXAxis(ctx,PAD,pw,H,w0,w1,total){
     ctx.fillStyle='rgba(74,98,120,.9)';
     ctx.fillText((d/1000).toFixed(dp)+'km',x,H-5);
   }
-  if(span<total-1){
+  // The shown range lives in the header's FULL button, clear of the clutter
+  // legend that occupies the top of the plot.
+  const full=document.getElementById('btnProfileFull');
+  if(full&&span<total-1){
     const rp=Math.min(2,dp+1);
-    const txt=`${(w0/1000).toFixed(rp)}–${(w1/1000).toFixed(rp)} km of ${(total/1000).toFixed(rp)}`;
-    ctx.textAlign='left';ctx.fillStyle='#ff2bd6';ctx.fillText(txt,PAD.l+6,PAD.t+10);
+    full.textContent=`⤢ ${(w0/1000).toFixed(rp)}–${(w1/1000).toFixed(rp)} of ${(total/1000).toFixed(rp)} km · FULL`;
   }
 }
 function hexAlpha(hex,alpha){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return `rgba(${r},${g},${b},${alpha})`;}
