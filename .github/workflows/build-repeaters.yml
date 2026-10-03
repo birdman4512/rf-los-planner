@@ -27,7 +27,9 @@ jobs:
           node-version: 20
 
       - name: Download ACMA spectra RRL extract
-        run: curl -fSL --retry 3 -o spectra_rrl.zip https://web.acma.gov.au/rrl-updates/spectra_rrl.zip
+        # HTTP/1.1: over HTTP/2 the CDN download can stall for minutes and then
+        # fail with "stream was not closed cleanly" (curl exit 92).
+        run: curl -fSL --http1.1 --retry 5 --retry-all-errors --retry-delay 15 --max-time 900 -o spectra_rrl.zip https://cdn.acma.gov.au/rrl/spectra_rrl.zip
 
       - name: Unzip
         run: unzip -o spectra_rrl.zip -d spectra

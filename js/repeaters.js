@@ -90,6 +90,7 @@ function visibleRepeaters() {
   if (q) rows = rows.filter(r => `${r.call || ''} ${r.name || ''}`.toLowerCase().includes(q));
   const band = $('band').value;
   if (band) rows = rows.filter(r => bandOf(r.outMhz) === band);
+  if (!$('simplex').checked) rows = rows.filter(r => r.kind !== 'simplex');
   const dir = state.sortDir;
   rows.sort((a, b) => {
     let av, bv;
@@ -197,6 +198,7 @@ async function init() {
   });
   ['lat', 'lng', 'radius', 'search'].forEach(id => $(id).addEventListener('input', render));
   $('band').addEventListener('change', render);
+  $('simplex').addEventListener('change', render);
   $('btnOpenSelected').addEventListener('click', () => openInClearPath(selectedRepeaters()));
 }
 

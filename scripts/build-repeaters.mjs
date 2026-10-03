@@ -18,8 +18,11 @@
 //  ── Heuristics worth verifying after the first run (counts are logged) ──
 //  • Amateur repeaters = LICENCE_TYPE_NAME ~ /amateur/i and
 //    LICENCE_CATEGORY_NAME ~ /repeater/i, status current.
-//  • A licence's transmitter device (DEVICE_TYPE ~ /^t/i) is the OUTPUT you
-//    listen to; the receiver (/^r/i) is the INPUT; offset = in − out.
+//  • One licence can hold several repeaters (e.g. a club's 2 m, 70 cm and
+//    23 cm machines at one site). Each transmitter (DEVICE_TYPE ~ /^t/i) is an
+//    OUTPUT you listen to and becomes its own entry; its INPUT is the receiver
+//    (/^r/i) sharing its EFL_SYSTEM, else the nearest-frequency receiver in
+//    the same band at the same site. offset = in − out.
 //  • FREQUENCY is stored in Hz → divided by 1e6 for MHz.
 //  If ACMA's values differ, adjust the filters below; the per-stage counts
 //  printed to the log make drift easy to spot.
@@ -109,6 +112,7 @@ await streamCsv('device_details', (f, idx) => {
     call: col(f, idx, 'CALL_SIGN').trim(),
     station: col(f, idx, 'STATION_NAME').trim(),
     height: col(f, idx, 'HEIGHT'),
+    system: col(f, idx, 'EFL_SYSTEM').trim(),
     eirp: col(f, idx, 'EIRP'),
     eirpUnit: col(f, idx, 'EIRP_UNIT')
   };
@@ -135,35 +139,60 @@ await streamCsv('client', (f, idx) => {
   licenceeByClient.set(id, col(f, idx, 'LICENCEE').trim());
 });
 
-// 4. Build repeater records: transmitter = output (listen), receiver = input.
+// 4. Build repeater records: one per transmitter (output), paired with its
+//    receiver (input).
+const BANDS = [[28, 29.7], [50, 54], [144, 148], [420, 450], [1240, 1300]];
+const bandIdx = mhz => BANDS.findIndex(([lo, hi]) => mhz >= lo && mhz <= hi);
 const repeaters = [];
-let skippedNoTx = 0, skippedNoSite = 0;
+const seen = new Set();
+let skippedNoTx = 0, skippedNoSite = 0, unpaired = 0, duplicates = 0;
 for (const [lic, devs] of devOfLicence) {
-  const tx = devs.find(d => /^t/i.test(d.type)) || devs[0];
-  const rx = devs.find(d => /^r/i.test(d.type));
-  if (!tx) { skippedNoTx++; continue; }
-  const site = siteById.get(tx.site);
-  if (!site || !isFinite(site.lat) || !isFinite(site.lng)) { skippedNoSite++; continue; }
-  const outMhz = hzToMhz(tx.freq);
-  const inMhz = rx ? hzToMhz(rx.freq) : null;
-  repeaters.push({
-    call: tx.call || null,
-    name: site.name || tx.station || licenceeByClient.get(clientOfLicence.get(lic)) || null,
-    lat: +site.lat.toFixed(6),
-    lng: +site.lng.toFixed(6),
-    state: site.state || null,
-    outMhz,
-    inMhz,
-    offsetMhz: (outMhz != null && inMhz != null) ? +(inMhz - outMhz).toFixed(4) : null,
-    antH: tx.height ? +(+tx.height).toFixed(1) : null,
-    eirp: tx.eirp ? `${tx.eirp} ${tx.eirpUnit || ''}`.trim() : null
-  });
+  const txs = devs.filter(d => /^t/i.test(d.type));
+  const rxs = devs.filter(d => /^r/i.test(d.type));
+  if (!txs.length) { skippedNoTx++; continue; }
+  const usedRx = new Set();
+  for (const tx of txs) {
+    const site = siteById.get(tx.site);
+    if (!site || !isFinite(site.lat) || !isFinite(site.lng)) { skippedNoSite++; continue; }
+    const outMhz = hzToMhz(tx.freq);
+    // Prefer the receiver in the same EFL system; otherwise the closest
+    // unused receiver in the same band at the same site.
+    let rx = tx.system ? rxs.find(r => r.system === tx.system && !usedRx.has(r)) : null;
+    if (!rx && outMhz != null) {
+      const band = bandIdx(outMhz);
+      rx = rxs.filter(r => !usedRx.has(r) && r.site === tx.site && hzToMhz(r.freq) != null && bandIdx(hzToMhz(r.freq)) === band)
+        .sort((p, q) => Math.abs(hzToMhz(p.freq) - outMhz) - Math.abs(hzToMhz(q.freq) - outMhz))[0] || null;
+    }
+    if (rx) usedRx.add(rx); else unpaired++;
+    const inMhz = rx ? hzToMhz(rx.freq) : null;
+    const call = tx.call || null;
+    const key = `${call}|${outMhz}|${site.lat.toFixed(4)}|${site.lng.toFixed(4)}`;
+    if (seen.has(key)) { duplicates++; continue; }
+    seen.add(key);
+    repeaters.push({
+      call,
+      name: site.name || tx.station || licenceeByClient.get(clientOfLicence.get(lic)) || null,
+      lat: +site.lat.toFixed(6),
+      lng: +site.lng.toFixed(6),
+      state: site.state || null,
+      outMhz,
+      inMhz,
+      offsetMhz: (outMhz != null && inMhz != null) ? +(inMhz - outMhz).toFixed(4) : null,
+      // A split input is a voice/data repeater; same-frequency or receive-less
+      // stations on repeater licences are simplex: APRS digipeaters, packet
+      // nodes, beacons and gateways.
+      kind: (inMhz != null && Math.abs(inMhz - outMhz) > 0.0001) ? 'repeater' : 'simplex',
+      // HEIGHT is metres above ground; 0 or blank means not recorded.
+      antH: +tx.height > 0 ? +(+tx.height).toFixed(1) : null,
+      eirp: tx.eirp ? `${tx.eirp} ${tx.eirpUnit || ''}`.trim() : null
+    });
+  }
 }
 
 repeaters.sort((a, b) => (a.state || '').localeCompare(b.state || '') ||
                          (a.outMhz || 0) - (b.outMhz || 0));
 
-console.log(`Built ${repeaters.length} repeaters (skipped: no-tx ${skippedNoTx}, no-site ${skippedNoSite})`);
+console.log(`Built ${repeaters.length} repeaters (skipped: no-tx ${skippedNoTx}, no-site ${skippedNoSite}, duplicate ${duplicates}; ${unpaired} without a paired input)`);
 
 const out = {
   generated: new Date().toISOString().slice(0, 10),

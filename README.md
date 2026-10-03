@@ -82,9 +82,16 @@ runs for the first time.
 The v4 share-link format is single-sourced in `share-codec.js`, shared by the
 app and the finder.
 
-Repeater antenna heights come from the transmitter's `HEIGHT` on its ACMA
-licence (metres above ground). A height of 0 means none was recorded, and the
-finder then assumes 10 m.
+One licence can cover several repeaters (a club's 2 m, 70 cm and 23 cm
+machines at one site), so every transmitter becomes its own entry, paired with
+its receiver (same `EFL_SYSTEM`, else nearest frequency in the band at the same
+site). Stations with no split input are tagged `simplex`: APRS digipeaters,
+packet nodes, beacons and gateways. The finder hides them unless *Include
+simplex stations* is ticked. Transmitters licensed by area with no site
+can't be mapped and are left out.
+
+Repeater antenna heights come from each transmitter's `HEIGHT` on its ACMA
+licence (metres above ground). Where none is recorded the finder assumes 10 m.
 
 ## Measured canopy
 

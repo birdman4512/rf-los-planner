@@ -31,6 +31,8 @@ h1 em{color:var(--accent);font-style:normal}
 .sub{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px;margin-bottom:14px}
 .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 label{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+label.check{display:flex;align-items:center;gap:5px;cursor:pointer}
+label.check input{accent-color:var(--accent)}
 input[type=number],input[type=text],select{font-family:'Share Tech Mono',monospace;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 8px;width:96px}
 .btn{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:1px;padding:7px 12px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;text-transform:uppercase}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
@@ -67,6 +69,7 @@ a.open:hover{text-decoration:underline}
       <option value="70cm">70 cm</option>
       <option value="23cm">23 cm</option>
     </select>
+    <label class="check" title="APRS digipeaters, packet nodes, beacons and gateways licensed as repeaters but on a single frequency"><input type="checkbox" id="simplex"> Include simplex stations</label>
     <label for="lat">Lat</label>
     <input type="number" id="lat" step="0.0001" placeholder="-33.8">
     <label for="lng">Lng</label>
@@ -83,6 +86,6 @@ a.open:hover{text-decoration:underline}
 
   <!-- Bump ?v= when changing the finder JS to bust the 4-hour asset cache. -->
   <script src="js/share-codec.js?v=20260929-04"></script>
-  <script src="js/repeaters.js?v=20260612-2"></script>
+  <script src="js/repeaters.js?v=20261004-1"></script>
 </body>
 </html>
