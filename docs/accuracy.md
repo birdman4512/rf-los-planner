@@ -55,8 +55,12 @@ controls coverage sweeps. Where a tree pixel has no measured canopy, its flat
 Forest(m) height is a guess. Within 100 m of either end of a path such guessed
 samples are treated as unknown (no clutter) in both clutter modes, rather than
 as a wall beside a low antenna; user-supplied site clutter heights still apply. Source availability, fallback use, raster sampling and sample
-spacing are reported. Canopy image resampling means its effective resolution is
-not necessarily the native one metre product.
+spacing are reported. Canopy is not the native one metre product. Tiles are
+pre-built to ~4–5 m cells using the maximum of each block, with RMS overviews,
+so tree tops are kept rather than averaged into gaps. The browser reads the
+overview level whose pixel is no larger than the sampling step: about 8.5 m for
+links and about 17 m for a coverage sweep at 27°S. Heights are whole metres with
+no ceiling. The data-quality note reports the grid spacing used and the tile build.
 
 The default clutter treatment uses geometry plus empirical through-clutter
 attenuation. The rate, square-root frequency scaling and cap are assumptions,

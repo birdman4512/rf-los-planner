@@ -1,0 +1,142 @@
+name: Build canopy tiles
+
+# Builds peak-preserving canopy COGs from the Meta/WRI source tiles and
+# publishes them to the Cloudflare R2 bucket the app reads directly with Range
+# requests (docs/canopy.md). Run it from the Actions tab with the quadkeys
+# ClearPath logs as "not published", or "all" to rebuild every published tile.
+#
+# Needs repository secrets R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+# and a repository variable R2_BUCKET (optionally CANOPY_ORIGINS).
+on:
+  workflow_dispatch:
+    inputs:
+      tiles:
+        description: 'Space- or comma-separated 9-digit quadkeys, or "all"'
+        required: true
+      factor:
+        description: 'Max-downsample factor from the ~1.2 m source (1, 2, 4, 8 or 16)'
+        default: '4'
+        required: true
+
+permissions:
+  contents: read
+
+# One run at a time: the manifest step lists and prunes the whole bucket.
+concurrency:
+  group: canopy-r2
+  cancel-in-progress: false
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: auto
+  # R2 rejects the default checksum headers newer aws-cli versions send.
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+  R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+  R2_BUCKET: ${{ vars.R2_BUCKET }}
+  # R2's free tier is 10 GB-month; stop short of it. Override with a repo variable.
+  BUDGET_GB: ${{ vars.CANOPY_BUDGET_GB || '9' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tiles: ${{ steps.plan.outputs.tiles }}
+    steps:
+      - id: plan
+        env:
+          INPUT: ${{ inputs.tiles }}
+          FACTOR: ${{ inputs.factor }}
+        run: |
+          set -eu
+          case "$FACTOR" in 1|2|4|8|16) ;; *) echo "::error::factor must be 1, 2, 4, 8 or 16"; exit 1;; esac
+          if [ "$(printf '%s' "$INPUT" | tr -d ' ')" = all ]; then
+            list=$(aws s3 ls "s3://$R2_BUCKET/meta/" --endpoint-url "$R2_ENDPOINT" | awk '{print $4}' | sed -n 's/^\([0-3]\{9\}\)\.json$/\1/p')
+          else
+            list=$(printf '%s' "$INPUT" | tr ',' ' ')
+          fi
+          json='['; sep=''
+          for t in $list; do
+            case "$t" in
+              [0-3][0-3][0-3][0-3][0-3][0-3][0-3][0-3][0-3]) ;;
+              *) echo "::error::'$t' is not a 9-digit quadkey"; exit 1;;
+            esac
+            case "$json" in *"\"$t\""*) continue;; esac
+            json="$json$sep\"$t\""; sep=','
+          done
+          json="$json]"
+          [ "$json" != '[]' ] || { echo "::error::no tiles to build"; exit 1; }
+
+          # Storage guard. Peak use is everything already in the bucket plus the
+          # new builds (replaced versions are pruned only at the end). Built size
+          # per source byte was measured on a dense-forest tile (factor 4: 0.141,
+          # factor 8: 0.046); these ratios add a safety margin.
+          case "$FACTOR" in 1) ratio=1.4;; 2) ratio=0.5;; 4) ratio=0.17;; 8) ratio=0.06;; 16) ratio=0.02;; esac
+          listing=$(aws s3 ls "s3://$R2_BUCKET" --recursive --summarize --endpoint-url "$R2_ENDPOINT")  # fails the step if R2 is unreachable
+          used=$(printf '%s\n' "$listing" | awk '/Total Size/ {print $3}')
+          src=0
+          for t in $(printf '%s' "$json" | tr -d '[]"' | tr ',' ' '); do
+            n=$(curl -fsSI "https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/$t.tif" | tr -d '\r' | awk 'tolower($1)=="content-length:" {print $2}')
+            [ -n "$n" ] || { echo "::error::source tile $t not found upstream"; exit 1; }
+            src=$((src + n))
+          done
+          awk -v used="${used:-0}" -v src="$src" -v r="$ratio" -v budget="$BUDGET_GB" 'BEGIN {
+            peak = (used + src * r) / 1e9
+            printf "Bucket now %.2f GB; this run adds ~%.2f GB; peak ~%.2f GB of %s GB budget\n", used / 1e9, src * r / 1e9, peak, budget
+            if (peak > budget) { printf "::error::estimated peak %.2f GB exceeds CANOPY_BUDGET_GB=%s; build fewer tiles or a larger factor\n", peak, budget; exit 1 }
+          }' | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "tiles=$json" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        tile: ${{ fromJSON(needs.plan.outputs.tiles) }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Build COG
+        env:
+          TILE: ${{ matrix.tile }}
+          FACTOR: ${{ inputs.factor }}
+        run: sh scripts/canopy/build-tile.sh "$TILE" out
+
+      # Tile first, entry second: the manifest only ever lists uploaded tiles.
+      - name: Upload to R2
+        env:
+          TILE: ${{ matrix.tile }}
+        run: |
+          set -eu
+          key=$(jq -r .path "out/$TILE.json")
+          # Hard stop: never upload past the budget, whatever the estimate said.
+          listing=$(aws s3 ls "s3://$R2_BUCKET" --recursive --summarize --endpoint-url "$R2_ENDPOINT")
+          used=$(printf '%s\n' "$listing" | awk '/Total Size/ {print $3}')
+          size=$(wc -c < "out/$TILE.tif")
+          awk -v used="${used:-0}" -v size="$size" -v budget="$BUDGET_GB" 'BEGIN {
+            if ((used + size) / 1e9 > budget) { printf "::error::uploading %.1f MB would take the bucket past %s GB\n", size / 1e6, budget; exit 1 }
+          }'
+          aws s3 cp "out/$TILE.tif" "s3://$R2_BUCKET/$key" --endpoint-url "$R2_ENDPOINT" \
+            --content-type image/tiff --cache-control "public, max-age=31536000, immutable" --only-show-errors
+          aws s3 cp "out/$TILE.json" "s3://$R2_BUCKET/meta/$TILE.json" --endpoint-url "$R2_ENDPOINT" \
+            --content-type application/json --cache-control no-cache --only-show-errors
+          jq -c . "out/$TILE.json"
+
+  manifest:
+    needs: build
+    # Publish whatever did build, even if some tiles failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Publish manifest, CORS policy and prune superseded tiles
+        env:
+          CANOPY_ORIGINS: ${{ vars.CANOPY_ORIGINS }}
+        run: sh scripts/canopy/publish-manifest.sh

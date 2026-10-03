@@ -32,8 +32,8 @@ scenarios are sensitivity checks, not confidence intervals.
 
 See [Accuracy model and validation](docs/accuracy.md) for the equations used,
 limitations, measurement/traceroute JSON format, terrain-grid format and tests.
-Measured canopy comes from a self-hosted titiler; see
-[docs/canopy-titiler.md](docs/canopy-titiler.md).
+Measured canopy is read straight from static COGs on Cloudflare R2, with no
+tile server; see [docs/canopy.md](docs/canopy.md).
 
 ## Running Locally
 
@@ -55,7 +55,8 @@ Fonts are self-hosted from `fonts/`.
 
 The app uses `index.html` (markup/styles), `js/app.js` (map and workflow),
 `js/rf-model.js` (shared propagation), `js/rf-worker.js` (coverage),
-`js/rf-data.js` (data validation), and `js/accuracy.js` (accuracy controls/imports).
+`js/rf-data.js` (data validation), `js/canopy-cog.js` (canopy COG reader), and
+`js/accuracy.js` (accuracy controls/imports).
 There is deliberately no inline JavaScript: the Content-Security-Policy omits
 `'unsafe-inline'` from `script-src`.
 
@@ -105,6 +106,5 @@ files into `_site/` (the HTML pages, the `js/` folder, fonts, icons, and
 workflows, `docs/`) is deliberately kept off the public URL. **Any new static
 asset must be added to that step or it will 404 on the live site.**
 
-The optional canopy/titiler stack is a separate self-hosted service and is **not**
-part of this Pages deploy — see [docs/canopy-titiler.md](docs/canopy-titiler.md)
-for that.
+Canopy tiles are **not** part of this Pages deploy. The **Build canopy tiles**
+workflow publishes them to R2; see [docs/canopy.md](docs/canopy.md).

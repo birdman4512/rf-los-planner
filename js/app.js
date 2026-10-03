@@ -81,24 +81,14 @@ const WORLDCOVER_WMS_SOURCES = [
   { name:'Terrascope TiTiler', url:'https://titiler.terrascope.be/wms', layer:'esa-worldcover-map-10m-2021-v2_map', time:'2021-01-01' },
   { name:'Terrascope legacy', url:'https://services.terrascope.be/wms/v2', layer:'WORLDCOVER_2021_MAP' }
 ];
-// Per-pixel Meta/WRI canopy height refines tree clutter. The source COGs have NO
-// overviews and are 1 m (65536²), so they are read SERVER-SIDE by a self-hosted
-// titiler (docs/canopy-titiler.md): one small downsampled PNG per source tile,
-// uncapped, so dense-forest coverage works. When titiler is unavailable, tree
-// pixels fall back to WorldCover's flat Forest(m).
+// Per-pixel Meta/WRI canopy height refines tree clutter. The 1 m source tiles
+// are rebuilt by the "Build canopy tiles" workflow (scripts/canopy/) into small
+// peak-preserving COGs on static storage, which the browser reads directly with
+// Range requests (js/canopy-cog.js); there is no tile server. Where a tile isn't
+// published, tree pixels fall back to WorldCover's flat Forest(m).
 const CANOPY_TILE_Z = 9;
-const TITILER_BASE = 'https://tracker.quirkyit.com.au';
-// Rescale ceiling: PNG gray 0–255 ↔ 0–CANOPY_HMAX m. The <img>/canvas decode is
-// 8-bit (256 levels), so a lower ceiling is the only browser-side precision lever.
-// The Meta CHM rarely exceeds ~40 m (the model saturates below that), so 40 gives
-// 0.157 m/level vs 0.235 at 60 with negligible clipping. MUST equal nginx rescale.
-const CANOPY_HMAX = 40;
-// Public endpoint is a narrow reverse proxy, not titiler's generic /cog?url=
-// surface. It only serves local /cogs/<quadkey>.cog.tif files through titiler.
-function canopyTitilerUrl(qk, w, s, e, n, cols, rows, cacheKey=''){
-  const suffix = cacheKey ? `?v=${encodeURIComponent(cacheKey)}` : '';
-  return `${TITILER_BASE}/canopy/${qk}/bbox/${w},${s},${e},${n}/${cols}x${rows}.png${suffix}`;
-}
+// Public R2 custom domain serving manifest.json + tiles/ (docs/canopy.md).
+const CANOPY_BASE = 'https://canopy.nbird.com.au';
 const CLUTTER_ATTEN_DB_PER_M_915 = 0.10; // reference loss while LOS passes through canopy/building clutter
 const CLUTTER_ATTEN_CAP_DB = 45;         // avoid treating clutter as infinite terrain
 // WorldCover classes: 10 Tree, 20 Shrub, 30 Grass, 40 Crop, 50 Built-up,
@@ -1747,8 +1737,8 @@ async function fetchProfile(lat1,lng1,lat2,lng2,N=80){
 // ═══════════════════════════════════════════════════════════
 const _clutterImgCache = new Map(); // url → Promise<{data,w,h}>
 let _clutterFailedAt = 0;           // when all WMS clutter sources last failed (0 = healthy); gates a short retry cooldown, not a session-long give-up
-let _titilerFailedAt = 0;           // when the titiler VM was last unreachable (it's part-time); also a cooldown, not sticky
-const _canopyLocalCogMisses = new Set(); // qk values that failed this session; cleared when a newer manifest generation appears (i.e. a COG was built)
+let _canopyFailedAt = 0;            // when the canopy store was last unreachable; a cooldown, not sticky
+const _canopyMisses = new Set();         // qk values that failed this session; cleared when a newer manifest generation appears (i.e. a COG was built)
 let _canopyManifestPromise = null;       // in-flight manifest fetch, shared by concurrent callers
 let _canopyManifest = null;              // last resolved manifest
 let _canopyManifestFetchedAt = 0;        // Date.now() of last successful fetch (TTL gate)
@@ -1759,7 +1749,7 @@ const CLUTTER_IMG_TIMEOUT_MS = 20000; // base per-tile timeout; scaled up for la
 const WMS_MAX_TILE_PX = 512;          // split big WorldCover GetMap requests into chunks ≤ this per side so one large image can't hang/abort the whole fetch
 
 function clutterInCooldown(){ return _clutterFailedAt > 0 && (Date.now() - _clutterFailedAt) < CLUTTER_RETRY_COOLDOWN_MS; }
-function titilerInCooldown(){ return _titilerFailedAt > 0 && (Date.now() - _titilerFailedAt) < CLUTTER_RETRY_COOLDOWN_MS; }
+function canopyInCooldown(){ return _canopyFailedAt > 0 && (Date.now() - _canopyFailedAt) < CLUTTER_RETRY_COOLDOWN_MS; }
 // Bigger tiles legitimately take longer; give ~15s extra per megapixel over the base, capped at 60s.
 function clutterTimeoutForPixels(px){ return Math.min(60000, CLUTTER_IMG_TIMEOUT_MS + Math.round(px / 1e6 * 15000)); }
 
@@ -1807,12 +1797,12 @@ function loadClutterImage(url, w, h, timeoutMs = CLUTTER_IMG_TIMEOUT_MS){
 }
 
 async function loadCanopyManifest(force){
-  if(titilerInCooldown()) return null;
+  if(canopyInCooldown()) return null;
   if(!force && _canopyManifest && (Date.now() - _canopyManifestFetchedAt) < CANOPY_MANIFEST_TTL_MS){
     return _canopyManifest; // fresh enough — skip the network round-trip
   }
   if(_canopyManifestPromise) return _canopyManifestPromise; // a fetch is already in flight — share it
-  _canopyManifestPromise = fetch(`${TITILER_BASE}/canopy/manifest.json`, { cache:'no-store' })
+  _canopyManifestPromise = fetch(`${CANOPY_BASE}/manifest.json`, { cache:'no-cache' })
     .then(r => r.ok ? r.json() : null)
     .then(m => {
       _canopyManifestPromise = null;
@@ -1821,17 +1811,17 @@ async function loadCanopyManifest(force){
         _canopyManifestFetchedAt = Date.now();
         const gen = canopyManifestCacheKey(m);
         if(gen !== _canopyManifestGenerated){
-          // refresh-manifest.sh stamps a new 'generated' on every build, so a
+          // publish-manifest.sh stamps a new 'generated' on every build, so a
           // changed stamp means tiles we previously gave up on may now exist.
           _canopyManifestGenerated = gen;
-          _canopyLocalCogMisses.clear();
+          _canopyMisses.clear();
         }
       }
       return m;
     })
     .catch(e => {
       _canopyManifestPromise = null;
-      _titilerFailedAt = Date.now();
+      _canopyFailedAt = Date.now();
       dlog(`Canopy: manifest unavailable — ${e.message||e}`,'warn');
       return null;
     });
@@ -1839,7 +1829,7 @@ async function loadCanopyManifest(force){
 }
 
 function canopyManifestHasTile(manifest, qk){
-  if(!manifest) return true; // old proxy or offline manifest: probe the image endpoint.
+  if(!manifest) return false;
   if(Array.isArray(manifest.tiles)) return manifest.tiles.includes(qk);
   return !!(manifest.tiles && manifest.tiles[qk]);
 }
@@ -2055,81 +2045,77 @@ async function buildWorldCoverGrid(minLat, minLng, maxLat, maxLng, stepM, height
   return null;
 }
 
+function canopyTileUrl(manifest, qk){
+  const t = manifest.tiles[qk];
+  return `${CANOPY_BASE}/${t.path || `tiles/${qk}.tif`}`;
+}
+
 // Build a measured-canopy sampler over [minLat,minLng]–[maxLat,maxLng] from the
-// self-hosted titiler: one downsampled gray PNG per source COG tile the bbox
-// touches (rescale 0–CANOPY_HMAX, return_mask=true). Decodes height = R/255*HMAX,
-// alpha 0 = no data. Uncapped, so dense-forest coverage is a handful of fetches.
-// Returns {heightAt(lat,lng)→metres or NaN, tiles} or null if titiler is
-// unreachable (caller then falls back to WorldCover's flat Forest(m)).
+// published COGs, one per source tile the bbox touches. Each is read at the
+// coarsest overview that still resolves stepM (see CanopyCOG.sampler).
+// Returns {heightAt(lat,lng)→metres or NaN, tiles, spacingM, note} or null if
+// the store is unreachable or any touched tile is unavailable (caller then
+// falls back to WorldCover's flat Forest(m)).
 async function buildCanopyGrid(minLat, minLng, maxLat, maxLng, stepM){
-  if(titilerInCooldown()) return null;
+  if(canopyInCooldown() || !globalThis.CanopyCOG) return null;
   // If we gave up on any tiles earlier this session, force a fresh manifest read:
   // a COG built since then bumps the manifest's 'generated' stamp, which clears
   // those misses so the newly built tile is picked up without a page reload.
-  const manifest = await loadCanopyManifest(_canopyLocalCogMisses.size > 0);
-  if(titilerInCooldown()) return null;
-  const midLat = (minLat + maxLat) / 2;
-  const { dLat, dLng } = metresToDegrees(midLat, stepM);
+  const manifest = await loadCanopyManifest(_canopyMisses.size > 0);
+  if(!manifest || canopyInCooldown()) return null;
   const tl = lonLatToTile(minLng, maxLat, CANOPY_TILE_Z);   // top-left source tile
   const br = lonLatToTile(maxLng, minLat, CANOPY_TILE_Z);   // bottom-right source tile
-  const images = [];
-  let attempted = 0;
-  let failed = 0;
+  const plan = [];
   let missing = 0;
   for(let tx = tl.x; tx <= br.x; tx++){
     for(let ty = tl.y; ty <= br.y; ty++){
       const tb = tileLonLatBounds(tx, ty, CANOPY_TILE_Z);
-      const w = Math.max(minLng, tb[0]), s = Math.max(minLat, tb[1]);
-      const e = Math.min(maxLng, tb[2]), n = Math.min(maxLat, tb[3]);
-      if(e <= w || n <= s) continue;                        // no real overlap
-      attempted++;
-      const cols = Math.min(1024, Math.max(2, Math.ceil((e - w) / dLng) + 1));
-      const rows = Math.min(1024, Math.max(2, Math.ceil((n - s) / dLat) + 1));
+      const west = Math.max(minLng, tb[0]), south = Math.max(minLat, tb[1]);
+      const east = Math.min(maxLng, tb[2]), north = Math.min(maxLat, tb[3]);
+      if(east <= west || north <= south) continue;          // no real overlap
       const qk = tileToQuadKey(tx, ty, CANOPY_TILE_Z);
-      if(_canopyLocalCogMisses.has(qk) || !canopyManifestHasTile(manifest, qk)){
-        _canopyLocalCogMisses.add(qk);
-        failed++;
+      if(_canopyMisses.has(qk) || !canopyManifestHasTile(manifest, qk)){
+        _canopyMisses.add(qk);
         missing++;
-        dlog(`Canopy: local COG ${qk} not built — using flat Forest(m); run build-cog.sh ${qk} to enable measured canopy here`,'warn');
+        dlog(`Canopy: tile ${qk} not published — using flat Forest(m); run the "Build canopy tiles" workflow for ${qk} to enable measured canopy here`,'warn');
         continue;
       }
-      const url = canopyTitilerUrl(qk, w, s, e, n, cols, rows, canopyManifestCacheKey(manifest));
-      let img = null;
-      try{
-        img = await loadClutterImage(url, cols, rows);
-      }catch(err){
-        _canopyLocalCogMisses.add(qk);
-        dlog(`Canopy: local COG ${qk} failed — ${err.message||err}; using flat Forest(m)`,'warn');
-      }
-      if(img){
-        images.push({ qk, w, s, e, n, cols: img.w, rows: img.h, data: img.data });
-      }else{
-        failed++;
-      }
+      plan.push({ qk, bbox: { west, south, east, north } });
     }
   }
-  if(failed || !images.length){
-    if(attempted && !images.length && failed > missing){
-      _titilerFailedAt = Date.now();
-      dlog('Canopy: titiler unreachable — using flat Forest(m)','warn');
-    }else if(failed){
-      dlog(`Canopy: titiler loaded ${images.length}/${attempted} source tile(s); using flat Forest(m) to avoid partial canopy data`,'warn');
+  // Partial canopy would mix measured and flat heights in one result.
+  if(missing){
+    dlog(`Canopy: ${plan.length}/${plan.length + missing} source tile(s) published here; using flat Forest(m) to avoid partial canopy data`,'warn');
+    return null;
+  }
+  const samplers = new Map();
+  let failed = 0;
+  await Promise.all(plan.map(async t => {
+    try{
+      samplers.set(t.qk, await CanopyCOG.sampler(canopyTileUrl(manifest, t.qk), t.bbox, stepM));
+    }catch(err){
+      failed++;
+      _canopyMisses.add(t.qk);
+      dlog(`Canopy: tile ${t.qk} failed — ${err.message||err}; using flat Forest(m)`,'warn');
+    }
+  }));
+  if(failed || !samplers.size){
+    if(failed && failed === plan.length){
+      _canopyFailedAt = Date.now();
+      dlog('Canopy: store unreachable — using flat Forest(m)','warn');
     }
     return null;
   }
+  const list = [...samplers.values()];
+  const builds = [...new Set(plan.map(t => manifest.tiles[t.qk].build).filter(Boolean))];
   return {
-    tiles: images.length,
-    spacingM:Math.max(...images.map(im=>Math.max((im.n-im.s)*111320/im.rows,(im.e-im.w)*111320*Math.cos(midLat*Math.PI/180)/im.cols))),
+    tiles: plan.length,
+    spacingM: Math.max(...list.map(x => x.resM)),
+    note: `whole-metre heights${builds.length ? `, build ${builds.join('/')}` : ''}`,
     heightAt(lat, lng){
-      for(const im of images){
-        if(lng < im.w || lng > im.e || lat < im.s || lat > im.n) continue;
-        const c = Math.max(0, Math.min(im.cols-1, Math.floor((lng - im.w) / (im.e - im.w) * im.cols)));
-        const r = Math.max(0, Math.min(im.rows-1, Math.floor((im.n - lat) / (im.n - im.s) * im.rows)));
-        const idx = (r * im.cols + c) * 4;
-        if(im.data[idx+3] === 0) return NaN;                // mask: no canopy data here
-        return im.data[idx] / 255 * CANOPY_HMAX;            // gray R → metres
-      }
-      return NaN;
+      const { x, y } = lonLatToTile(lng, lat, CANOPY_TILE_Z);
+      const smp = samplers.get(tileToQuadKey(x, y, CANOPY_TILE_Z));
+      return smp ? smp.heightAt(lat, lng) : NaN;
     }
   };
 }
@@ -2503,12 +2489,12 @@ async function _computeNodeCoverageImpl(node){
     const { dLat, dLng } = metresToDegrees(node.lat, maxRange);
     dlog(`  Clutter ON: forest ${g.clutterHeights[10]}m, urban ${g.clutterHeights[50]}m, clear-radius ${g.clutterExcludeM}m, atten ${clutterAttenDbPerM(g.freq, g.clutterAttenRef).toFixed(3)}dB/m — loading…`);
     toast(`${node.name}: loading land cover…`);
-    // WorldCover and titiler canopy are independent sources — fetch both so a
-    // Terrascope outage doesn't also take down the (unrelated) self-hosted
-    // titiler canopy data, and vice versa.
+    // WorldCover and canopy are independent sources — fetch both so a
+    // Terrascope outage doesn't also take down the (unrelated) canopy store,
+    // and vice versa.
     let canopySrc = null;
     const canopyPromise = canopyEnabled()
-      ? (toast(`${node.name}: loading canopy (titiler)…`),
+      ? (toast(`${node.name}: loading canopy…`),
          buildCanopyGrid(node.lat - dLat, node.lng - dLng, node.lat + dLat, node.lng + dLng, COVERAGE_STEP_M))
       : Promise.resolve(null);
     const [wc, cg] = await Promise.all([
@@ -2518,9 +2504,9 @@ async function _computeNodeCoverageImpl(node){
     ]);
     if(cg){
       canopySrc = cg;
-      dlog(`  Canopy: titiler grid loaded over ${cg.tiles} source tile(s)`,'ok');
+      dlog(`  Canopy: grid loaded over ${cg.tiles} source tile(s)`,'ok');
     } else if(canopyEnabled()){
-      dlog('  Canopy: titiler unavailable — using flat Forest(m)','warn');
+      dlog('  Canopy: unavailable — using flat Forest(m)','warn');
     }
     if(wc || canopySrc){
       clutter = {
@@ -2957,9 +2943,9 @@ async function runAnalysis(){
       let clutterSource='Disabled',fallbackHeights=0;
       if(clutterOn){
         const pad=0.005;
-        // WorldCover and titiler canopy are independent sources — fetch both so a
-        // Terrascope outage doesn't also take down the (unrelated) self-hosted
-        // titiler canopy data, and vice versa. Links always try measured canopy
+        // WorldCover and canopy are independent sources — fetch both so a
+        // Terrascope outage doesn't also take down the (unrelated) canopy store,
+        // and vice versa. Links always try measured canopy
         // (one small bbox); the canopy checkbox only governs coverage sweeps.
         const [wc,canopySrc]=await Promise.all([
           buildWorldCoverGrid(
@@ -2970,7 +2956,7 @@ async function runAnalysis(){
             Math.min(a.lat,b.lat)-pad, Math.min(a.lng,b.lng)-pad,
             Math.max(a.lat,b.lat)+pad, Math.max(a.lng,b.lng)+pad, Math.max(10, dist/N))
         ]);
-        if(canopySrc) dlog(`  Canopy: titiler grid loaded over ${canopySrc.tiles} source tile(s)`,'ok');
+        if(canopySrc) dlog(`  Canopy: grid loaded over ${canopySrc.tiles} source tile(s)`,'ok');
         clutterSource=clutterProvenance(wc,canopySrc);
         if(wc || canopySrc){
           // Parallel land-cover class per sample (0 where none) so the profile
@@ -3537,9 +3523,9 @@ async function computeHorizon(node){
 
   // Surface-clutter samplers over a (near) bbox around the node — clutter only
   // bites the skyline close in, so this stays small even though terrain scans far.
-  // Use the most accurate source available: the self-hosted measured canopy
-  // (titiler) where it's built, falling back to ESA WorldCover land cover where it
-  // isn't. The popup always tries titiler — it doesn't wait on the global
+  // Use the most accurate source available: measured canopy where a tile is
+  // published, falling back to ESA WorldCover land cover where it isn't. The
+  // popup always tries measured canopy — it doesn't wait on the global
   // "measured canopy" setting, which only governs the link/coverage analysis.
   let wcGrid = null, canopyGrid = null;
   if(useClutter){
@@ -3548,8 +3534,8 @@ async function computeHorizon(node){
     try { canopyGrid = await buildCanopyGrid(node.lat-dLat, node.lng-dLng, node.lat+dLat, node.lng+dLng, 30); } catch {}
     try { wcGrid = await buildWorldCoverGrid(node.lat-dLat, node.lng-dLng, node.lat+dLat, node.lng+dLng, 30, heights); } catch {}
     dlog(canopyGrid
-      ? `Sun view: measured canopy (titiler) loaded over ${canopyGrid.tiles} tile(s) — used where available, WorldCover elsewhere`
-      : 'Sun view: no titiler canopy here — using WorldCover land cover', canopyGrid ? 'ok' : 'warn');
+      ? `Sun view: measured canopy loaded over ${canopyGrid.tiles} tile(s) — used where available, WorldCover elsewhere`
+      : 'Sun view: no measured canopy here — using WorldCover land cover', canopyGrid ? 'ok' : 'warn');
   }
   const clutterAt = (lat,lng) => {
     if(canopyGrid){ const c = canopyGrid.heightAt(lat,lng); if(Number.isFinite(c)) return { h:c, cls:10 }; }
@@ -3586,7 +3572,7 @@ async function computeHorizon(node){
 
   const nodeClutter = useClutter ? clutterAt(node.lat, node.lng) : { h:0, cls:0 };
   const h = { az, terr, top, cls, eye, groundElev, eyeAbove, useClutter,
-              clutterSource: canopyGrid ? 'titiler' : (wcGrid ? 'WorldCover' : null),
+              clutterSource: canopyGrid ? 'measured canopy' : (wcGrid ? 'WorldCover' : null),
               nodeClutter: nodeClutter.h, nodeClutterCls: nodeClutter.cls,
               underCanopy: nodeClutter.h > eyeAbove };
   node._horizon = h; node._horizonKey = key;

@@ -24,7 +24,7 @@ function applySiteClutter(h,dists,a,b,guess=null){
 }
 function solveCoverageWorker(profile,a,b,margin){
   if(typeof Worker==='undefined') return Promise.resolve(RFModel.coverageRay(profile,a,b,margin));
-  if(!coverageWorker) coverageWorker=new Worker('js/rf-worker.js?v=20260929-05');
+  if(!coverageWorker) coverageWorker=new Worker('js/rf-worker.js?v=20261003-01');
   const worker=coverageWorker,id=++workerSequence;
   return new Promise((resolve,reject)=>{
     const cleanup=()=>{worker.removeEventListener('message',message);worker.removeEventListener('error',error);};
@@ -85,7 +85,7 @@ function terrainProvenance(lat,lng){
   return g ? `Local DEM ${g.source} (${g.date}; ${g.datum}; ~${spacing.toFixed(0)} m grid); AWS fallback outside grid/nodata` : `AWS Terrarium z${TERRAIN_Z}, ~${pixel.toFixed(0)} m pixels; source age/vertical accuracy unverified`;
 }
 function clutterProvenance(wc,canopy){
-  return `${wc?`WorldCover 2021 class heights (~${(wc.spacingM||20).toFixed(0)} m sampling)`:'WorldCover unavailable'}; ${canopy?`measured canopy resampled to ~${(canopy.spacingM||20).toFixed(0)} m; age/height error unverified`:'measured canopy unavailable or disabled; class-height fallback where available'}`;
+  return `${wc?`WorldCover 2021 class heights (~${(wc.spacingM||20).toFixed(0)} m sampling)`:'WorldCover unavailable'}; ${canopy?`measured canopy resampled to ~${(canopy.spacingM||20).toFixed(0)} m${canopy.note?` (${canopy.note})`:''}; age/height error unverified`:'measured canopy unavailable or disabled; class-height fallback where available'}`;
 }
 function matchedObservations(a,b){return observations.filter(r=>r.from.toLowerCase()===a.name.toLowerCase()&&r.to.toLowerCase()===b.name.toLowerCase());}
 function observationSummary(a,b){
